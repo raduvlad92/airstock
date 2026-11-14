@@ -1,12 +1,15 @@
-// Staging Worker (plan Section 5.1). IDs marked REPLACE are filled in during M1, when the
-// Cloudflare and Neon resources are created; secrets are set with `wrangler secret put`.
+// Staging Worker (plan Section 5.1), served only at https://airstock.deletecookies.dev.
+// Resource IDs are not secrets. Secrets are set with `wrangler secret put`; see
+// docs/staging.md.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "airstock-staging",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "airstock.deletecookies.dev", "custom_domain": true }],
   "observability": { "enabled": true },
   // Run near the Neon database (aws-eu-central-1): every SQL statement is a round trip.
   // M1 compares this with Smart Placement and records the result.
@@ -14,7 +17,7 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "REPLACE_WITH_HYPERDRIVE_ID",
+      "id": "d4107a1ef7aa4b6ea8935a208edb0512",
       "localConnectionString": "postgres://airstock_app:airstock_app@localhost:54329/airstock_dev"
     }
   ],

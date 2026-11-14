@@ -1,4 +1,4 @@
-import type { ConnectionScope, Role } from './permissions.ts';
+import type { ConnectionScope, Permission, Role } from './permissions.ts';
 
 export type CallerKind = 'user' | 'api_credential' | 'connection' | 'connector' | 'system';
 export type Source = 'dashboard' | 'api' | 'mcp' | 'import' | 'scheduled' | 'admin' | 'shopify';
@@ -9,6 +9,11 @@ export interface Membership {
   allLocations: boolean;
   /** Warehouse or location IDs the member is limited to when allLocations is false. */
   locationScopeIds: string[];
+  /**
+   * Set for connectors, which act with a fixed permission set rather than a member's role.
+   * Never set for people.
+   */
+  permissions?: ReadonlySet<Permission>;
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { Tx } from '@airstock/db';
 import type { z } from 'zod';
-import type { AuditEvent } from './audit.ts';
+import type { AuditEvent, AuditOutcome } from './audit.ts';
 import type { Caller, Membership } from './caller.ts';
 import type { Permission, RequiredScope } from './permissions.ts';
 
@@ -43,6 +43,8 @@ export interface AuditDetails {
   operationId?: string | null;
   externalRef?: string | null;
   reason?: string | null;
+  /** Defaults to `succeeded`; `no_change` when the command found nothing to do. */
+  outcome?: Extract<AuditOutcome, 'succeeded' | 'no_change'>;
 }
 
 export interface HandlerResult<O> {

@@ -11,3 +11,4 @@ Short records of decisions made while building, with the reason and what would m
 | [0005](0005-operation-registry.md) | One registry generates REST, OpenAPI, permissions, audit names, and task-shaped MCP tools | Accepted |
 | [0006](0006-inventory-concurrency.md) | Position locks in id order, a database check on allocations, lazy expiry | Accepted |
 | [0007](0007-mcp-connection-binding.md) | MCP shop binding through WorkOS standalone Connect: Airstock consent creates the grant, the first token binds its client | Accepted |
+| [0008](0008-shopify-sync.md) | Shopify: expiring encrypted tokens, receipts with jobs, orders reserved by the connector, compare-and-set push that processes unseen orders before calling a conflict | Accepted |

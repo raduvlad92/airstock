@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { errors } from '../errors.ts';
-import { PERMISSIONS, ROLE_PERMISSIONS, ROLES } from '../permissions.ts';
+import { effectivePermissions, PERMISSIONS, ROLES } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, isTimeZone } from '../schemas.ts';
 
@@ -104,7 +104,7 @@ export const getShopContext = defineOperation({
       result: {
         shop,
         role: ctx.membership.role,
-        permissions: [...ROLE_PERMISSIONS[ctx.membership.role]],
+        permissions: [...effectivePermissions(ctx.membership)],
         allLocations: ctx.membership.allLocations,
         locationScopeIds: ctx.membership.locationScopeIds,
         connectionScopes: ctx.caller.scopes === 'all' ? ('all' as const) : [...ctx.caller.scopes],

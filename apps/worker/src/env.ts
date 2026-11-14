@@ -1,9 +1,10 @@
 import type { AuditEvent, OutboxMessage } from '@airstock/core';
+import type { JobMessage } from './shopify.ts';
 
 export interface Env {
   HYPERDRIVE: Hyperdrive;
   AUDIT_QUEUE: Queue<AuditEvent>;
-  JOBS_QUEUE: Queue<OutboxMessage>;
+  JOBS_QUEUE: Queue<OutboxMessage | JobMessage>;
   FILES: R2Bucket;
   /** MCP OAuth settings; /mcp answers 503 until they are set (plan M5). */
   MCP_ISSUER?: string;
@@ -22,4 +23,9 @@ export interface Env {
   SESSION_SECRET?: string;
   /** Shopify app client secret (plan M6). */
   SHOPIFY_API_SECRET?: string;
+  SHOPIFY_CLIENT_ID?: string;
+  /** 32 random bytes, Base64: encrypts stored Shopify tokens. */
+  SHOPIFY_TOKEN_KEY?: string;
+  /** Names the token key, stored next to each ciphertext so the key can rotate. */
+  SHOPIFY_TOKEN_KEY_ID?: string;
 }

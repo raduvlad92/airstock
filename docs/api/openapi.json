@@ -297,7 +297,8 @@
                           "inventory.reserve",
                           "activity.read",
                           "credentials.manage",
-                          "connections.manage"
+                          "connections.manage",
+                          "integrations.sync"
                         ]
                       }
                     },
@@ -2252,6 +2253,316 @@
                   "required": [
                     "grantId",
                     "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/shopify/connections": {
+      "get": {
+        "operationId": "shopify.connections.list",
+        "summary": "List connected Shopify stores",
+        "description": "Shows each connected Shopify store with its location and variant mappings, webhook status, and unexplained quantity differences.",
+        "x-permission": "shop.read",
+        "x-connection-scope": "shop:read",
+        "x-audit-action": "shopify.connections.listed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "connectionId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "shopDomain": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "uninstalled"
+                            ]
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "uninstalledAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "shopifyLocations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "active": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "active"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "webhooks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "topic": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "topic",
+                                "status"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "locationMap": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "shopifyLocationId": {
+                                    "type": "string"
+                                  },
+                                  "locationId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  }
+                                },
+                                "required": [
+                                  "shopifyLocationId",
+                                  "locationId"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "variantsMapped": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "conflicts": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "lastWebhookAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "connectionId",
+                          "shopDomain",
+                          "status",
+                          "scopes",
+                          "createdAt",
+                          "uninstalledAt",
+                          "shopifyLocations",
+                          "webhooks",
+                          "locationMap",
+                          "variantsMapped",
+                          "conflicts",
+                          "lastWebhookAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "connections"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/mappings": {
+      "post": {
+        "operationId": "shopify.mappings.set",
+        "summary": "Map a Shopify store to a location and variants",
+        "description": "Replaces the mappings of one connected Shopify store: one Shopify location to one location, and the listed Shopify variants to variants. Airstock then sets Shopify’s available quantity at that location to Airstock’s availability, and keeps it in step.",
+        "x-permission": "connections.manage",
+        "x-connection-scope": "session",
+        "x-audit-action": "shopify.mappings.set",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "locationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "shopifyLocationId": {
+                    "type": "string",
+                    "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                  },
+                  "variants": {
+                    "maxItems": 1000,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "shopifyVariantId": {
+                          "type": "string",
+                          "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                        },
+                        "shopifyInventoryItemId": {
+                          "type": "string",
+                          "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                        }
+                      },
+                      "required": [
+                        "variantId",
+                        "shopifyVariantId",
+                        "shopifyInventoryItemId"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "locationId",
+                  "shopifyLocationId",
+                  "variants"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connectionId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "locationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "shopifyLocationId": {
+                      "type": "string"
+                    },
+                    "variantsMapped": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "connectionId",
+                    "locationId",
+                    "shopifyLocationId",
+                    "variantsMapped"
                   ],
                   "additionalProperties": false
                 }

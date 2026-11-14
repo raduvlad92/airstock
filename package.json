@@ -24,6 +24,7 @@
   "devDependencies": {
     "@airstock/core": "workspace:*",
     "@airstock/db": "workspace:*",
+    "@airstock/shopify": "workspace:*",
     "@biomejs/biome": "2.6.4",
     "@types/node": "22.20.5",
     "@types/pg": "8.23.1",

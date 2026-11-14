@@ -8,8 +8,9 @@ import {
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
-import { createApp } from '../src/app.ts';
+import { type AppDeps, createApp } from '../src/app.ts';
 import type { McpAuthConfig } from '../src/mcp.ts';
+import type { ShopifyAppConfig } from '../src/shopify.ts';
 import type { WebConfig } from '../src/web.ts';
 import {
   type ConsentOption,
@@ -69,6 +70,12 @@ export class FakeWorkos implements WorkosClient {
   }
 }
 
+export interface TestOptions {
+  shopify?: ShopifyAppConfig;
+  jobs?: AppDeps['jobs'];
+  dispatch?: AppDeps['dispatch'];
+}
+
 export interface TestApp {
   app: ReturnType<typeof createApp>;
   db: Database;
@@ -79,7 +86,7 @@ export interface TestApp {
   close(): Promise<void>;
 }
 
-export async function testApp(): Promise<TestApp> {
+export async function testApp(options: TestOptions = {}): Promise<TestApp> {
   const db = appDatabase();
   const sink = new MemoryAuditSink();
   const { privateKey, publicKey } = await generateKeyPair('RS256');
@@ -107,6 +114,9 @@ export async function testApp(): Promise<TestApp> {
     audit: sink,
     mcp,
     web,
+    shopify: options.shopify ?? null,
+    jobs: options.jobs,
+    dispatch: options.dispatch,
     logger: { error: () => {} },
   });
   return {
@@ -181,4 +191,37 @@ export async function connectionGrant(
     [shop.shopId, grantId, member!.id, clientId, 'ChatGPT', scopes, user!.workos_user_id],
   );
   return { grantId, sub: user!.workos_user_id, clientId };
+}
+
+export function cookiesFrom(res: Response): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of res.headers.getSetCookie()) {
+    const [pair] = line.split(';');
+    const eq = pair!.indexOf('=');
+    out[pair!.slice(0, eq)] = pair!.slice(eq + 1);
+  }
+  return out;
+}
+
+export function cookieHeader(...sets: Array<Record<string, string>>): string {
+  return Object.entries(Object.assign({}, ...sets) as Record<string, string>)
+    .filter(([, v]) => v !== '')
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+/** Signs a new user in through the provider flow; returns the session cookies. */
+export async function signInAs(
+  t: TestApp,
+  user: WorkosUser,
+): Promise<{ cookies: Record<string, string>; cookie: string }> {
+  const code = `code-${user.id}`;
+  t.workos.addUser(code, user);
+  const start = await t.app.request('/auth/oauth/google?return_to=%2Fapp');
+  const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
+  const callback = await t.app.request(`/auth/callback?code=${code}&state=${state}`, {
+    headers: { cookie: cookieHeader(cookiesFrom(start)) },
+  });
+  const cookies = cookiesFrom(callback);
+  return { cookies, cookie: cookieHeader(cookies) };
 }

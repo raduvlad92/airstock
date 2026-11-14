@@ -45,8 +45,9 @@ too. Airstock therefore:
 Not embedded; authorization-code install (`use_legacy_install_flow`); scopes `read_products`,
 `read_inventory`, `write_inventory`, `read_locations`, `read_orders`; webhooks API version
 `2026-10`; app URL `https://airstock.deletecookies.dev/shopify/app`; redirect URL
-`https://airstock.deletecookies.dev/shopify/oauth/callback`. Order webhooks and protected
-customer data access are set up in M6.
+`https://airstock.deletecookies.dev/shopify/oauth/callback`. Airstock subscribes each store to
+`orders/create` and `app/uninstalled` at install (ADR 0008). Tokens are expiring offline tokens,
+stored encrypted with `SHOPIFY_TOKEN_KEY`.
 
 ## Secrets
 
@@ -58,7 +59,8 @@ Values are never committed. Names only:
 | GitHub environment `staging` | `CLOUDFLARE_ACCOUNT_ID` | |
 | GitHub environment `staging` | `DATABASE_OWNER_URL` | `airstock_owner`, direct (unpooled) host, `sslmode=verify-full` |
 | Worker secret | `SMOKE_SECRET` | Enables `/internal/smoke` |
-| Worker secret | `SHOPIFY_API_SECRET` | Shopify app client secret |
+| Worker secret | `SHOPIFY_API_SECRET` | Shopify app client secret: verifies webhooks and the install redirect |
+| Worker secret | `SHOPIFY_TOKEN_KEY` | 32 random bytes (Base64) that encrypt stored Shopify tokens; key ID `k1` in `SHOPIFY_TOKEN_KEY_ID` |
 | Worker secret | `WORKOS_API_KEY` | WorkOS key `airstock-staging-worker` |
 | Worker secret | `SESSION_SECRET` | Seals the session cookie |
 | Hyperdrive origin | `airstock_app` password | Set with `alter role` and stored only in the Hyperdrive config |

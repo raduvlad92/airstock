@@ -4,7 +4,7 @@ import { type Caller, callerKey, type Membership } from './caller.ts';
 import { AppError, errors } from './errors.ts';
 import { canonicalJson, sha256Hex } from './hash.ts';
 import { UUID_PATTERN, uuidv7 } from './ids.ts';
-import { isRole, ROLE_PERMISSIONS } from './permissions.ts';
+import { effectivePermissions, isRole } from './permissions.ts';
 import type { AnyOperation, HandlerContext, HandlerResult } from './registry.ts';
 
 export interface Logger {
@@ -241,7 +241,7 @@ function authorize(
   membership: Membership | null,
 ): AppError | null {
   if (op.permission !== 'authenticated') {
-    if (!membership || !ROLE_PERMISSIONS[membership.role].has(op.permission)) {
+    if (!membership || !effectivePermissions(membership).has(op.permission)) {
       return errors.forbidden(`Requires the ${op.permission} permission.`);
     }
   }
@@ -330,7 +330,7 @@ async function finalizeCommand(
   const success: AuditEvent = auditEvent(base, {
     action: op.audit.action,
     phase: 'outcome',
-    outcome: 'succeeded',
+    outcome: audit.outcome ?? 'succeeded',
     target_type: audit.targetType,
     target_id: audit.targetId,
     operation_id: audit.operationId ?? null,

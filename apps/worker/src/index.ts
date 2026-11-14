@@ -11,11 +11,22 @@ import {
   systemCaller,
   uuidv7,
 } from '@airstock/core';
-import { PgDatabase } from '@airstock/db';
+import { type Database, PgDatabase } from '@airstock/db';
+import {
+  type AvailabilityChanged,
+  httpShopifyAdmin,
+  httpShopifyAuth,
+  NotConnectedError,
+  pushAvailability,
+  runJob,
+  type SyncDeps,
+  TokenCipher,
+} from '@airstock/shopify';
 import { createApp } from './app.ts';
 import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
 import { requestScopedSource } from './request-db.ts';
+import type { JobMessage, ShopifyAppConfig } from './shopify.ts';
 import type { WebConfig } from './web.ts';
 import { createWorkosClient } from './workos.ts';
 
@@ -57,8 +68,43 @@ function webConfigFromEnv(env: Env): WebConfig | null {
   };
 }
 
+/** Shopify needs the client ID and secret, the token key, and the public URL. */
+let shopifyConfig: Promise<ShopifyAppConfig | null> | null = null;
+function shopifyConfigFromEnv(env: Env): Promise<ShopifyAppConfig | null> {
+  shopifyConfig ??= (async () => {
+    if (
+      !env.SHOPIFY_CLIENT_ID ||
+      !env.SHOPIFY_API_SECRET ||
+      !env.SHOPIFY_TOKEN_KEY ||
+      !env.PUBLIC_URL
+    )
+      return null;
+    return {
+      clientId: env.SHOPIFY_CLIENT_ID,
+      apiSecret: env.SHOPIFY_API_SECRET,
+      redirectUri: new URL('/shopify/oauth/callback', env.PUBLIC_URL).href,
+      webhookUri: new URL('/shopify/webhooks', env.PUBLIC_URL).href,
+      cipher: await TokenCipher.fromBase64(env.SHOPIFY_TOKEN_KEY_ID ?? 'k1', env.SHOPIFY_TOKEN_KEY),
+      auth: httpShopifyAuth({
+        clientId: env.SHOPIFY_CLIENT_ID,
+        clientSecret: env.SHOPIFY_API_SECRET,
+      }),
+      admin: (shopDomain, accessToken) => httpShopifyAdmin(shopDomain, accessToken),
+    };
+  })();
+  return shopifyConfig;
+}
+
 function database(env: Env) {
   return new PgDatabase(requestScopedSource(env.HYPERDRIVE.connectionString));
+}
+
+function publishOutbox(env: Env, db: Database): Promise<number> {
+  return dispatchOutbox(db, async (messages) => {
+    await env.JOBS_QUEUE.sendBatch(
+      messages.map((body) => ({ body, contentType: 'json' as const })),
+    );
+  });
 }
 
 let app: ReturnType<typeof createApp> | null = null;
@@ -72,6 +118,13 @@ export default {
       audit: queueSink(env),
       mcp: mcpConfigFromEnv(env),
       web: webConfigFromEnv(env),
+      shopify: await shopifyConfigFromEnv(env),
+      jobs: {
+        async send(message: JobMessage) {
+          await env.JOBS_QUEUE.send(message, { contentType: 'json' });
+        },
+      },
+      dispatch: (db) => publishOutbox(env, db),
       logger,
     });
     return app.fetch(request, env, ctx);
@@ -89,11 +142,45 @@ export default {
         batch.ackAll();
         return;
       }
+      const shopify = await shopifyConfigFromEnv(env);
+      const deps: SyncDeps | null = shopify
+        ? {
+            db,
+            audit: queueSink(env),
+            logger,
+            shopify,
+            dispatch: () => publishOutbox(env, db),
+          }
+        : null;
       for (const message of batch.messages) {
-        const event = message.body as OutboxMessage;
-        // Phase 0 has no subscribers yet; the Shopify availability push subscribes in M6.
-        logger.error('outbox_event_unhandled', { topic: event.topic, id: event.id });
-        message.ack();
+        const body = message.body as OutboxMessage | JobMessage;
+        try {
+          if ('job' in body) {
+            if (!deps) {
+              message.retry({ delaySeconds: 300 });
+              continue;
+            }
+            const outcome = await runJob(deps, body.job.shopId, body.job.jobId);
+            if (outcome.status === 'retry') message.retry({ delaySeconds: outcome.delaySeconds });
+            else message.ack();
+          } else if (body.topic === 'inventory.availability_changed') {
+            // The Shopify availability push (plan Section 8.2, step 5).
+            if (deps) {
+              await pushAvailability(deps, body.shopId, body.payload as AvailabilityChanged);
+            }
+            message.ack();
+          } else {
+            logger.error('outbox_event_unhandled', { topic: body.topic, id: body.id });
+            message.ack();
+          }
+        } catch (error) {
+          if (error instanceof NotConnectedError) {
+            message.ack();
+            continue;
+          }
+          logger.error('jobs_message_failed', { error: String(error) });
+          message.retry({ delaySeconds: Math.min(300, 30 * message.attempts) });
+        }
       }
     } finally {
       await db.close();
@@ -103,11 +190,14 @@ export default {
   async scheduled(controller, env) {
     const db = database(env);
     try {
-      await dispatchOutbox(db, async (messages) => {
+      await publishOutbox(env, db);
+      // Jobs whose queue message was lost or whose backoff has passed.
+      const stale = await requeueStaleJobs(db);
+      if (stale.length > 0) {
         await env.JOBS_QUEUE.sendBatch(
-          messages.map((body) => ({ body, contentType: 'json' as const })),
+          stale.map((body) => ({ body, contentType: 'json' as const })),
         );
-      });
+      }
       await sweepExpiredReservations(db);
       if (controller.cron === '0 3 * * *') await ensureAuditPartitions(db);
     } finally {
@@ -115,6 +205,13 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+async function requeueStaleJobs(db: Database): Promise<JobMessage[]> {
+  const rows = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
+    tx.query<{ shop_id: string; id: string }>('select shop_id, id from stale_jobs($1)', [100]),
+  );
+  return rows.map((r) => ({ job: { shopId: r.shop_id, jobId: r.id } }));
+}
 
 /**
  * Staging measurement route (plan M1): database round trips, R2, and queue latency.

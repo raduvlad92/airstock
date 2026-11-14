@@ -37,6 +37,8 @@ export type AppEnv = {
     requestId: string;
     db: Database;
     caller: Caller;
+    /** Set when the request committed outbox events. */
+    outboxWritten: boolean;
   };
 };
 
@@ -64,6 +66,26 @@ export function createApp(deps: AppDeps) {
       await db.close();
     }
     c.header('x-request-id', c.get('requestId'));
+    // Publish committed outbox events now (a Shopify push, say) instead of at the next cron
+    // sweep, after the response, on a handle of its own. The sweep still covers failures.
+    if (c.get('outboxWritten') && deps.dispatch) {
+      const dispatch = deps.dispatch;
+      const publish = (async () => {
+        const own = deps.database();
+        try {
+          await dispatch(own);
+        } catch (error) {
+          deps.logger.error('outbox_dispatch_failed', { error: String(error) });
+        } finally {
+          await own.close();
+        }
+      })();
+      try {
+        c.executionCtx.waitUntil(publish);
+      } catch {
+        // No execution context outside Workers (tests): the publish simply runs.
+      }
+    }
   });
 
   app.use(

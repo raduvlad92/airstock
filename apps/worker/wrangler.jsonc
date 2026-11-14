@@ -40,6 +40,8 @@
       {
         "queue": "airstock-staging-jobs",
         "max_batch_size": 10,
+        // Orders and pushes are latency-sensitive; do not wait for a fuller batch.
+        "max_batch_timeout": 1,
         "max_retries": 10,
         "dead_letter_queue": "airstock-staging-jobs-dlq"
       }

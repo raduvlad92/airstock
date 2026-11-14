@@ -33,6 +33,8 @@ export interface ExecuteResult {
   attemptId: string | null;
   /** Null for account-level reads, which span the caller's shops. */
   shopId: string | null;
+  /** Outbox events this call committed; the caller may publish them right away. */
+  outbox: number;
 }
 
 /**
@@ -198,6 +200,7 @@ export async function execute(
       requestId,
       attemptId,
       shopId: resolvedShopId,
+      outbox: 0,
     };
   }
 
@@ -227,6 +230,7 @@ export async function execute(
     requestId,
     attemptId,
     shopId: resolvedShopId,
+    outbox: op.kind === 'command' ? (outcome.handled.outbox?.length ?? 0) : 0,
   };
 }
 

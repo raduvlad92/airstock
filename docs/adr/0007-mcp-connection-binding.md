@@ -28,7 +28,7 @@ WorkOS AuthKit acts as the OAuth authorization server for MCP clients. It suppor
 4. Creating or switching shops leaves an existing connection's shop unchanged.
 5. The stored scopes are exactly the ones ticked at consent.
 
-The recorded ChatGPT run against staging confirms the same against real WorkOS tokens (plan Section 7.3, E6).
+The ChatGPT run on staging on 14 November 2026 confirmed the same with real WorkOS tokens (plan Section 7.3, E6; [status Section 5](../phase-0-status.md#5-chatgpt-run-on-staging-plan-73-e6)). ChatGPT registers with a Client ID Metadata Document, so the bound client ID is `https://chatgpt.com/oauth/client.json`. The subject is the member's WorkOS user ID, and the grant claim survives refresh.
 
 ## Consequences
 

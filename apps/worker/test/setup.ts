@@ -75,6 +75,7 @@ export interface TestOptions {
   jobs?: AppDeps['jobs'];
   dispatch?: AppDeps['dispatch'];
   files?: AppDeps['files'];
+  runJobNow?: AppDeps['runJobNow'];
 }
 
 export interface TestApp {
@@ -152,6 +153,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     jobs: options.jobs,
     dispatch: options.dispatch,
     files: options.files,
+    runJobNow: options.runJobNow,
     logger: { error: () => {} },
   });
   return {

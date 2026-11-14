@@ -104,11 +104,23 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
     });
     if (outcome.status === 'unknown_store') {
       deps.logger.error('shopify_webhook_unknown_store', { topic });
-    } else if (outcome.jobId && deps.jobs) {
-      // The job row is committed; if this send fails, the scheduled sweeper sends it later.
+    } else if (outcome.jobId) {
+      const message: JobMessage = { job: { shopId: outcome.shopId, jobId: outcome.jobId } };
+      // The job row is committed. Run it right after answering Shopify; the queued copy, delayed
+      // a minute, finds it done. If both fail, the scheduled sweep sends it again.
       await deps.jobs
-        .send({ job: { shopId: outcome.shopId, jobId: outcome.jobId } })
+        ?.send(message, deps.runJobNow ? 60 : undefined)
         .catch((error) => deps.logger.error('job_enqueue_failed', { error: String(error) }));
+      if (deps.runJobNow) {
+        const run = deps.runJobNow(message).catch((error) =>
+          deps.logger.error('job_inline_failed', { error: String(error) }),
+        );
+        try {
+          c.executionCtx.waitUntil(run);
+        } catch {
+          // No execution context outside Workers (tests): the run simply continues.
+        }
+      }
     }
     return c.body(null, 200);
   });

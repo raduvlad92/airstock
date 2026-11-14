@@ -330,7 +330,11 @@ function retryable(error: unknown): boolean {
   return true;
 }
 
-/** Runs one job row. Safe to run twice: every effect is idempotent. */
+/**
+ * Runs one job row. Another runner takes over a running job only after five minutes, so the
+ * immediate run and its queued safety copy do not both work on it; every effect is idempotent
+ * in any case.
+ */
 export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Promise<JobOutcome> {
   const [job] = await deps.db.transaction({ shopId, userId: null }, (tx) =>
     tx.query<{
@@ -339,7 +343,8 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
       attempts: number;
     }>(
       `update jobs set status = 'running', attempts = attempts + 1, updated_at = now()
-       where id = $1 and status in ('pending', 'running')
+       where id = $1 and (status = 'pending'
+         or (status = 'running' and updated_at <= now() - interval '5 minutes'))
        returning kind, payload, attempts`,
       [jobId],
     ),

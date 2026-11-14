@@ -27,7 +27,12 @@ export interface AppDeps {
   /** Shopify install, webhooks, and mapping; off until the app credentials are set. */
   shopify?: ShopifyAppConfig | null;
   /** The jobs queue, for work a request commits and hands off (a Shopify order, say). */
-  jobs?: { send(message: JobMessage): Promise<void> };
+  jobs?: { send(message: JobMessage, delaySeconds?: number): Promise<void> };
+  /**
+   * Runs a committed job right after the response, on its own database handle, instead of
+   * waiting for the queue to deliver it (seconds). The queued copy is the safety net.
+   */
+  runJobNow?: (message: JobMessage) => Promise<void>;
   /** Publishes committed outbox rows to the jobs queue now instead of at the next sweep. */
   dispatch?: (db: Database) => Promise<number>;
   /** File storage (R2): scan-test results. */

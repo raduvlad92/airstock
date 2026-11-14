@@ -15,6 +15,7 @@ export const PERMISSIONS = [
   'activity.read',
   'credentials.manage',
   'connections.manage',
+  'members.manage',
   /** Records what a connected sales channel reports, such as a Shopify order. */
   'integrations.sync',
 ] as const;

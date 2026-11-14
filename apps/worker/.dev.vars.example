@@ -4,7 +4,9 @@
 # Secrets (plan M4, M5). Sign-in and /connect stay off until all are set.
 WORKOS_API_KEY=
 SESSION_SECRET=
-# Shopify app client secret (plan M6).
+# Shopify app client secret, and 32 random bytes in Base64 that encrypt stored store tokens
+# (plan M6): openssl rand -base64 32
 SHOPIFY_API_SECRET=
+SHOPIFY_TOKEN_KEY=
 # Enables /internal/smoke (plan M1).
 SMOKE_SECRET=

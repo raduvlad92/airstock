@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
 import { mountRestRoutes } from './rest.ts';
+import { type JobMessage, mountShopify, type ShopifyAppConfig } from './shopify.ts';
 import { mountWeb, readSession, sameOrigin, type WebConfig } from './web.ts';
 
 export interface AppDeps {
@@ -22,6 +23,12 @@ export interface AppDeps {
   mcp: McpAuthConfig | null;
   /** Sign-in, connect consent, and dashboard pages; off until WorkOS is configured. */
   web: WebConfig | null;
+  /** Shopify install, webhooks, and mapping; off until the app credentials are set. */
+  shopify?: ShopifyAppConfig | null;
+  /** The jobs queue, for work a request commits and hands off (a Shopify order, say). */
+  jobs?: { send(message: JobMessage): Promise<void> };
+  /** Publishes committed outbox rows to the jobs queue now instead of at the next sweep. */
+  dispatch?: (db: Database) => Promise<number>;
   logger: Logger;
 }
 
@@ -90,6 +97,7 @@ export function createApp(deps: AppDeps) {
   mountRestRoutes(app, deps);
   mountMcp(app, deps);
   mountWeb(app, deps);
+  mountShopify(app, deps);
 
   app.notFound((c) => problem(errors.notFound('Route'), c.get('requestId') ?? uuidv7()));
   app.onError((error, c) => {

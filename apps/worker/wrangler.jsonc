@@ -48,7 +48,8 @@
   "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
   // Static files for the dashboard shell; everything else runs the Worker.
   "assets": { "directory": "./public" },
-  // Public settings. Secrets (WORKOS_API_KEY, SESSION_SECRET, SHOPIFY_API_SECRET, SMOKE_SECRET)
+  // Public settings. Secrets (WORKOS_API_KEY, SESSION_SECRET, SHOPIFY_API_SECRET, SHOPIFY_TOKEN_KEY,
+  // SMOKE_SECRET)
   // are set with `wrangler secret put`.
   "vars": {
     "PUBLIC_URL": "https://airstock.deletecookies.dev",
@@ -59,6 +60,9 @@
     "MCP_AUDIENCE": "https://airstock.deletecookies.dev/mcp",
     "MCP_RESOURCE_URL": "https://airstock.deletecookies.dev/mcp",
     // The consent step puts the grant ID in this claim (plan Section 7.2, option A).
-    "MCP_GRANT_CLAIM": "urn:airstock:grant"
+    "MCP_GRANT_CLAIM": "urn:airstock:grant",
+    // Shopify app "Airstock Staging" (plan M6). The token key itself is a secret.
+    "SHOPIFY_CLIENT_ID": "5023573bb7a0db1c57597424be17feff",
+    "SHOPIFY_TOKEN_KEY_ID": "k1"
   }
 }

@@ -51,11 +51,15 @@ async function renderShops() {
         el('tr', {}, [
           el('td', {}, shop.name),
           el('td', {}, shop.role),
-          el(
-            'td',
-            {},
-            el('button', { class: 'small', onclick: () => renderConnections(shop) }, 'Connections'),
-          ),
+          el('td', {}, [
+            el(
+              'button',
+              { class: 'small', onclick: () => renderConnections(shop) },
+              'AI connections',
+            ),
+            ' ',
+            el('button', { class: 'small', onclick: () => renderShopify(shop) }, 'Shopify'),
+          ]),
         ]),
       );
     }
@@ -167,4 +171,137 @@ async function renderConnections(shop) {
   );
 }
 
-renderShops().catch(showError);
+// Shopify (plan Section 8): connect a store to a shop, then map one Shopify location to one
+// location and match variants by SKU.
+async function renderShopify(shop) {
+  const [{ connections }, { locations }] = await Promise.all([
+    api(`/shops/${shop.id}/shopify/connections`),
+    api(`/shops/${shop.id}/locations`),
+  ]);
+  root.replaceChildren(
+    el('p', {}, el('button', { class: 'small', onclick: () => renderShops() }, '← All shops')),
+    el('h2', {}, `Shopify in ${shop.name}`),
+  );
+  for (const c of connections) root.append(shopifyCard(shop, c, locations));
+  const input = el('input', {
+    name: 'shop',
+    placeholder: 'my-store.myshopify.com',
+    required: '',
+    maxlength: '100',
+  });
+  const form = el('form', {}, [
+    el('h3', {}, connections.length ? 'Connect another store' : 'Connect a Shopify store'),
+    el('label', {}, ['Store address', input]),
+    el(
+      'p',
+      { class: 'fine' },
+      'Shopify asks you to approve access to products, inventory, locations, and orders. Airstock never reads customer details.',
+    ),
+    el('button', { type: 'submit' }, 'Connect store'),
+  ]);
+  form.onsubmit = (event) => {
+    event.preventDefault();
+    const params = new URLSearchParams({ shop_id: shop.id, shop: input.value.trim() });
+    window.location.assign(`/shopify/install?${params}`);
+  };
+  root.append(form);
+}
+
+function shopifyCard(shop, c, locations) {
+  const stockable = locations.filter((l) => l.holdsStockAllowed && l.status === 'active');
+  const mapped = c.locationMap
+    ? `${c.shopifyLocations.find((l) => l.id === c.locationMap.shopifyLocationId)?.name ?? c.locationMap.shopifyLocationId} → ${stockable.find((l) => l.locationId === c.locationMap.locationId)?.path ?? 'a location'}`
+    : 'Not mapped yet';
+  const webhooks = c.webhooks.length
+    ? c.webhooks
+        .map((w) => `${w.topic} ${w.status}${w.message ? ` (${w.message})` : ''}`)
+        .join(', ')
+    : 'none';
+  const card = el('section', { class: 'card inset' }, [
+    el('h3', {}, `${c.shopDomain} · ${c.status}`),
+    el('p', { class: 'fine' }, `Webhooks: ${webhooks}`),
+    el('p', {}, `Location: ${mapped}. Variants mapped: ${c.variantsMapped}.`),
+    c.conflicts
+      ? el(
+          'p',
+          { class: 'error' },
+          `${c.conflicts} quantity difference(s) with Shopify that no order explains. Airstock left Shopify unchanged; map again to take Shopify's current quantity as the starting point.`,
+        )
+      : '',
+    el(
+      'p',
+      { class: 'fine' },
+      `Last webhook: ${c.lastWebhookAt ? new Date(c.lastWebhookAt).toLocaleString() : 'none yet'}`,
+    ),
+  ]);
+  if (c.status !== 'active') return card;
+  const shopifySelect = el(
+    'select',
+    { name: 'shopifyLocationId' },
+    c.shopifyLocations.filter((l) => l.active).map((l) => el('option', { value: l.id }, l.name)),
+  );
+  const locationSelect = el(
+    'select',
+    { name: 'locationId' },
+    stockable.map((l) => el('option', { value: l.locationId }, l.path)),
+  );
+  if (c.locationMap) {
+    shopifySelect.value = c.locationMap.shopifyLocationId;
+    locationSelect.value = c.locationMap.locationId;
+  }
+  const result = el('p', { class: 'fine' });
+  const form = el('form', {}, [
+    el('label', {}, ['Shopify location', shopifySelect]),
+    el('label', {}, ['Airstock location', locationSelect]),
+    el(
+      'p',
+      { class: 'fine' },
+      "Variants are matched by SKU. Airstock then sets Shopify's available quantity at that location to Airstock's availability and keeps it in step.",
+    ),
+    el('button', { type: 'submit' }, c.locationMap ? 'Map again by SKU' : 'Map by SKU'),
+    result,
+  ]);
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    result.textContent = 'Matching…';
+    try {
+      const res = await fetch(`/shopify/connections/${c.connectionId}/map`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-airstock-request': '1' },
+        body: JSON.stringify({
+          shopId: shop.id,
+          locationId: locationSelect.value,
+          shopifyLocationId: shopifySelect.value,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.title || `Request failed (${res.status})`);
+      const notes = [];
+      if (body.unmatchedShopify.length)
+        notes.push(`no match for ${body.unmatchedShopify.join(', ')}`);
+      if (body.untrackedShopify.length)
+        notes.push(`not tracked in Shopify: ${body.untrackedShopify.join(', ')}`);
+      await renderShopify(shop);
+      showNotice(
+        `Mapped ${body.variantsMapped} variant(s)${notes.length ? `; ${notes.join('; ')}` : ''}.`,
+      );
+    } catch (error) {
+      result.textContent = '';
+      showError(error);
+    }
+  };
+  card.append(form);
+  return card;
+}
+
+function showNotice(message) {
+  root.prepend(el('p', { class: 'notice' }, message));
+}
+
+const connected = new URLSearchParams(window.location.search).get('shopify');
+renderShops()
+  .then(() => {
+    if (connected) showNotice('Shopify store connected. Open Shopify on the shop to map it.');
+  })
+  .catch(showError);

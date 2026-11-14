@@ -91,6 +91,18 @@ h2 {
   margin: 1.5rem 0 0.5rem;
 }
 
+h3 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.card.inset {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--bg);
+}
+
 label {
   display: block;
   margin: 0.75rem 0;
@@ -100,7 +112,9 @@ input[type="email"],
 input[name="code"],
 input[name="name"],
 input[name="currency"],
-input[name="timezone"] {
+input[name="timezone"],
+input[name="shop"],
+select {
   display: block;
   width: 100%;
   margin-top: 0.25rem;

@@ -62,7 +62,7 @@ export function page(title: string, body: SafeHtml, options: PageOptions = {}): 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
+<meta name="referrer" content="same-origin">
 <title>${title} · Airstock</title>
 <link rel="stylesheet" href="/assets/app.css">
 ${(options.scripts ?? []).map((src) => html`<script src="${src}" defer></script>`)}
@@ -78,7 +78,10 @@ ${(options.scripts ?? []).map((src) => html`<script src="${src}" defer></script>
       'content-type': 'text/html; charset=utf-8',
       'content-security-policy': contentSecurityPolicy(options),
       'x-content-type-options': 'nosniff',
-      'referrer-policy': 'no-referrer',
+      // Not `no-referrer`: under it browsers send `Origin: null` even on same-origin form posts,
+      // and every form here requires this site's Origin. `same-origin` still sends nothing to
+      // other sites (WorkOS, Google, ChatGPT).
+      'referrer-policy': 'same-origin',
       'cache-control': 'no-store',
     },
   });

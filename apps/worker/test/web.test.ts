@@ -135,6 +135,14 @@ describe('sealed cookies', () => {
     expect(await unseal(secret, 'session', expired)).toBeNull();
   });
 
+  it('serves pages whose referrer policy keeps Origin on same-site form posts', async () => {
+    const res = await t.app.request('/auth/login');
+    // Under `no-referrer`, browsers send `Origin: null` on same-origin POSTs and every form
+    // would be refused by the Origin check.
+    expect(res.headers.get('referrer-policy')).toBe('same-origin');
+    expect(await res.text()).toContain('<meta name="referrer" content="same-origin">');
+  });
+
   it('keeps sign-in redirects on this site', () => {
     expect(safeReturnTo('/connect/login?external_auth_id=abc')).toBe(
       '/connect/login?external_auth_id=abc',

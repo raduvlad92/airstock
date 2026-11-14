@@ -28,4 +28,8 @@ export interface Env {
   SHOPIFY_TOKEN_KEY?: string;
   /** Names the token key, stored next to each ciphertext so the key can rotate. */
   SHOPIFY_TOKEN_KEY_ID?: string;
+  /** Resend API key with sending access to the EMAIL_FROM domain (plan M7, ADR 0009). */
+  RESEND_API_KEY?: string;
+  /** Sender, for example: Airstock <invites@mail.airstock.example>. */
+  EMAIL_FROM?: string;
 }

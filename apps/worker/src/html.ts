@@ -222,3 +222,23 @@ export function dashboardPage(input: { email: string; mcpUrl: string }): Respons
     { scripts: ['/assets/app.js'] },
   );
 }
+
+export function invitationPage(input: {
+  invitationId: string;
+  shopName: string;
+  role: string;
+  email: string;
+  csrf: string;
+}): Response {
+  return page(
+    'Invitation',
+    html`<section class="card narrow">
+  <h1>Join ${input.shopName}</h1>
+  <p>You were invited to join <strong>${input.shopName}</strong> on Airstock as ${input.role.replaceAll('_', ' ')}. You are signed in as ${input.email}.</p>
+  <form method="post" action="/invitations/${input.invitationId}/accept">
+    <input type="hidden" name="csrf" value="${input.csrf}">
+    <button type="submit">Accept invitation</button>
+  </form>
+</section>`,
+  );
+}

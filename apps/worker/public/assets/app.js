@@ -59,6 +59,8 @@ async function renderShops() {
             ),
             ' ',
             el('button', { class: 'small', onclick: () => renderShopify(shop) }, 'Shopify'),
+            ' ',
+            el('button', { class: 'small', onclick: () => renderMembers(shop) }, 'Members'),
           ]),
         ]),
       );
@@ -295,6 +297,74 @@ function shopifyCard(shop, c, locations) {
   return card;
 }
 
+// Members and invitations (plan M4). The invited person accepts by signing in with the
+// invited email address.
+async function renderMembers(shop) {
+  const { members, invitations } = await api(`/shops/${shop.id}/members`);
+  root.replaceChildren(
+    el('p', {}, el('button', { class: 'small', onclick: () => renderShops() }, '← All shops')),
+    el('h2', {}, `Members of ${shop.name}`),
+  );
+  const rows = [
+    ...members.map((m) =>
+      el('tr', {}, [el('td', {}, m.email), el('td', {}, m.role), el('td', {}, m.status)]),
+    ),
+    ...invitations.map((i) =>
+      el('tr', {}, [
+        el('td', {}, i.email),
+        el('td', {}, i.role),
+        el('td', {}, `invited${i.emailSentAt ? ', email sent' : ''} (${i.status})`),
+      ]),
+    ),
+  ];
+  root.append(
+    el(
+      'div',
+      { class: 'table-wrap' },
+      el('table', {}, [
+        el(
+          'thead',
+          {},
+          el('tr', {}, [el('th', {}, 'Email'), el('th', {}, 'Role'), el('th', {}, 'Status')]),
+        ),
+        el('tbody', {}, rows),
+      ]),
+    ),
+  );
+  const email = el('input', { name: 'email', type: 'email', required: '', maxlength: '320' });
+  const role = el(
+    'select',
+    { name: 'role' },
+    [
+      ['viewer', 'Viewer'],
+      ['inventory_operator', 'Inventory operator'],
+      ['catalog_editor', 'Catalog editor'],
+      ['manager', 'Manager'],
+    ].map(([value, label]) => el('option', { value }, label)),
+  );
+  const form = el('form', {}, [
+    el('h3', {}, 'Invite someone'),
+    el('label', {}, ['Email', email]),
+    el('label', {}, ['Role', role]),
+    el('button', { type: 'submit' }, 'Send invitation'),
+  ]);
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/shops/${shop.id}/invitations`, {
+        method: 'POST',
+        headers: { 'idempotency-key': crypto.randomUUID() },
+        body: JSON.stringify({ email: email.value, role: role.value }),
+      });
+      await renderMembers(shop);
+      showNotice(`Invitation sent to ${email.value}.`);
+    } catch (error) {
+      showError(error);
+    }
+  };
+  root.append(form);
+}
+
 function showNotice(message) {
   root.prepend(el('p', { class: 'notice' }, message));
 }
@@ -303,5 +373,8 @@ const connected = new URLSearchParams(window.location.search).get('shopify');
 renderShops()
   .then(() => {
     if (connected) showNotice('Shopify store connected. Open Shopify on the shop to map it.');
+    if (new URLSearchParams(window.location.search).get('joined')) {
+      showNotice('Invitation accepted. The shop is now in your list.');
+    }
   })
   .catch(showError);

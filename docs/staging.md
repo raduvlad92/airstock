@@ -26,7 +26,8 @@ too. Airstock therefore:
 | Database roles | `airstock_owner` (migrations, owns tables), `airstock_app` (runtime, no `BYPASSRLS`) | Hyperdrive connects as `airstock_app` |
 | WorkOS | Staging environment `environment_01M7CV6V2AM1CB2KDKR36JWE56`, client `client_01M7CV6VA3GMRS5MYZ2GC1TJNS` | AuthKit domain `tranquil-mirror-83-staging.authkit.app` |
 | Shopify app | `Airstock Staging`, client ID `5023573bb7a0db1c57597424be17feff` | Dev Dashboard organization 227739292 |
-| Shopify dev stores | `airstock-dev-a`, `airstock-dev-b` | Basic plan, test data and the bogus payment gateway |
+| Shopify dev stores | `airstock-dev-a`, `airstock-dev-b` | Basic plan, test data and the bogus payment gateway; product `AIR-MUG-01` stocked at "Shop location" only |
+| Resend | Team `radu.vlad.92`, key `airstock-staging` | Sends as `EMAIL_FROM` from `eu-west-1`. The planned `mail.airstock.deletecookies.dev` waits for a domain slot (ADR 0009) |
 
 ### WorkOS settings
 
@@ -60,6 +61,7 @@ Values are never committed. Names only:
 | GitHub environment `staging` | `DATABASE_OWNER_URL` | `airstock_owner`, direct (unpooled) host, `sslmode=verify-full` |
 | Worker secret | `SMOKE_SECRET` | Enables `/internal/smoke` |
 | Worker secret | `SHOPIFY_API_SECRET` | Shopify app client secret: verifies webhooks and the install redirect |
+| Worker secret | `RESEND_API_KEY` | Resend key `airstock-staging`: sending access to the `EMAIL_FROM` domain only (ADR 0009) |
 | Worker secret | `SHOPIFY_TOKEN_KEY` | 32 random bytes (Base64) that encrypt stored Shopify tokens; key ID `k1` in `SHOPIFY_TOKEN_KEY_ID` |
 | Worker secret | `WORKOS_API_KEY` | WorkOS key `airstock-staging-worker` |
 | Worker secret | `SESSION_SECRET` | Seals the session cookie |

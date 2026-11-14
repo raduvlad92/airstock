@@ -10,6 +10,7 @@ import {
 import { getOperationOutcome, listActivity } from './activity.ts';
 import { createItem, searchVariants } from './catalog.ts';
 import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
+import { inviteMember, listMembers } from './members.ts';
 import {
   connectShopifyStore,
   listShopifyConnections,
@@ -45,6 +46,8 @@ export const operations: readonly AnyOperation[] = [
   revokeConnection,
   listShopifyConnections,
   setShopifyMappings,
+  inviteMember,
+  listMembers,
 ];
 
 export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
@@ -73,10 +76,12 @@ export {
   getAvailability,
   getOperationOutcome,
   getShopContext,
+  inviteMember,
   listActivity,
   listApiCredentials,
   listConnections,
   listLocations,
+  listMembers,
   listShopifyConnections,
   listShops,
   markShopifyUninstalled,

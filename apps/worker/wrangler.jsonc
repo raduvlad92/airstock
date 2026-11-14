@@ -51,7 +51,7 @@
   // Static files for the dashboard shell; everything else runs the Worker.
   "assets": { "directory": "./public" },
   // Public settings. Secrets (WORKOS_API_KEY, SESSION_SECRET, SHOPIFY_API_SECRET, SHOPIFY_TOKEN_KEY,
-  // SMOKE_SECRET)
+  // RESEND_API_KEY, SMOKE_SECRET)
   // are set with `wrangler secret put`.
   "vars": {
     "PUBLIC_URL": "https://airstock.deletecookies.dev",
@@ -65,6 +65,9 @@
     "MCP_GRANT_CLAIM": "urn:airstock:grant",
     // Shopify app "Airstock Staging" (plan M6). The token key itself is a secret.
     "SHOPIFY_CLIENT_ID": "5023573bb7a0db1c57597424be17feff",
-    "SHOPIFY_TOKEN_KEY_ID": "k1"
+    "SHOPIFY_TOKEN_KEY_ID": "k1",
+    // Transactional email (ADR 0009). The owner asked for mail.airstock.deletecookies.dev; until
+    // the Resend team has a free domain slot, staging sends from the verified tracker subdomain.
+    "EMAIL_FROM": "Airstock staging <airstock@mail.tracker.deletecookies.dev>"
   }
 }

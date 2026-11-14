@@ -31,6 +31,14 @@ export { buildMcpTools, type McpToolDef, resolveToolCall } from './mcp-tools.ts'
 export { formatApiToken, parseApiToken } from './operations/access.ts';
 export * as ops from './operations/index.ts';
 export { integrationCallbacks, operations, operationsById } from './operations/index.ts';
+export {
+  acceptInvitation,
+  type EmailSender,
+  type InvitationView,
+  type OutgoingEmail,
+  sendInvitationEmail,
+  viewInvitation,
+} from './operations/members.ts';
 export { shopifyNumericId } from './operations/shopify.ts';
 export {
   CONNECTION_SCOPES,

@@ -111,7 +111,33 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
   };
   const app = createApp({
     // The shared pool outlives requests in tests; the Worker closes its per-request handle.
-    database: () => ({ transaction: db.transaction.bind(db), close: async () => {} }),
+    // Statements are counted here (plus BEGIN and COMMIT) to mirror PgDatabase's hook.
+    database: (hooks) => ({
+      async transaction(ctx, fn) {
+        const started = performance.now();
+        let statements = 2;
+        try {
+          return await db.transaction(ctx, (tx) =>
+            fn({
+              query: (sql, params) => {
+                statements++;
+                return tx.query(sql, params);
+              },
+              get statements() {
+                return statements;
+              },
+            }),
+          );
+        } finally {
+          hooks?.onTransactionEnd?.({
+            statements,
+            durationMs: performance.now() - started,
+            outcome: 'committed',
+          });
+        }
+      },
+      close: async () => {},
+    }),
     audit: sink,
     mcp,
     web,

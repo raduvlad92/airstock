@@ -169,7 +169,7 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
   const config: WebConfig = deps.web;
   const pipeline = (c: Context<AppEnv>) => ({
     db: c.get('db'),
-    audit: deps.audit,
+    audit: c.get('audit'),
     logger: deps.logger,
   });
 

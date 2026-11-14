@@ -66,7 +66,7 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
   if (!shopify) return;
   const syncDeps = (c: Context<AppEnv>): SyncDeps => ({
     db: c.get('db'),
-    audit: deps.audit,
+    audit: c.get('audit'),
     logger: deps.logger,
     shopify,
     dispatch: deps.dispatch ? () => deps.dispatch!(c.get('db')) : undefined,

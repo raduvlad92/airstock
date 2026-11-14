@@ -1,5 +1,6 @@
 import {
   AppError,
+  type AuditSink,
   buildMcpTools,
   type Caller,
   errors,
@@ -100,6 +101,7 @@ async function authenticate(
 
 function buildServer(
   deps: AppDeps,
+  audit: AuditSink,
   db: Database,
   caller: Caller,
   requestId: string,
@@ -122,7 +124,7 @@ function buildServer(
         try {
           const call = resolveToolCall(tool, args);
           const res = await execute(
-            { db, audit: deps.audit, logger: deps.logger },
+            { db, audit, logger: deps.logger },
             call.operation,
             {
               caller,
@@ -204,7 +206,7 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
     }
     const handler = createMcpHandler(
       () =>
-        buildServer(deps, c.get('db'), caller, c.get('requestId'), () =>
+        buildServer(deps, c.get('audit'), c.get('db'), caller, c.get('requestId'), () =>
           c.set('outboxWritten', true),
         ),
       {

@@ -32,7 +32,7 @@ export function mountRestRoutes(app: Hono<AppEnv>, deps: AppDeps): void {
             ? undefined
             : body;
       const result = await execute(
-        { db: c.get('db'), audit: deps.audit, logger: deps.logger },
+        { db: c.get('db'), audit: c.get('audit'), logger: deps.logger },
         op,
         {
           caller: c.get('caller'),

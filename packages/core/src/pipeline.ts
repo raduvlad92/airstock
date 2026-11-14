@@ -9,6 +9,8 @@ import type { AnyOperation, HandlerContext, HandlerResult } from './registry.ts'
 
 export interface Logger {
   error(message: string, data?: Record<string, unknown>): void;
+  /** Optional: measurements and other non-error lines. */
+  info?(message: string, data?: Record<string, unknown>): void;
 }
 
 export interface PipelineDeps {

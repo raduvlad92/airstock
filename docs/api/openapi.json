@@ -1,0 +1,2097 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Airstock API",
+    "version": "0.1.0",
+    "description": "Generated from the operation registry (packages/core). Every operation is also reachable over MCP or has a documented exception. Errors use RFC 9457 problem details."
+  },
+  "servers": [
+    {
+      "url": "https://airstock-staging.workers.dev"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API credential token (ask_...)."
+      }
+    },
+    "responses": {
+      "Problem": {
+        "description": "Problem details (RFC 9457).",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "type",
+                "title",
+                "status",
+                "code"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "integer"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/shops": {
+      "post": {
+        "operationId": "shops.create",
+        "summary": "Create a shop",
+        "description": "Creates a shop owned by the signed-in user, with one default warehouse and location named Main stock (PRD 3.1).",
+        "x-permission": "authenticated",
+        "x-connection-scope": "session",
+        "x-audit-action": "shop.created",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "name",
+                  "currency",
+                  "timezone"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "shopId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "membershipId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "defaultWarehouseId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "defaultLocationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "required": [
+                    "shopId",
+                    "membershipId",
+                    "defaultWarehouseId",
+                    "defaultLocationId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}": {
+      "get": {
+        "operationId": "shops.context.get",
+        "summary": "Get the current shop and your access",
+        "description": "Returns the shop, your role and permissions, any location limits, and the scopes this connection was granted.",
+        "x-permission": "shop.read",
+        "x-connection-scope": "shop:read",
+        "x-audit-action": "shop.context.viewed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "shop": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "timezone": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "currency",
+                        "timezone"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "shop.read",
+                          "shop.manage",
+                          "catalog.read",
+                          "catalog.write",
+                          "storage.read",
+                          "storage.manage",
+                          "inventory.read",
+                          "inventory.receive",
+                          "inventory.reserve",
+                          "activity.read",
+                          "credentials.manage",
+                          "connections.manage"
+                        ]
+                      }
+                    },
+                    "allLocations": {
+                      "type": "boolean"
+                    },
+                    "locationScopeIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      }
+                    },
+                    "connectionScopes": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "all"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "shop",
+                    "role",
+                    "permissions",
+                    "allLocations",
+                    "locationScopeIds",
+                    "connectionScopes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/items": {
+      "post": {
+        "operationId": "catalog.items.create",
+        "summary": "Create a product with its default variant",
+        "description": "Creates a product and the default variant that carries its SKU and inventory settings. A SKU that matches an existing one after normalization is rejected.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.item.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "sku": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "price": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                    "description": "Decimal string, zero or more, at most 14 integer digits and 6 decimal places."
+                  },
+                  "baseUnit": {
+                    "default": "each",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20
+                  },
+                  "quantityScale": {
+                    "default": 0,
+                    "description": "Decimal places allowed in stock quantities, 0 for whole units.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                  }
+                },
+                "required": [
+                  "name",
+                  "sku"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "productId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "variantId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "sku": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "productId",
+                    "variantId",
+                    "sku"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/variants": {
+      "get": {
+        "operationId": "catalog.variants.search",
+        "summary": "Find variants by SKU or name",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.variants.searched",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "sku",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Exact SKU, matched after normalization.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Text found in the product name or SKU.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Cursor from the previous page.",
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "variants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "sku": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "baseUnit": {
+                            "type": "string"
+                          },
+                          "quantityScale": {
+                            "type": "number"
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "variantId",
+                          "productId",
+                          "productName",
+                          "sku",
+                          "price",
+                          "baseUnit",
+                          "quantityScale",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "variants",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/warehouses": {
+      "post": {
+        "operationId": "storage.warehouses.create",
+        "summary": "Create a warehouse or storage site",
+        "x-permission": "storage.manage",
+        "x-connection-scope": "storage:write",
+        "x-audit-action": "storage.warehouse.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "ownership": {
+                    "default": "owned",
+                    "type": "string",
+                    "enum": [
+                      "owned",
+                      "rented",
+                      "third_party"
+                    ]
+                  },
+                  "operatorName": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "warehouseId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "required": [
+                    "warehouseId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/locations": {
+      "post": {
+        "operationId": "storage.locations.create",
+        "summary": "Create a storage location",
+        "description": "Creates a location in a warehouse, optionally under a parent location. Stock is held only at locations without children, so a parent that holds stock cannot gain children.",
+        "x-permission": "storage.manage",
+        "x-connection-scope": "storage:write",
+        "x-audit-action": "storage.location.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "warehouseId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "parentId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50
+                  },
+                  "fulfillmentEligible": {
+                    "default": true,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "warehouseId",
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "locationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "locationId",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "get": {
+        "operationId": "storage.locations.list",
+        "summary": "List warehouses and their locations",
+        "x-permission": "storage.read",
+        "x-connection-scope": "storage:read",
+        "x-audit-action": "storage.locations.listed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "partial": {
+                      "type": "boolean",
+                      "description": "True when your access is limited to some locations."
+                    },
+                    "locations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "warehouseId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "warehouseName": {
+                            "type": "string"
+                          },
+                          "ownership": {
+                            "type": "string"
+                          },
+                          "parentId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "code": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "holdsStockAllowed": {
+                            "type": "boolean",
+                            "description": "True for locations without children."
+                          },
+                          "fulfillmentEligible": {
+                            "type": "boolean"
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "warehouseId",
+                          "warehouseName",
+                          "ownership",
+                          "parentId",
+                          "name",
+                          "code",
+                          "path",
+                          "holdsStockAllowed",
+                          "fulfillmentEligible",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "partial",
+                    "locations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/receipts": {
+      "post": {
+        "operationId": "inventory.receipts.create",
+        "summary": "Receive stock into a location",
+        "description": "Adds units of a variant to a leaf location in a condition. Also used for opening stock. The quantity is in the variant base unit.",
+        "x-permission": "inventory.receive",
+        "x-connection-scope": "inventory:write",
+        "x-audit-action": "inventory.receipt.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "locationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "quantity": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                    "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                  },
+                  "condition": {
+                    "default": "sellable",
+                    "type": "string",
+                    "enum": [
+                      "sellable",
+                      "quarantine",
+                      "damaged"
+                    ]
+                  },
+                  "unitCost": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                    "description": "Decimal string, zero or more, at most 14 integer digits and 6 decimal places."
+                  },
+                  "reference": {
+                    "description": "Supplier or inbound reference.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "variantId",
+                  "locationId",
+                  "quantity"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "position": {
+                      "type": "object",
+                      "properties": {
+                        "positionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "condition": {
+                          "type": "string",
+                          "enum": [
+                            "sellable",
+                            "quarantine",
+                            "damaged"
+                          ]
+                        },
+                        "onHand": {
+                          "type": "string"
+                        },
+                        "allocated": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "positionId",
+                        "variantId",
+                        "locationId",
+                        "condition",
+                        "onHand",
+                        "allocated"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "operationId",
+                    "position"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/reservations": {
+      "post": {
+        "operationId": "inventory.reservations.create",
+        "summary": "Reserve sellable stock",
+        "description": "Claims sellable units for an order or other purpose without moving them. Without a location, stock is allocated across fulfillment-eligible locations in location path order. Fails if not enough is available; nothing is partly reserved.",
+        "x-permission": "inventory.reserve",
+        "x-connection-scope": "inventory:write",
+        "x-audit-action": "inventory.reservation.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "quantity": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                    "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                  },
+                  "locationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "purpose": {
+                    "default": "manual",
+                    "type": "string",
+                    "enum": [
+                      "manual",
+                      "external_order"
+                    ]
+                  },
+                  "externalRef": {
+                    "description": "For example an external order and line ID.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "expiresInSeconds": {
+                    "description": "Release automatically after this many seconds.",
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 7776000
+                  }
+                },
+                "required": [
+                  "variantId",
+                  "quantity"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reservationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "variantId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "quantity": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "active"
+                    },
+                    "expiresAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "allocations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "positionId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "quantity": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "positionId",
+                          "locationId",
+                          "quantity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "reservationId",
+                    "operationId",
+                    "variantId",
+                    "quantity",
+                    "status",
+                    "expiresAt",
+                    "allocations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/reservations/{reservationId}/release": {
+      "post": {
+        "operationId": "inventory.reservations.release",
+        "summary": "Release a reservation, fully or partly",
+        "description": "Returns reserved units to availability without moving stock. Without a quantity, everything still reserved is released.",
+        "x-permission": "inventory.reserve",
+        "x-connection-scope": "inventory:write",
+        "x-audit-action": "inventory.reservation.released",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "reservationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quantity": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                    "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reservationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "released": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "reservationId",
+                    "operationId",
+                    "released",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/availability": {
+      "get": {
+        "operationId": "inventory.availability.get",
+        "summary": "Get stock and availability for a variant",
+        "description": "Shows on-hand, reserved, and available quantities per location and condition, with totals. Totals cover only the locations you can access; `partial` says when that is a subset.",
+        "x-permission": "inventory.read",
+        "x-connection-scope": "inventory:read",
+        "x-audit-action": "inventory.availability.viewed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "variantId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "variantId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "sku": {
+                      "type": "string"
+                    },
+                    "partial": {
+                      "type": "boolean"
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "onHand": {
+                          "type": "string"
+                        },
+                        "sellableOnHand": {
+                          "type": "string"
+                        },
+                        "reserved": {
+                          "type": "string"
+                        },
+                        "available": {
+                          "type": "string"
+                        },
+                        "quarantined": {
+                          "type": "string"
+                        },
+                        "damaged": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "onHand",
+                        "sellableOnHand",
+                        "reserved",
+                        "available",
+                        "quarantined",
+                        "damaged"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "positions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "positionId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "locationPath": {
+                            "type": "string"
+                          },
+                          "warehouseId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "condition": {
+                            "type": "string",
+                            "enum": [
+                              "sellable",
+                              "quarantine",
+                              "damaged"
+                            ]
+                          },
+                          "onHand": {
+                            "type": "string"
+                          },
+                          "reserved": {
+                            "type": "string"
+                          },
+                          "available": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "positionId",
+                          "locationId",
+                          "locationPath",
+                          "warehouseId",
+                          "condition",
+                          "onHand",
+                          "reserved",
+                          "available"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "variantId",
+                    "sku",
+                    "partial",
+                    "totals",
+                    "positions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/activity": {
+      "get": {
+        "operationId": "activity.list",
+        "summary": "Search the activity history",
+        "description": "Newest first. Filter by target to explain a record, or by attempt to follow one request. Recent events can take a few seconds to appear because reads and failures are ingested through a queue.",
+        "x-permission": "activity.read",
+        "x-connection-scope": "activity:read",
+        "x-audit-action": "activity.viewed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "targetType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          {
+            "name": "targetId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "attemptId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Cursor from the previous page.",
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "eventId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "occurredAt": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "attempt",
+                              "outcome"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "actorType": {
+                            "type": "string"
+                          },
+                          "actorId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "clientId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "targetType": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "targetId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "operationId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "attemptId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "externalRef": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "changes": {},
+                          "error": {}
+                        },
+                        "required": [
+                          "eventId",
+                          "occurredAt",
+                          "action",
+                          "phase",
+                          "outcome",
+                          "source",
+                          "actorType",
+                          "actorId",
+                          "clientId",
+                          "targetType",
+                          "targetId",
+                          "operationId",
+                          "attemptId",
+                          "externalRef",
+                          "reason",
+                          "changes",
+                          "error"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "events",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/operation-outcomes": {
+      "get": {
+        "operationId": "operations.outcome.get",
+        "summary": "Look up the result of a command by its idempotency key",
+        "description": "Use after a lost response or an outcome_unknown error. `completed` returns the original result; `not_found` means the command made no change and is safe to retry with the same key.",
+        "x-permission": "shop.read",
+        "x-connection-scope": "shop:read",
+        "x-audit-action": "operation.outcome.viewed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "Operation ID, for example inventory.reservations.create."
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "completed",
+                        "not_found"
+                      ]
+                    },
+                    "result": {},
+                    "completedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "result",
+                    "completedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/api-credentials": {
+      "post": {
+        "operationId": "credentials.create",
+        "summary": "Create an API credential",
+        "description": "Creates a scoped credential that acts for you, never beyond your own permissions and locations. The token is shown once.",
+        "x-permission": "credentials.manage",
+        "x-connection-scope": "session",
+        "x-audit-action": "credential.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "scopes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "shop:read",
+                        "catalog:read",
+                        "catalog:write",
+                        "storage:read",
+                        "storage:write",
+                        "inventory:read",
+                        "inventory:write",
+                        "activity:read"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "scopes"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "credentialId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "credentialId",
+                    "name",
+                    "scopes",
+                    "token"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "get": {
+        "operationId": "credentials.list",
+        "summary": "List API credentials",
+        "x-permission": "credentials.manage",
+        "x-connection-scope": "session",
+        "x-audit-action": "credentials.listed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "credentials": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "credentialId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "membershipId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUsedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "credentialId",
+                          "name",
+                          "scopes",
+                          "status",
+                          "membershipId",
+                          "createdAt",
+                          "lastUsedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "credentials"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/api-credentials/{credentialId}/revoke": {
+      "post": {
+        "operationId": "credentials.revoke",
+        "summary": "Revoke an API credential",
+        "x-permission": "credentials.manage",
+        "x-connection-scope": "session",
+        "x-audit-action": "credential.revoked",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "credentialId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "revoked"
+                    }
+                  },
+                  "required": [
+                    "credentialId",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/connections": {
+      "get": {
+        "operationId": "connections.list",
+        "summary": "List AI and OAuth connections",
+        "description": "Your own connections, or every connection in the shop with the connections.manage permission.",
+        "x-permission": "shop.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "connections.listed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "grantId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "clientId": {
+                            "type": "string"
+                          },
+                          "clientName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "membershipId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUsedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "grantId",
+                          "clientId",
+                          "clientName",
+                          "scopes",
+                          "status",
+                          "membershipId",
+                          "createdAt",
+                          "lastUsedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "connections"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/connections/{grantId}/revoke": {
+      "post": {
+        "operationId": "connections.revoke",
+        "summary": "Revoke an AI or OAuth connection",
+        "description": "Stops the connection on its next request, even if its access token has not expired (PRD 9.4).",
+        "x-permission": "shop.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "connection.revoked",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grantId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "revoked"
+                    }
+                  },
+                  "required": [
+                    "grantId",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    }
+  }
+}

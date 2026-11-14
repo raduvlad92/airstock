@@ -20,6 +20,7 @@ export interface McpException {
 
 export interface HandlerContext {
   tx: Tx;
+  /** Empty for account-level reads, which span the caller's shops. */
   shopId: string;
   caller: Caller;
   /** Null only for account-level operations such as creating a shop. */

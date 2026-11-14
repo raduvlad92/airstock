@@ -16,6 +16,8 @@ import { createApp } from './app.ts';
 import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
 import { requestScopedSource } from './request-db.ts';
+import type { WebConfig } from './web.ts';
+import { createWorkosClient } from './workos.ts';
 
 const logger: Logger = {
   error: (message, data) => console.error(JSON.stringify({ level: 'error', message, ...data })),
@@ -29,6 +31,29 @@ function queueSink(env: Env): AuditSink {
         events.map((body) => ({ body, contentType: 'json' as const })),
       );
     },
+  };
+}
+
+/** Sign-in and connect pages need WorkOS, the session secret, and the MCP settings. */
+function webConfigFromEnv(env: Env): WebConfig | null {
+  if (
+    !env.PUBLIC_URL ||
+    !env.WORKOS_CLIENT_ID ||
+    !env.WORKOS_API_KEY ||
+    !env.SESSION_SECRET ||
+    !env.MCP_AUTHORIZATION_SERVER
+  )
+    return null;
+  return {
+    publicUrl: env.PUBLIC_URL,
+    sessionSecret: env.SESSION_SECRET,
+    workos: createWorkosClient({
+      apiKey: env.WORKOS_API_KEY,
+      clientId: env.WORKOS_CLIENT_ID,
+      redirectUri: new URL('/auth/callback', env.PUBLIC_URL).href,
+    }),
+    authkitOrigin: new URL(env.MCP_AUTHORIZATION_SERVER).origin,
+    grantClaim: env.MCP_GRANT_CLAIM ?? 'grant_id',
   };
 }
 
@@ -46,6 +71,7 @@ export default {
       database: () => database(env),
       audit: queueSink(env),
       mcp: mcpConfigFromEnv(env),
+      web: webConfigFromEnv(env),
       logger,
     });
     return app.fetch(request, env, ctx);

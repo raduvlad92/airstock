@@ -14,4 +14,12 @@ export interface Env {
   MCP_AUTHORIZATION_SERVER?: string;
   /** Enables /internal/smoke for staging measurements (plan M1). */
   SMOKE_SECRET?: string;
+  /** Public origin, such as https://airstock.deletecookies.dev. */
+  PUBLIC_URL?: string;
+  WORKOS_CLIENT_ID?: string;
+  WORKOS_API_KEY?: string;
+  /** Seals the session and sign-in flow cookies. */
+  SESSION_SECRET?: string;
+  /** Shopify app client secret (plan M6). */
+  SHOPIFY_API_SECRET?: string;
 }

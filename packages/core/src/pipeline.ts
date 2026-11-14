@@ -31,7 +31,8 @@ export interface ExecuteResult {
   replayed: boolean;
   requestId: string;
   attemptId: string | null;
-  shopId: string;
+  /** Null for account-level reads, which span the caller's shops. */
+  shopId: string | null;
 }
 
 /**
@@ -49,7 +50,9 @@ export async function execute(
 ): Promise<ExecuteResult> {
   const requestId = req.requestId ?? uuidv7();
   const { caller } = req;
-  const shopId = op.scope === 'account' ? uuidv7() : req.shopId;
+  // An account-level command creates the shop it names; an account-level read spans the
+  // caller's shops and runs, and is audited, without a shop.
+  const shopId = op.scope === 'account' ? (op.kind === 'command' ? uuidv7() : null) : req.shopId;
   const idempotencyKey = req.idempotencyKey ?? null;
   let attemptId: string | null = null;
 
@@ -141,7 +144,7 @@ export async function execute(
   const requestHash =
     op.idempotency === 'required' ? await sha256Hex(canonicalJson({ op: op.id, input })) : null;
   const locationScope = membership && !membership.allLocations ? membership.locationScopeIds : null;
-  const resolvedShopId = shopId as string;
+  const resolvedShopId = shopId;
 
   type TxOutcome =
     | { kind: 'done'; handled: HandlerResult<unknown> }
@@ -161,7 +164,7 @@ export async function execute(
         }
         const ctx: HandlerContext = {
           tx,
-          shopId: resolvedShopId,
+          shopId: resolvedShopId ?? '',
           caller,
           membership,
           requestId,

@@ -8,7 +8,11 @@ export {
   sweepExpiredReservations,
 } from './background.ts';
 export type { Caller, CallerKind, Membership, Source } from './caller.ts';
-export { authenticateApiToken, resolveConnectionGrant } from './credentials.ts';
+export {
+  authenticateApiToken,
+  resolveConnectionGrant,
+  type VerifiedConnectionToken,
+} from './credentials.ts';
 export { AppError, errors, type ProblemDetails } from './errors.ts';
 export { uuidv7, uuidv7Time } from './ids.ts';
 export { buildMcpTools, type McpToolDef, resolveToolCall } from './mcp-tools.ts';

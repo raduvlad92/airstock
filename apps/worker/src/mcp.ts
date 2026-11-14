@@ -50,9 +50,11 @@ export function mcpConfigFromEnv(env: {
 }
 
 const TOOLS = buildMcpTools(operations);
-const SCOPES = [
-  ...new Set(operations.map((o) => o.connectionScope).filter((s) => s !== 'session')),
-];
+/**
+ * OAuth scopes the authorization server issues. What a connection may do is not an OAuth scope:
+ * it is the access chosen at the consent step and stored in the grant, checked on every call.
+ */
+const OAUTH_SCOPES = ['openid', 'profile', 'email', 'offline_access'];
 
 /**
  * Verifies the bearer token (signature, issuer, audience, expiry) and then loads the
@@ -70,6 +72,9 @@ async function authenticate(
       issuer: config.issuer,
       audience: config.audience,
     });
+    // WorkOS marks tokens issued to an agent identity rather than a person; Airstock serves
+    // people, and a connection always acts for the user who approved it.
+    if (payload.sub_profile === 'ai_agent') return null;
     const grantId = payload[config.grantClaim];
     const clientId = (payload.client_id ?? payload.azp) as unknown;
     if (
@@ -79,7 +84,7 @@ async function authenticate(
     )
       return null;
     if (!/^[0-9a-f-]{36}$/.test(grantId)) return null;
-    return await resolveConnectionGrant(db, grantId, { providerUserId: payload.sub, clientId });
+    return await resolveConnectionGrant(db, grantId, { subject: payload.sub, clientId });
   } catch {
     return null;
   }
@@ -145,7 +150,7 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
     return c.json({
       resource: deps.mcp.resource,
       authorization_servers: [deps.mcp.authorizationServer],
-      scopes_supported: SCOPES,
+      scopes_supported: OAUTH_SCOPES,
       bearer_methods_supported: ['header'],
     });
   });

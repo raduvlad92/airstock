@@ -156,6 +156,74 @@
             "$ref": "#/components/responses/Problem"
           }
         }
+      },
+      "get": {
+        "operationId": "shops.list",
+        "summary": "List your shops",
+        "description": "The shops where you are an active member, with your role in each.",
+        "x-permission": "authenticated",
+        "x-connection-scope": "session",
+        "x-audit-action": "shops.listed",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "shops": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "timezone": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "owner",
+                              "manager",
+                              "catalog_editor",
+                              "inventory_operator",
+                              "viewer"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "currency",
+                          "timezone",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "shops"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
       }
     },
     "/api/v1/shops/{shopId}": {
@@ -1938,6 +2006,99 @@
       }
     },
     "/api/v1/shops/{shopId}/connections": {
+      "post": {
+        "operationId": "connections.create",
+        "summary": "Approve an AI or OAuth connection",
+        "description": "The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2).",
+        "x-permission": "shop.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "connection.created",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "shop:read",
+                        "catalog:read",
+                        "catalog:write",
+                        "storage:read",
+                        "storage:write",
+                        "inventory:read",
+                        "inventory:write",
+                        "activity:read"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "scopes"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grantId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "grantId",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
       "get": {
         "operationId": "connections.list",
         "summary": "List AI and OAuth connections",
@@ -1974,7 +2135,10 @@
                             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                           },
                           "clientId": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "clientName": {
                             "type": [
@@ -1998,6 +2162,12 @@
                           "createdAt": {
                             "type": "string"
                           },
+                          "boundAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "lastUsedAt": {
                             "type": [
                               "string",
@@ -2013,6 +2183,7 @@
                           "status",
                           "membershipId",
                           "createdAt",
+                          "boundAt",
                           "lastUsedAt"
                         ],
                         "additionalProperties": false

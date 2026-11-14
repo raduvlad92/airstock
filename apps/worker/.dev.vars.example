@@ -1,9 +1,10 @@
 # Copy to .dev.vars for `wrangler dev`. Never commit .dev.vars.
-# MCP OAuth (plan M5). /mcp answers 503 until these are set.
-MCP_ISSUER=
-MCP_AUDIENCE=
-MCP_JWKS_URL=
-MCP_RESOURCE_URL=
-MCP_AUTHORIZATION_SERVER=
+# Public settings live in wrangler.jsonc `vars`; .dev.vars overrides them locally, for example
+# PUBLIC_URL=http://localhost:8787 (cookies use the __Host- prefix, so sign-in needs HTTPS).
+# Secrets (plan M4, M5). Sign-in and /connect stay off until all are set.
+WORKOS_API_KEY=
+SESSION_SECRET=
+# Shopify app client secret (plan M6).
+SHOPIFY_API_SECRET=
 # Enables /internal/smoke (plan M1).
 SMOKE_SECRET=

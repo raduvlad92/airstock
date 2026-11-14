@@ -124,9 +124,20 @@ export default {
       web: webConfigFromEnv(env),
       shopify: await shopifyConfigFromEnv(env),
       jobs: {
-        async send(message: JobMessage) {
-          await env.JOBS_QUEUE.send(message, { contentType: 'json' });
+        async send(message: JobMessage, delaySeconds?: number) {
+          await env.JOBS_QUEUE.send(message, {
+            contentType: 'json',
+            ...(delaySeconds ? { delaySeconds } : {}),
+          });
         },
+      },
+      runJobNow: async (message: JobMessage) => {
+        const own = database(env);
+        try {
+          await runJobsBatch(env, own, [{ id: 'inline', attempts: 1, body: message }]);
+        } finally {
+          await own.close();
+        }
       },
       dispatch: (db) => publishOutbox(env, db),
       files: {

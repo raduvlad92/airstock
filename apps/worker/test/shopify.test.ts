@@ -32,6 +32,7 @@ let shopify: ShopifyAppConfig;
 const stores = new Map<string, FakeStore>();
 const auth = new FakeAuth();
 const queued: JobMessage[] = [];
+const delays: Array<number | undefined> = [];
 
 function deps(): SyncDeps {
   return { db: t.db, audit: t.sink, shopify };
@@ -55,8 +56,9 @@ beforeAll(async () => {
   t = await testApp({
     shopify,
     jobs: {
-      async send(message) {
+      async send(message, delaySeconds) {
         queued.push(message);
+        delays.push(delaySeconds);
       },
     },
   });
@@ -501,5 +503,65 @@ describe('Shopify orders and availability', () => {
     const order = storeB.placeOrder([{ variant: mugB, quantity: 1 }]);
     expect((await deliver(domainB, 'orders/create', storeB.webhookBody(order))).status).toBe(200);
     expect(queued).toHaveLength(0);
+  });
+});
+
+describe('running an order job right after the webhook', () => {
+  it('reserves without waiting for the queue; the delayed queued copy finds it done', async () => {
+    const inline: Promise<unknown>[] = [];
+    const fast = await testApp({
+      shopify,
+      jobs: {
+        async send(message, delaySeconds) {
+          queued.push(message);
+          delays.push(delaySeconds);
+        },
+      },
+      runJobNow: async (message) => {
+        const run = runJob(
+          { db: fast.db, audit: fast.sink, shopify },
+          message.job.shopId,
+          message.job.jobId,
+        );
+        inline.push(run);
+        await run;
+      },
+    });
+    try {
+      const domain = `fast-${uuidv7().slice(-6)}.myshopify.com`;
+      const store = new FakeStore(domain);
+      stores.set(domain, store);
+      const sku = `FAST-${uuidv7().slice(-6)}`;
+      const mug = store.addVariant(sku, 5);
+      const previous = t;
+      t = fast;
+      try {
+        const m = await merchant(sku, 5);
+        expect((await install(m, domain)).status).toBe(303);
+        const connectionId = (await connectionOf(m.shopId)).id;
+        const mapped = await t.app.request(`/shopify/connections/${connectionId}/map`, {
+          method: 'POST',
+          headers: { cookie: m.cookie, ...DASHBOARD, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            shopId: m.shopId,
+            locationId: m.locationId,
+            shopifyLocationId: '1001',
+          }),
+        });
+        expect(mapped.status).toBe(200);
+        const order = store.placeOrder([{ variant: mug, quantity: 2 }]);
+        const res = await deliver(domain, 'orders/create', store.webhookBody(order));
+        expect(res.status).toBe(200);
+        await Promise.all(inline);
+        expect((await reservationsFor(m.shopId)).map((r) => r.quantity)).toEqual(['2.000000']);
+        expect(delays.at(-1)).toBe(60);
+        // The queued copy arrives later and has nothing to do.
+        expect(await runQueuedJobs()).toEqual([{ status: 'missing' }]);
+      } finally {
+        t = previous;
+      }
+    } finally {
+      await fast.close();
+    }
   });
 });

@@ -8,7 +8,7 @@ import {
   sessionCaller,
   uuidv7,
 } from '@airstock/core';
-import type { Database } from '@airstock/db';
+import type { Database, DatabaseHooks } from '@airstock/db';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
@@ -19,7 +19,7 @@ import { mountWeb, readSession, sameOrigin, type WebConfig } from './web.ts';
 
 export interface AppDeps {
   /** A database handle for one request; the app closes it when the request ends. */
-  database(): Database;
+  database(hooks?: DatabaseHooks): Database;
   audit: AuditSink;
   mcp: McpAuthConfig | null;
   /** Sign-in, connect consent, and dashboard pages; off until WorkOS is configured. */
@@ -39,6 +39,8 @@ export type AppEnv = {
   Variables: {
     requestId: string;
     db: Database;
+    /** The audit sink for this request, timed for the Server-Timing header. */
+    audit: AuditSink;
     caller: Caller;
     /** Set when the request committed outbox events. */
     outboxWritten: boolean;
@@ -60,15 +62,55 @@ export function createApp(deps: AppDeps) {
   const app = new Hono<AppEnv>();
 
   app.use('*', async (c, next) => {
+    const started = performance.now();
     c.set('requestId', uuidv7());
-    const db = deps.database();
+    // Per-request measurements (plan Section 10): transactions, SQL statements, database time,
+    // and awaited queue sends, reported in Server-Timing and one log line.
+    const stats = { tx: 0, sql: 0, dbMs: 0, sends: 0, events: 0, queueMs: 0 };
+    const db = deps.database({
+      onTransactionEnd: (t) => {
+        stats.tx++;
+        stats.sql += t.statements;
+        stats.dbMs += t.durationMs;
+      },
+    });
     c.set('db', db);
+    c.set('audit', {
+      async send(events) {
+        const t = performance.now();
+        try {
+          await deps.audit.send(events);
+        } finally {
+          stats.sends++;
+          stats.events += events.length;
+          stats.queueMs += performance.now() - t;
+        }
+      },
+    });
     try {
       await next();
     } finally {
       await db.close();
     }
     c.header('x-request-id', c.get('requestId'));
+    const ms = (n: number) => n.toFixed(1);
+    c.header(
+      'server-timing',
+      [
+        `app;dur=${ms(performance.now() - started)}`,
+        `db;dur=${ms(stats.dbMs)};desc="tx ${stats.tx}, sql ${stats.sql}"`,
+        `queue;dur=${ms(stats.queueMs)};desc="sends ${stats.sends}, events ${stats.events}"`,
+      ].join(', '),
+    );
+    deps.logger.info?.('request_stats', {
+      method: c.req.method,
+      route: c.req.routePath,
+      status: c.res.status,
+      ms: Math.round(performance.now() - started),
+      ...stats,
+      dbMs: Math.round(stats.dbMs),
+      queueMs: Math.round(stats.queueMs),
+    });
     // Publish committed outbox events now (a Shopify push, say) instead of at the next cron
     // sweep, after the response, on a handle of its own. The sweep still covers failures.
     if (c.get('outboxWritten') && deps.dispatch) {

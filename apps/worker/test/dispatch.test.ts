@@ -25,12 +25,17 @@ describe('outbox publishing', () => {
     );
     expect(read.status).toBe(200);
     expect(published).toBe(0);
+    // A read: one access event on the queue, and its statements counted.
+    expect(read.headers.get('server-timing')).toMatch(/queue;dur=[\d.]+;desc="sends 1, events 1"/);
+    expect(read.headers.get('server-timing')).toMatch(/db;dur=[\d.]+;desc="tx \d+, sql \d+"/);
     const reserve = await t.app.request(`/api/v1/shops/${shop.shopId}/reservations`, {
       method: 'POST',
       headers: { ...headers, 'idempotency-key': crypto.randomUUID() },
       body: JSON.stringify({ variantId, quantity: '1' }),
     });
     expect(reserve.status).toBe(201);
+    // A command: the attempt event is the only queue send; the outcome commits with the change.
+    expect(reserve.headers.get('server-timing')).toContain('desc="sends 1, events 1"');
     await new Promise((r) => setTimeout(r, 10));
     expect(published).toBe(1);
   });

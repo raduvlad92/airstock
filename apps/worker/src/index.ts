@@ -12,7 +12,7 @@ import {
   systemCaller,
   uuidv7,
 } from '@airstock/core';
-import { type Database, PgDatabase } from '@airstock/db';
+import { type Database, type DatabaseHooks, PgDatabase } from '@airstock/db';
 import {
   type AvailabilityChanged,
   httpShopifyAdmin,
@@ -34,6 +34,7 @@ import { createWorkosClient } from './workos.ts';
 
 const logger: Logger = {
   error: (message, data) => console.error(JSON.stringify({ level: 'error', message, ...data })),
+  info: (message, data) => console.log(JSON.stringify({ level: 'info', message, ...data })),
 };
 
 /** Awaited send: resolves once Cloudflare Queues has durably accepted the events (PRD 7.3). */
@@ -97,8 +98,8 @@ function shopifyConfigFromEnv(env: Env): Promise<ShopifyAppConfig | null> {
   return shopifyConfig;
 }
 
-function database(env: Env) {
-  return new PgDatabase(requestScopedSource(env.HYPERDRIVE.connectionString));
+function database(env: Env, hooks?: DatabaseHooks) {
+  return new PgDatabase(requestScopedSource(env.HYPERDRIVE.connectionString), hooks);
 }
 
 function publishOutbox(env: Env, db: Database): Promise<number> {
@@ -116,7 +117,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/internal/smoke') return smoke(request, env);
     app ??= createApp({
-      database: () => database(env),
+      database: (hooks) => database(env, hooks),
       audit: queueSink(env),
       mcp: mcpConfigFromEnv(env),
       web: webConfigFromEnv(env),

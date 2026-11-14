@@ -2,7 +2,7 @@
 
 ## Product requirements, operating behavior, and architecture
 
-**Version:** 0.5 — review draft with Phase 0 findings  
+**Version:** 0.6 — review draft with Phase 1 owner answers  
 **Date:** 14 November 2026  
 **Audience:** Product owner, designers, developers, and future implementation agents  
 **Product name:** To be decided  
@@ -208,7 +208,7 @@ Currency, units, timezone, and email sign-in method are proposed setup defaults.
 - Distinguish saved values, unsaved edits, pending changes, errors, and version conflicts.
 - One cell edit receives the same validation, permissions, and audit treatment as a large import.
 - Rejected edits preserve the user's draft where possible and explain how to resolve the problem.
-- Concurrent edits must not silently replace another person's changes. Return a conflict and offer a refresh or a reviewed retry.
+- Concurrent edits must not silently replace another person's changes. **Conflicts are detected per field (confirmed, v0.6):** each edit carries the expected previous value of every field it changes. Edits to different fields of the same record both succeed; a stale value for the same field returns a conflict and offers a refresh or a reviewed retry.
 - Inventory quantities are changed through inventory commands. Typing a counted quantity into a grid initiates an adjustment workflow with a reason and an expected stock version.
 - Desktop is the main workspace for catalog editing. Warehouse work (scanning, receiving, counting, moving, picking) is designed for phones first (Section 3.4).
 
@@ -288,6 +288,8 @@ Field definitions have a stable ID, label, type, validation rules, applicability
 
 Product families define the applicable fields and variant options for a category of products. A shop can use many families at once and extend them. A merchant does not need to select one industry for the whole shop.
 
+**Starter families (confirmed, v0.6):** ship four templates, Apparel, Furniture, Food, and Spare parts, that a merchant adds with one click. Adding one copies its fields and family into the shop as ordinary definitions the merchant can edit; a template is a starting point, not a fixed vertical.
+
 Validate custom fields on the server for dashboard, API, import, and MCP writes. Version definitions and preserve the interpretation of historical changes. Changing a field type requires a preview and an explicit conversion plan.
 
 Many fields are allowed, subject to visible and measured payload, indexing, and performance limits. Do not promise physically unlimited fields or create a database column for every merchant-defined attribute.
@@ -314,6 +316,7 @@ Representing a category's attributes is distinct from completing all its operati
 - Validate file size and supported content; failed uploads must not leave a completed catalog attachment.
 - Use an upload intent and finalization workflow because a file upload and a PostgreSQL transaction cannot be committed atomically together.
 - Use authorized media delivery for access that must produce a shop audit event. Public image distribution is a later explicit policy, not an accidental consequence of using a CDN.
+- **Picture access logging (confirmed, v0.6, C08):** each list or detail request that returns pictures records one access event naming the media it returned. The thumbnail and display images are fetched through short-lived signed URLs issued by that request, without a separate event per image. Each download of an original file is its own audit event.
 - Thumbnail generation and image processing are background work with their own measured resource budget.
 
 ### 4.6 Pack sizes and units of measure
@@ -1042,7 +1045,7 @@ Do not make the entire product a single arbitrary JSON document. Flexible attrib
 
 Measure with representative shops and realistic attribute/media/history data. Initial benchmark proposal: three shops, 10,000 variants per shop, 1,000,000 audit events total, and ten simultaneous users. Logging every read means a small pilot produces 100,000 events within weeks, so the benchmark must cover at least several months of history.
 
-Phase 0 measured **732 bytes per audit event** in PostgreSQL, including its indexes ([report Section 4.6](phase-0-report.md#46-bytes-per-audit-event)). A million events therefore take about 700 MB, which leaves too little of Neon Free's storage for the rest of the benchmark. Run the full benchmark in a separate Neon project or a temporary paid tier, then delete it.
+Phase 0 measured **732 bytes per audit event** in PostgreSQL, including its indexes ([report Section 4.6](phase-0-report.md#46-bytes-per-audit-event)). A million events therefore take about 700 MB, which leaves too little of Neon Free's storage for the rest of the benchmark. Run the full benchmark in a temporary separate Neon project, then delete it. Moving staging to a paid Neon plan (Launch) happens only when a benchmark or the pilot actually needs it, and only after asking the owner at that time (confirmed, v0.6).
 
 Target the 95th percentile of ordinary warm list/search responses below one second at the server for a page of fifty records, and ordinary stock commands below two seconds. Report cold-start behavior separately and include end-to-end user latency in the test results. These are proposed targets, not measured capacity or an SLA.
 
@@ -1330,7 +1333,7 @@ These decisions do not prevent drafting or building the foundation. Resolve them
 | Warehouse commercial functions | Record provider and contract/rate information first. | Advertising automated warehouse billing. |
 | Pricing and merchant billing | Ceiling fixed at one tenth of Sortly's list price: $4.90, $14.90, and $29.90 (C19, Section 14.4). Open: plan limits, and Shopify billing vs Stripe annual billing. | Charging customers. |
 | Shopify field ownership | Platform owns stock; Shopify owns orders; storefront content per field, default Shopify (Section 8.5). | Shopify connector implementation. |
-| Production budget and recovery objectives | Free development, measured pilot, upgrades before quotas affect live stock. | Live inventory dependence. |
+| Production budget and recovery objectives | Free development, measured pilot, upgrades before quotas affect live stock. Each paid upgrade during development, such as Neon Launch for a benchmark, only when needed and approved by the owner at the time (v0.6). | Live inventory dependence. |
 | Postgres query library | Use a small library with explicit transaction control after the integration spike. | Main data-access implementation. |
 | Connectors after Shopify | Select from real workflows; API availability alone is not synchronization. | Connector development beyond Shopify. |
 
@@ -1381,3 +1384,4 @@ These primary sources support the vendor behavior and architecture constraints d
 | 0.3 | 14 November 2026 | Added competitor must-haves C22–C32 to V0: mobile scanning (3.4), reports with scheduled email (3.5), location-scoped permissions (2.4), labels (4.7), bundles (4.8), duplicate detection (4.9), lots/expiry/serials moved into V0 (6.7), purchase orders (6.8), reorder points and alerts (6.9), picking (6.10), moving average valuation (6.11). Acceptance scenarios A32–A43. |
 | 0.4 | 14 November 2026 | Owner confirmed the V0 limits: bundles without their own stock (kits later), shop-currency purchase orders, one average cost per variant per shop, reorder rules per warehouse, an installable web app without offline mode, picking that does not create Shopify fulfillments, report emails with a link only, and duplicate acknowledgment for API/MCP creates. Price benchmark confirmed as Sortly's list price ($4.90 entry ceiling). |
 | 0.5 | 14 November 2026 | Phase 0 findings P1–P15 ([report Section 7](phase-0-report.md#7-proposed-prd-v05-changes)). Shopify: compare-and-set push where only an unexplained difference is a conflict (8.5); expiring offline tokens (8.5); one shop per store at a time and protected customer data approval before going public (8.5); bundles wording (8.5). Audit: authentication before the audit queue (7.3, 10.3); one queue message per read (7.3, 14.2); UUIDv7 event IDs, monthly partitions on creation time, `UNIQUE (occurred_at, event_id)` (7.3, 7.4); 732 bytes per event and a separate project for the 1-million-event benchmark (12.3, 14.1). MCP: WorkOS AuthKit with standalone Connect and the platform's consent creating the grant (1.3, 9.4, 10.2); unbound grants expire after 10 minutes (9.4). Runtime: waited-on work runs in the request next to the database, with queues as the retry path (10.2, 10.3, 10.5); sweeps every 30 minutes (6.3, 10.2, 14.2); rate limits and batched access events before launch (7.3, 8.3, 9.2, 14.2). Neon in `aws-eu-central-1` (12.4). Email: Resend for the pilot, US data storage noted against C20 (12.4, 14.1, 14.2, 17). |
+| 0.6 | 14 November 2026 | Owner answers for Phase 1 ([Phase 1 build plan](phase-1-build-plan.md), Section 4.2): edit conflicts detected per field (3.3); four starter family templates (4.3); one access event per list or detail request naming its pictures, and one per original download (4.5); paid Neon upgrades only when needed and approved by the owner at the time (12.3, 17). |

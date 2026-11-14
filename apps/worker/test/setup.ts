@@ -112,32 +112,39 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
   const app = createApp({
     // The shared pool outlives requests in tests; the Worker closes its per-request handle.
     // Statements are counted here (plus BEGIN and COMMIT) to mirror PgDatabase's hook.
-    database: (hooks) => ({
-      async transaction(ctx, fn) {
-        const started = performance.now();
-        let statements = 2;
-        try {
-          return await db.transaction(ctx, (tx) =>
-            fn({
-              query: (sql, params) => {
-                statements++;
-                return tx.query(sql, params);
-              },
-              get statements() {
-                return statements;
-              },
-            }),
-          );
-        } finally {
-          hooks?.onTransactionEnd?.({
-            statements,
-            durationMs: performance.now() - started,
-            outcome: 'committed',
-          });
-        }
-      },
-      close: async () => {},
-    }),
+    // Like the Worker's handle, it cannot be used after the request closed it.
+    database: (hooks) => {
+      let closed = false;
+      return {
+        async transaction(ctx, fn) {
+          if (closed) throw new Error('Database handle used after the request closed it.');
+          const started = performance.now();
+          let statements = 2;
+          try {
+            return await db.transaction(ctx, (tx) =>
+              fn({
+                query: (sql, params) => {
+                  statements++;
+                  return tx.query(sql, params);
+                },
+                get statements() {
+                  return statements;
+                },
+              }),
+            );
+          } finally {
+            hooks?.onTransactionEnd?.({
+              statements,
+              durationMs: performance.now() - started,
+              outcome: 'committed',
+            });
+          }
+        },
+        close: async () => {
+          closed = true;
+        },
+      };
+    },
     audit: sink,
     mcp,
     web,

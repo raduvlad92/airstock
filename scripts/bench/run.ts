@@ -46,7 +46,8 @@ interface Sample {
 
 function parseServerTiming(header: string | null) {
   const out: Record<string, { dur: number; desc: string }> = {};
-  for (const part of (header ?? '').split(',')) {
+  // Split between metrics only: descriptions contain commas themselves.
+  for (const part of (header ?? '').split(/,\s*(?=[a-z]+;)/)) {
     const [name, ...params] = part.trim().split(';');
     if (!name) continue;
     const dur = Number(/dur=([\d.]+)/.exec(params.join(';'))?.[1] ?? Number.NaN);
@@ -72,11 +73,10 @@ async function timed(op: string, url: string, init: RequestInit): Promise<[Sampl
   const res = await fetch(url, init);
   const body = await res.clone().text();
   const clientMs = performance.now() - started;
-  if (!res.ok) console.error(`${op} ${res.status} ${body.slice(0, 200)}`);
-  return [
-    { op, status: res.status, clientMs, ...parseServerTiming(res.headers.get('server-timing')) },
-    res,
-  ];
+  // MCP reports a failed tool call inside a 200 response.
+  const status = res.ok && body.includes('"isError":true') ? 599 : res.status;
+  if (status >= 400) console.error(`${op} ${status} ${body.slice(0, 200)}`);
+  return [{ op, status, clientMs, ...parseServerTiming(res.headers.get('server-timing')) }, res];
 }
 
 const headers = (extra: Record<string, string> = {}) => ({

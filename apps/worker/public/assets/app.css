@@ -114,6 +114,7 @@ input[name="name"],
 input[name="currency"],
 input[name="timezone"],
 input[name="shop"],
+input[name="email"],
 select {
   display: block;
   width: 100%;

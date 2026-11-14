@@ -1,17 +1,20 @@
 import {
   AppError,
+  acceptInvitation,
   CONNECTION_SCOPES,
   type ConnectionScope,
   ensureUser,
   execute,
   ops,
   sessionCaller,
+  viewInvitation,
 } from '@airstock/core';
 import type { Context, Hono } from 'hono';
 import type { AppDeps, AppEnv } from './app.ts';
 import {
   connectPage,
   dashboardPage,
+  invitationPage,
   landingPage,
   magicCodePage,
   messagePage,
@@ -254,6 +257,72 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     const session = await readSession(c, config);
     if (!session) return redirect(`/auth/login?return_to=${encodeURIComponent('/app')}`, [], 302);
     return dashboardPage({ email: session.email, mcpUrl: new URL('/mcp', config.publicUrl).href });
+  });
+
+  // Member invitations (plan M4). The link carries no secret: the invitation is accepted only by
+  // a user signed in with the invited, provider-verified email address.
+  app.get('/invitations/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!UUID.test(id))
+      return messagePage('Invitation not found', 'Check the link in your email.', 404);
+    const session = await readSession(c, config);
+    if (!session) {
+      return redirect(`/auth/login?return_to=${encodeURIComponent(`/invitations/${id}`)}`, [], 302);
+    }
+    const view = await viewInvitation(c.get('db'), id, {
+      userId: session.uid,
+      email: session.email,
+    });
+    if (!view) return messagePage('Invitation not found', 'Check the link in your email.', 404);
+    if (!view.forThisUser) {
+      return messagePage(
+        'Different email address',
+        `This invitation was sent to another address. You are signed in as ${session.email}; sign out and sign in with the invited address.`,
+        403,
+      );
+    }
+    if (view.state !== 'pending') {
+      return messagePage(
+        'Invitation closed',
+        view.state === 'accepted'
+          ? 'This invitation was already accepted. Open the dashboard to see the shop.'
+          : 'This invitation is no longer open. Ask the shop for a new one.',
+        409,
+      );
+    }
+    return invitationPage({
+      invitationId: id,
+      shopName: view.shopName,
+      role: view.role,
+      email: session.email,
+      csrf: await mac(config.sessionSecret, 'invitation', `${session.uid}:${id}`),
+    });
+  });
+
+  app.post('/invitations/:id/accept', async (c) => {
+    const id = c.req.param('id');
+    const session = await readSession(c, config);
+    if (!UUID.test(id) || !session || !sameOrigin(c, config)) {
+      return messagePage('Request blocked', 'Open the invitation link again.', 403);
+    }
+    const expected = await mac(config.sessionSecret, 'invitation', `${session.uid}:${id}`);
+    if (!constantTimeEqual(expected, formString(await c.req.parseBody(), 'csrf'))) {
+      return messagePage('Request blocked', 'Open the invitation link again.', 403);
+    }
+    try {
+      await acceptInvitation(c.get('db'), {
+        invitationId: id,
+        userId: session.uid,
+        email: session.email,
+        requestId: c.get('requestId'),
+      });
+    } catch (error) {
+      if (error instanceof AppError && error.status < 500) {
+        return messagePage('Invitation not accepted', error.message, error.status);
+      }
+      throw error;
+    }
+    return redirect('/app?joined=1');
   });
 
   // Standalone Connect (plan Section 7.2, option A): AuthKit sends the MCP client's

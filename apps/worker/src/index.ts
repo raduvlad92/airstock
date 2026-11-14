@@ -7,6 +7,7 @@ import {
   ingestAuditEvents,
   type Logger,
   type OutboxMessage,
+  sendInvitationEmail,
   sweepExpiredReservations,
   systemCaller,
   uuidv7,
@@ -23,6 +24,7 @@ import {
   TokenCipher,
 } from '@airstock/shopify';
 import { createApp } from './app.ts';
+import { resendSender } from './email.ts';
 import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
 import { requestScopedSource } from './request-db.ts';
@@ -163,6 +165,23 @@ export default {
             const outcome = await runJob(deps, body.job.shopId, body.job.jobId);
             if (outcome.status === 'retry') message.retry({ delaySeconds: outcome.delaySeconds });
             else message.ack();
+          } else if (body.topic === 'email.member_invitation') {
+            if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
+              logger.error('email_not_configured', { topic: body.topic });
+              message.retry({ delaySeconds: 600 });
+              continue;
+            }
+            await sendInvitationEmail(
+              {
+                db,
+                audit: queueSink(env),
+                email: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
+                publicUrl: env.PUBLIC_URL,
+              },
+              body.shopId,
+              (body.payload as { invitationId: string }).invitationId,
+            );
+            message.ack();
           } else if (body.topic === 'inventory.availability_changed') {
             // The Shopify availability push (plan Section 8.2, step 5).
             if (deps) {

@@ -2,7 +2,7 @@
 
 ## Product requirements, operating behavior, and architecture
 
-**Version:** 0.4 — review draft with owner decisions  
+**Version:** 0.5 — review draft with Phase 0 findings  
 **Date:** 14 November 2026  
 **Audience:** Product owner, designers, developers, and future implementation agents  
 **Product name:** To be decided  
@@ -18,7 +18,7 @@ This document combines the PRD and the detailed operating specification. Keeping
 - **Proposed default:** A concrete recommendation that makes the draft implementable; it is not presented as an instruction already given by the owner.
 - **Open:** A decision that remains genuinely unresolved. Repository visibility is not open.
 
-Requirements describe intended behavior, not functionality already implemented. Prices and vendor allowances are reference information checked on the date above, not permanent guarantees.
+Requirements describe intended behavior. Where Phase 0 built or measured something, the text says so and points to the [Phase 0 report](phase-0-report.md); everything else is not yet implemented. Prices and vendor allowances are reference information checked on the date above, not permanent guarantees.
 
 ## Contents
 
@@ -92,7 +92,7 @@ C22–C32 come from a review of Sortly, inFlow, and Zoho Inventory (14 November 
 
 ### 1.3 Selected direction
 
-- WorkOS AuthKit for application sign-in and WorkOS Connect for MCP authorization.
+- WorkOS AuthKit for application sign-in and as the OAuth authorization server for MCP clients. MCP consent uses WorkOS standalone Connect: the platform's own consent page chooses the shop and access and creates the connection grant, and WorkOS issues tokens carrying the grant's ID (Section 9.4, [ADR 0007](adr/0007-mcp-connection-binding.md)).
 - Google, Microsoft, and email sign-in for the initial experience.
 - Cloudflare for hosting, R2 file storage, and standard DDoS protection.
 - PostgreSQL hosted through Neon for the main database.
@@ -454,7 +454,7 @@ Opening stock follows the same rules and is labeled as an opening adjustment or 
 - Expiry and fulfillment can race; exactly one valid transition wins for the relevant quantity.
 - Fulfillment reduces physical stock and the corresponding reserved quantity in the same transaction.
 - Cancellation or expiry releases the claim without creating a physical stock movement.
-- A late background expiry job must not keep already-expired stock unavailable. Commands account for expiration when calculating availability and reconcile state safely.
+- A late background expiry job must not keep already-expired stock unavailable. Commands account for expiration when calculating availability and reconcile state safely. The expiry sweep runs every 30 minutes, not every minute, so the database can scale to zero (Section 14.2); correctness never depends on it running on time.
 
 ### 6.4 Transfer between locations or warehouses
 
@@ -585,7 +585,7 @@ The requirement is complete application activity logging, including minimal acti
 | Reports | Report runs, saved-report changes, schedules, and each emailed report. |
 | Reads and exports | Product view, list request, search, filter application, stock lookup, media access, history access, export request, and download. |
 | Interface actions | Shop switch, saved-view selection, sort change, column visibility change, and operation cancellation. |
-| Access and configuration | Login, logout, failed authentication, invitation, role change, API credential lifecycle, OAuth consent, connection revocation, and webhook configuration. |
+| Access and configuration | Login, logout, failed sign-in (from the identity provider's verified events, Section 7.3), invitation, role change, API credential lifecycle, OAuth consent, connection revocation, and webhook configuration. |
 | Automation | Scheduled processing, imports, job retries, reconciliation, webhook delivery outcomes, and MCP calls. |
 | Administration | Shop inspection, support access, administrative changes, and changes to the administrator's own access. |
 | Unsuccessful actions | Validation rejection, conflict, denied access, no-op update, duplicate command replay, and failed operation. |
@@ -615,16 +615,23 @@ Never store credentials or unrestricted request bodies as audit context. Do not 
 
 Mutations and reads use different durability paths. Both are durable before the caller gets a result; only mutations write to PostgreSQL synchronously.
 
+**Authentication first (confirmed by the owner)**
+
+- Only authenticated callers are served. Authentication runs before anything else: a request without a valid session, API credential, MCP token, or webhook signature gets 401 before anything is sent to the audit queue, and it is not a shop audit event. Otherwise anonymous traffic would cost queue operations and make running up the bill cheap. Built in Phase 0, including Shopify webhooks: a bad signature is a 401 before anything is recorded or queued.
+- Failed sign-ins are recorded by the identity provider and reach the history through its verified events (below). Successful sign-ins and sign-outs are platform events.
+- A Cloudflare rate-limiting rule in front of the Worker bounds the cost of unauthenticated traffic.
+
 **Mutations**
 
-- Before executing a mutation, send a minimal attempt event to the audit queue (Cloudflare Queues) and wait for the queue to acknowledge it. Authentication and context resolution then add verified actor/shop linkage as needed; unverified client identifiers must not be treated as authorized context. Background operations use the same attempt/outcome pattern.
+- After authorization and input validation, and before executing a mutation, send a minimal attempt event to the audit queue (Cloudflare Queues) and wait for the queue to acknowledge it. A denied or invalid request sends one outcome event instead. Unverified client identifiers must not be treated as authorized context. Background operations use the same attempt/outcome pattern.
 - The attempt record sits outside the business transaction. A stable attempt ID links it to the eventual transactional success event or independent failure event.
 - Successful mutations and their change events commit in the same PostgreSQL transaction.
 - Failed or rolled-back mutations need a separate failure event, sent to the audit queue. An event rolled back with the mutation is not enough.
 
 **Reads and access events**
 
-- Before returning protected data, the Worker sends the request's access event to the audit queue and waits for the acknowledgment. If the send fails, the read fails. This keeps the rule that no protected data is returned without a durable record, without a PostgreSQL write per read.
+- Before returning protected data, the Worker sends **one queue message per read**, carrying the read's outcome (its access event), and waits for the acknowledgment. A read has no separate attempt event, because two messages would double its queue cost. If the send fails, the read fails. This keeps the rule that no protected data is returned without a durable record, without a PostgreSQL write per read. Built in Phase 0.
+- **Before launch:** batch the access events of API and MCP clients, several per queue message, without weakening the rule above. At three queue operations per message, an integration polling once a second would otherwise cost about $3 a month on its own (Section 14.2).
 - A queue consumer writes audit events to PostgreSQL in batches (one multi-row insert per batch), deduplicated by event ID.
 - Client-reported interface events arrive in batches (Section 7.1) and follow the same queue path.
 
@@ -632,13 +639,13 @@ Mutations and reads use different durability paths. Both are durable before the 
 
 - If PostgreSQL is unavailable, protected reads and mutations fail. Their attempt and failure events are still accepted by the audit queue. Queue retention, configurable up to 14 days on the paid plan, bounds how long an outage the log can cover. An outage longer than that is a documented gap until the R2 spool exists.
 - **Deferred until after the pilot (owner decision):** a private R2 audit spool as a second durable fallback, with a scheduled reconciler that replays unprocessed spool objects independently of queue retention.
-- Queue delivery is at least once; event IDs deduplicate retries. A queue acknowledgment does not mean the event is already searchable in PostgreSQL. Show ingestion delay and degraded operation explicitly in the activity views.
+- Queue delivery is at least once. Event IDs are UUIDv7, and an event's ID and timestamp are both fixed when it is created, not when it is ingested. PostgreSQL requires a unique constraint on a partitioned table to include the partition key, so history is partitioned on that creation time and redelivery is deduplicated by `UNIQUE (occurred_at, event_id)`. Built in Phase 0. A queue acknowledgment does not mean the event is already searchable in PostgreSQL. Show ingestion delay and degraded operation explicitly in the activity views.
 - Reconcile started attempts without terminal events against committed operation/idempotency records after a crash. Do not call an operation failed merely because the client did not receive a response.
 - If commit acknowledgement is lost, expose an outcome-unknown result and require a retry with the original idempotency key. Append a reconciliation event when the outcome is established; do not overwrite earlier evidence.
 - Provider login and authorization events arrive through verified provider events and are reconciled when delivery is delayed.
 - Browser actions that have not been durably acknowledged must be shown as pending or failed delivery; the system cannot claim completeness for an offline or crashed browser.
 - A simultaneous loss of every durable store cannot be described as lossless logging. Production readiness includes an explicit outage contract and recovery test.
-- Reading the activity timeline generates the normal bounded attempt/access outcome events for that request. Writing or processing audit events does not recursively create infinite audit events.
+- Reading the activity timeline generates the normal single access event for that request. Writing or processing audit events does not recursively create infinite audit events.
 
 ### 7.4 Views and integrity
 
@@ -649,6 +656,7 @@ Mutations and reads use different durability paths. Both are durable before the 
 - Application roles cannot edit or delete individual events. Reversals and corrections create new entries.
 - Application-level append-only controls do not mean a privileged database operator is physically incapable of alteration. Independent archive manifests and storage retention controls strengthen tamper evidence.
 - Proposed retention default: no silent expiry. The owner must select a published policy before automatically deleting or expiring any history.
+- History is partitioned by month on each event's creation time (Section 7.3), so archiving detaches whole months without rewriting rows.
 - Archive partitions older than a hot window (proposed: 90 days) to R2 as compressed files, keeping a searchable index and an authorized retrieval/export path. This is a V0 requirement, not something to add later as volume grows: logging every read makes history the largest per-shop storage cost, and the price target (Section 14.4) depends on keeping it out of PostgreSQL. Archived history must remain discoverable to owners and admins.
 - Retention, privacy redaction, and recovery are separate policies; none may silently change the promise of complete history.
 
@@ -694,7 +702,7 @@ These are contract sketches, not a frozen endpoint specification. Lifecycle tran
 - Bind each key to its shop, caller/connection, operation, and normalized request hash. Reusing a key for a different command is rejected.
 - A replay returns the original successful result without repeating the effect, while logging the replay attempt.
 - Atomicity for one inventory command. Large batches use explicit per-item outcomes and checkpoints rather than an implied unlimited all-or-nothing transaction.
-- Document API limits and expose relevant usage in the shop settings.
+- Document API limits and expose relevant usage in the shop settings. Rate-limit each API credential before launch (Section 14.2).
 - Use short-lived user tokens for interactive access and scoped, revocable credentials for integrations. Store only appropriate credential hashes or protected provider identifiers.
 
 ### 8.4 Imports, exports, and webhooks
@@ -713,21 +721,23 @@ Confirmed requirement C16. Shopify is where most pilot merchants sell, so V0 inv
 
 **Installation and access**
 
-- Distributed as a Shopify app. Use OAuth installation with offline access tokens stored encrypted, the GraphQL Admin API, and the narrowest scopes that work (products, inventory, locations, orders, fulfillments, returns).
+- Distributed as a Shopify app. Use OAuth installation, the GraphQL Admin API, and the narrowest scopes that work (products, inventory, locations, orders, fulfillments, returns).
+- Use **expiring offline tokens**: a one-hour access token and a 90-day refresh token, stored encrypted and rotated once even when several jobs refresh at the same time. Shopify requires them for public apps from 2027, so the connector starts with them. Built in Phase 0 ([ADR 0008](adr/0008-shopify-sync.md)).
 - The pilot can start as a custom or unlisted app. Publishing on the Shopify App Store requires Shopify's review, its mandatory privacy webhooks (customer data request, customer redact, shop redact), and charging merchants through Shopify's billing. Recheck these requirements before submission.
-- A Shopify connection belongs to exactly one shop. Store the minimum customer data needed: order and line references, not customer names or addresses.
+- Before the app is public, Shopify must approve its access to protected customer data, which order webhooks contain. Development stores do not ask for this approval, so Phase 0 did not need it.
+- A Shopify store is active in **one shop at a time**, enforced in the database, so its webhooks have exactly one destination. Store the minimum customer data needed: order and line references, not customer names or addresses.
 
 **Onboarding**
 
 - Import products, variants, SKUs, barcodes, images, and current quantities from Shopify as a resumable job using Shopify's bulk operations. The import uses the normal catalog commands and inventory engine (opening stock), with full history.
 - Map each Shopify location to a warehouse or location here. Unmapped Shopify locations are shown and never guessed.
-- Map each Shopify variant to a variant here, optionally through a sales pack (Section 4.6) or, once supported, a bundle.
+- Map each Shopify variant to a variant here, optionally through a sales pack (Section 4.6) or a bundle (Section 4.8).
 
 **Ownership rules (proposed defaults)**
 
 | Data | Owner after onboarding | Behavior |
 | --- | --- | --- |
-| Stock quantities | This platform | Push availability per mapped location to Shopify after each committed change, through the outbox. Shopify-side quantity edits are detected and shown as conflicts, not silently accepted. |
+| Stock quantities | This platform | Push availability per mapped location to Shopify after each committed change, through the outbox, with compare-and-set (see Reliability). A Shopify-side quantity edit that no order explains is shown as a conflict, not silently accepted. |
 | Orders, payments, customers | Shopify | Read only. This platform stores references, not a copy of the order system. |
 | Storefront content (title, description, storefront price, storefront images) | Per-field setting, default Shopify | Changes made in Shopify arrive by webhook and are logged as connector changes. |
 | Extended attributes, custom fields, packs, warehouse data | This platform | Not pushed to Shopify unless a field mapping is configured. |
@@ -750,7 +760,8 @@ Confirmed requirement C16. Shopify is where most pilot merchants sell, so V0 inv
 - Verify every webhook's HMAC signature. Deduplicate by Shopify's webhook/event ID. Process through durable job records and idempotent commands.
 - Webhooks can be delayed or missed. A scheduled reconciler polls recent orders, fulfillments, and refunds, and compares pushed quantities with Shopify's levels.
 - Respect Shopify's cost-based GraphQL rate limits with backoff. Use bulk operations for imports.
-- Where Shopify's API supports compare-and-set inventory updates, use them, so a quantity changed in Shopify since the last push is detected rather than overwritten.
+- **Compare-and-set push.** Send what this platform believes Shopify's quantity is with each write (`changeFromQuantity`), so a quantity changed in Shopify since the last push is detected rather than overwritten.
+- **Mismatch handling.** Shopify lowers its own available quantity when it accepts an order, so a refused write often means an order this platform has not processed yet, not a merchant's edit. On a refused write, fetch recent orders, process any not seen yet, recompute, and retry. Only a difference that no order explains is a conflict: record the expected, platform, and Shopify quantities and leave Shopify untouched. Proven on two development stores in Phase 0 ([report Section 3](phase-0-report.md#3-shopify-on-staging-e7), [ADR 0008](adr/0008-shopify-sync.md)).
 - Every connector action is a normal audit event with source "Shopify connector", the connection identity, and the Shopify event ID.
 - Show sync health per shop: last successful sync, pending pushes, unmapped variants or locations, shortages, and conflicts. Expose the same through MCP.
 
@@ -761,8 +772,8 @@ Confirmed requirement C16. Shopify is where most pilot merchants sell, so V0 inv
 Target experience:
 
 1. Find and install the platform's ChatGPT plugin, or add its custom MCP connection during the pilot.
-2. Sign in through WorkOS.
-3. Choose the shop and approve the requested access.
+2. Sign in to the platform with Google, Microsoft, or an emailed code.
+3. Choose the shop and the access to grant on the platform's consent page, then confirm on WorkOS's screen.
 4. Ask questions or request authorized operations in ordinary language.
 5. Inspect the same results and history in the dashboard.
 6. Review and revoke the connection from the platform.
@@ -791,6 +802,7 @@ These examples describe tool-backed workflows. They do not require the platform 
 - Keep tool descriptions concise, with pagination, field selection, and useful errors.
 - Provide tools for field discovery and enabled capabilities so agents can understand each shop's custom schema.
 - Use a stable set of tools that accepts field identifiers; do not create a separate tool for every custom field or SKU.
+- Rate-limit each MCP connection before launch, as each API credential is (Section 8.3). Every call costs queue operations and database time (Section 14.2).
 
 ### 9.3 Tool families and parity
 
@@ -821,12 +833,15 @@ Parity is checked at the capability level. A CI check asserts that every registr
 
 ### 9.4 OAuth and tenant authorization
 
-- WorkOS Connect supplies OAuth authorization, consent, token issuance, and supported client discovery.
+- **WorkOS AuthKit is the OAuth authorization server**: client registration (including Client ID Metadata Documents, which ChatGPT uses), token issuance, and refresh. Consent uses WorkOS **standalone Connect**: WorkOS sends the user to the platform's consent page, where they sign in and choose the shop and access, and the platform creates a connection grant through an audited command. The platform then completes the authorization with the grant's ID, which WorkOS writes into a claim of every token, including refreshed ones. Built in Phase 0 and confirmed with ChatGPT on staging ([ADR 0007](adr/0007-mcp-connection-binding.md)).
 - The platform owns the shop chooser, membership mapping, permission descriptions, and application grant enforcement. WorkOS does not automatically know which internal shop a user should access.
-- The MCP server publishes protected-resource metadata and validates issuer, audience, expiry, granted scope, and current application permissions.
+- The MCP server publishes protected-resource metadata and validates issuer, audience, expiry, the grant's scopes, and current application permissions.
+- **Access lives in the grant, not in OAuth scopes.** WorkOS issues only `openid`, `profile`, `email`, and `offline_access`. What a connection may do is the set of connection scopes stored in its grant, read on every request.
 - Support the client identification method required by the actual target ChatGPT connection; prefer current metadata-based discovery when supported.
 - Bind consent to an authorized shop. A tool argument naming a shop must never authorize access by itself.
-- Resolve and test WorkOS's organization-scoped consent/token behavior in the first integration spike. Map provider user and organization identities to the application's canonical memberships and connection grants.
+- **Binding on first use.** At consent, neither the OAuth client nor the token subject is known yet. The first MCP request whose verified token carries the grant binds both, and every later request must present the same client and subject. Only the platform chooses which grant ID goes into a token, and only for the signed-in user who approved it, so a grant cannot be attached to anyone else.
+- **Unbound grants expire.** If the person abandons WorkOS's consent screen, no client receives a code and the grant is never bound. A grant that no token has bound within 10 minutes of consent can no longer be bound or used; it is listed and recorded as expired. Built after one such grant was seen on staging.
+- Map the provider's user identity to the platform's user and memberships.
 - Do not infer shop access solely from an email domain or the dashboard's current active shop.
 - A connection grants the intersection of its approved capabilities and the user's current permissions.
 - Revocation in the application must stop subsequent tool use promptly. Local JWT verification alone can continue to accept an issued token until expiry, so enforce the application's connection state or an appropriate online check.
@@ -895,19 +910,19 @@ flowchart TD
 | API | Hono | Versioned routes, request context, authentication, and transport errors. |
 | Validation and API description | Zod + Hono OpenAPI integration | Shared validation definitions and published API contracts. |
 | MCP | Official TypeScript SDK v2 + Cloudflare stateless serving helper | Remote tools, schemas, and request-local authorized context. |
-| Application identity | WorkOS AuthKit | Google, Microsoft, and email sign-in, user and organization identities. |
-| Delegated access | WorkOS Connect | OAuth linking for MCP and supported external clients. |
+| Application identity | WorkOS AuthKit | Google, Microsoft, and emailed-code sign-in, called from the platform's own sign-in page, because standalone Connect sends every hosted AuthKit sign-in page to the platform ([ADR 0007](adr/0007-mcp-connection-binding.md)). No passwords. |
+| Delegated access | WorkOS AuthKit as the OAuth authorization server, with standalone Connect | OAuth for MCP clients; the platform's consent page creates the shop-bound connection grant (Section 9.4). |
 | Runtime plan | Cloudflare Workers Paid (confirmed, already subscribed) | Removes the free plan's 10 ms CPU limit and its daily request and Hyperdrive query caps. |
 | Main database | PostgreSQL hosted through Neon, in an EU region | Catalog relationships, inventory transactions, permissions, audit history, jobs, and outbox. |
-| Database connection | Cloudflare Hyperdrive + a supported PostgreSQL driver | Worker connection management. Run the Worker close to the Neon region (Smart Placement or a placement hint), because each SQL statement in a transaction is a network round trip. |
+| Database connection | Cloudflare Hyperdrive + a supported PostgreSQL driver | Worker connection management. Run the Worker close to the Neon region, because each SQL statement in a transaction is a network round trip. Smart Placement measured 4–8 ms per statement in Phase 0. Placement moves fetch handlers only (Section 10.5). |
 | Operation registry | Typed registry of business operations (selected) | Single source for REST routes, OpenAPI, MCP tool composition, permissions, and audit names. |
 | Sales-channel connector | Shopify app (confirmed for V0) | Order-driven reservations and fulfillments, stock push, catalog import. Section 8.5. |
 | SQL/data access | Thin typed repositories or a PostgreSQL-focused query builder, proposed | Keep explicit transaction control; choose the specific library during the technical spike. |
 | Binary storage | Cloudflare R2, EU jurisdiction buckets | Product media, attachments, exports, and audit archives. |
-| Background delivery | Cloudflare Queues + durable database job/outbox records | Imports, exports, thumbnails, retries, webhook delivery, Shopify sync, and reconciliation. |
+| Background delivery | Durable database job/outbox records + Cloudflare Queues as the retry path | Imports, exports, thumbnails, retries, webhook delivery, Shopify sync, and reconciliation. Work a merchant waits on runs in the request, after the response (Section 10.5). |
 | Audit intake | Dedicated Cloudflare Queue + batch consumer | Durable acceptance of attempt, access, and failure events before a result is returned; batched writes to PostgreSQL (Section 7.3). |
 | Audit fallback | Separate private R2 spool + replay, deferred until after the pilot | Durable attempt/failure evidence for PostgreSQL outages longer than queue retention. |
-| Scheduled processing | Worker scheduled triggers, proposed | Reservation expiry, outbox dispatch, reconciliation, and maintenance. |
+| Scheduled processing | Worker scheduled triggers, every 30 minutes | Safety-net sweeps: reservation expiry, unbound connection grants, lost job messages, undelivered outbox events, and reconciliation; daily maintenance. Not every minute, so the database can scale to zero (Section 14.2). |
 | Code hosting and CI | Public GitHub repository + standard GitHub-hosted runners | Source control and economical automated checks. |
 
 The frontend and data-access library are recommendations, not previously confirmed product-owner choices. No framework choice may weaken transactional correctness or increase cost without a clear reason.
@@ -916,16 +931,16 @@ The frontend and data-access library are recommendations, not previously confirm
 
 For a successful mutation:
 
-1. Assign request/attempt IDs and send a minimal attempt event to the audit queue before execution (Section 7.3).
-2. Authenticate the caller, resolve actor/shop/connection context, and append verified attribution when needed.
-3. Check current membership, capability scopes, and record visibility.
-4. Validate the input, expected version, and idempotency key.
+1. Authenticate the caller: session, API credential, MCP token and its connection grant, or webhook signature. A request that fails gets 401 here, before anything is sent to the audit queue (Section 7.3).
+2. Resolve actor, shop, and connection context, and check current membership, capability scopes, and record visibility. A denial sends one outcome event to the audit queue.
+3. Validate the input, expected version, and idempotency key. An invalid request sends one outcome event.
+4. Assign request and attempt IDs, send a minimal attempt event to the audit queue, and wait for the acknowledgment (Section 7.3).
 5. Start a database transaction and acquire the necessary stock or record locks.
 6. Validate business invariants using fresh authoritative data.
 7. Apply domain changes and current-balance projection changes.
 8. Append the linked business audit event, idempotency result, and any outbox messages.
 9. Commit and return the result with operation and correlation IDs.
-10. Dispatch external side effects from the outbox after commit.
+10. Right after the response, in the same request and next to the database, deliver the outbox messages and run any jobs the command created. The queue and the scheduled sweep retry whatever fails (Section 10.5).
 
 The API and MCP adapters both call this command path. Failed attempts and ambiguous commit acknowledgments follow the independent outcome and reconciliation path in Section 7. An uncaught termination leaves an already-durable attempt for the reconciler to inspect.
 
@@ -946,6 +961,8 @@ Disable Hyperdrive query caching on inventory, authorization, and other reads th
 ### 10.5 Jobs and external effects
 
 - Persist job state and outbox rows before queue delivery.
+- **Work a merchant waits on runs in the request, after the response, next to the database.** A Shopify order job runs right after the webhook is acknowledged, and a command delivers its outbox events right after it returns. Cloudflare Queues is the retry path, not the first delivery: in Phase 0 queue delivery added 1.5–4.6 s, and running order jobs in the request cut webhook-to-reservation from a median of 4.6 s to 0.26 s.
+- **Queue consumers are not placed near the database.** Placement moves only fetch handlers, and a consumer measured about 150 ms per round trip to Neon. A consumer hands its batch to the Worker's own fetch handler through a service binding, so database-heavy work still runs next to the database.
 - Treat queues as delivery mechanisms; a temporary queue retention limit must not erase the only record of an unfinished import or webhook.
 - Workers may retry or deliver a message more than once. Consumers use durable checkpoints and idempotent commands.
 - Keep batches small enough for the actual Worker processing limits.
@@ -1025,6 +1042,8 @@ Do not make the entire product a single arbitrary JSON document. Flexible attrib
 
 Measure with representative shops and realistic attribute/media/history data. Initial benchmark proposal: three shops, 10,000 variants per shop, 1,000,000 audit events total, and ten simultaneous users. Logging every read means a small pilot produces 100,000 events within weeks, so the benchmark must cover at least several months of history.
 
+Phase 0 measured **732 bytes per audit event** in PostgreSQL, including its indexes ([report Section 4.6](phase-0-report.md#46-bytes-per-audit-event)). A million events therefore take about 700 MB, which leaves too little of Neon Free's storage for the rest of the benchmark. Run the full benchmark in a separate Neon project or a temporary paid tier, then delete it.
+
 Target the 95th percentile of ordinary warm list/search responses below one second at the server for a page of fifty records, and ordinary stock commands below two seconds. Report cold-start behavior separately and include end-to-end user latency in the test results. These are proposed targets, not measured capacity or an SLA.
 
 Use pagination and bounded filters. Keep the grid responsive without loading an entire catalog or its history into the browser.
@@ -1035,7 +1054,8 @@ The free pilot has no promised uptime SLA. Monitor failed writes, audit ingestio
 
 Confirmed requirement C20.
 
-- Create the Neon project in an EU region and the R2 buckets with EU jurisdiction. Keep staging and production in the EU as well.
+- Create the Neon project in `aws-eu-central-1` (Frankfurt) and the R2 buckets with EU jurisdiction. Neon's European regions include London, which is not in the EU. Keep staging and production in the EU as well. Staging was built this way in Phase 0.
+- The pilot's email provider, Resend, sends from Ireland but stores account data, email metadata, and logs in the US. That does not meet C20 as written. Before production, either replace it with a provider that stores email data in the EU or record the owner's acceptance (Section 17).
 - Cloudflare runs Workers at edge locations worldwide, so request processing is not confined to the EU. Do not promise EU-only processing unless a data-localization product is actually purchased and configured.
 - Cloudflare, Neon, WorkOS, and Shopify are processors or independent services. Each needs a data processing agreement and an appropriate international-transfer basis where relevant. Publish a subprocessor list.
 - The platform is a processor for merchants' data and needs a merchant-facing DPA.
@@ -1093,6 +1113,9 @@ Target $0 infrastructure charges during development and a small, measured pilot 
 | Standard Cloudflare DDoS protection | Available without a separate metered DDoS traffic charge. |
 | Public GitHub standard runners | Free runner compute; still bound storage and cache use. |
 | API and MCP code | No extra hosted API gateway or MCP hosting subscription is needed in this design. Their work consumes Worker/database/storage resources. |
+| Resend (transactional email) | Free: 3,000 emails a month, 100 a day, 3 domains. Pro: $20 a month for 50,000 emails and 10 domains, then $0.90 per 1,000. |
+
+Measured in Phase 0: one audit event takes 732 bytes in PostgreSQL, including its indexes, so storage for history grows by about 0.7 GB per million events until they are archived (Section 7.4).
 
 Vendor pricing and quotas must be rechecked before provisioning and launch. The references are linked in Section 18.
 
@@ -1106,9 +1129,11 @@ Vendor pricing and quotas must be rechecked before provisioning and launch. The 
 - Proposed alerts at 70% and 85% of relevant free allowances, with an operational decision before 100%.
 - Never drop required audit events or weaken inventory validation merely to stay under a quota.
 - Workers Paid is the baseline (C21). Usage beyond its included amounts, plus PostgreSQL, R2, and other metered services, is billed separately.
-- Every audit event, including each read, uses about three queue operations. At 1 million included operations per month, that covers roughly 300,000 audit events. Beyond that, the cost is about $1.20 per million events. Batch client-reported events (Section 7.1) so they don't multiply this.
+- Each queue message uses about three queue operations. A read sends one message, its access event (Section 7.3). A command also sends one, its attempt event, because its success event is written in the transaction. At 1 million included operations per month, that covers roughly 300,000 reads or commands. Beyond that, the cost is about $1.20 per million. Batch client-reported events (Section 7.1) so they don't multiply this.
+- **Rate limits and batched access events before launch.** Rate-limit each API credential and MCP connection (Sections 8.3 and 9.2), and batch the access events of API and MCP clients (Section 7.3). One API client polling availability every second costs about 7.8 million queue operations a month, about $3 for that shop alone, against a per-shop budget of $0.49.
+- **Let the database scale to zero.** In Phase 0 an every-minute scheduled sweep kept Neon's compute awake: about 180 CU-hours a month against the free plan's 100, which would have suspended staging mid-month. Sweeps run every 30 minutes, and commands deliver their own events (Section 10.5). A compute that has scaled to zero adds about 0.7 s to the first request after an idle period.
 - A custom product domain, production recovery needs, and email delivery configuration may introduce costs outside the initial allowance table.
-- Alerts, scheduled reports, and PO emails need a transactional email provider. Choose it in Phase 0 by cost and EU data handling, and count it in the per-shop budget (Section 14.4).
+- Transactional email (member invitations now; alerts, scheduled reports, and PO emails later) uses **Resend** for the pilot, by the owner's choice ([ADR 0009](adr/0009-transactional-email.md)), from a dedicated sending subdomain per environment. Resend Pro costs about $0.02 per shop a month at 1,000 shops. The free plan's three domains are already in use, so the staging subdomain needs Pro or a freed slot. Resend stores email data in the US (Section 12.4).
 
 The platform does not need to buy model tokens just to expose its tools to a merchant's ChatGPT. If built-in AI generation, enrichment, or chat is later added to the platform, those model calls require a separate budget.
 
@@ -1298,7 +1323,7 @@ These decisions do not prevent drafting or building the foundation. Resolve them
 | Reservation and expiry policies | Explicit allocations; optional expiry; no negative availability. | Core inventory release. |
 | Transfers and return policy details | Use the explicit states and partial-quantity rules in this draft. | Workflow implementation. |
 | Specialist tracking beyond V0 | Lots, expiry, serials, and bundles are confirmed for V0. Promote fitment or assembled kits when a pilot merchant needs them. | Declaring the affected category operationally supported. |
-| Transactional email provider | Choose in Phase 0 by cost and EU data handling. | Alerts, scheduled reports, and PO emails. |
+| Transactional email provider and sending domain | Resend for the pilot, by the owner's choice ([ADR 0009](adr/0009-transactional-email.md)), from `mail.airstock.deletecookies.dev` on staging once a Resend domain slot exists (Pro, or remove a domain). Open: whether Resend's US data storage is acceptable, or an EU-storing provider replaces it (C20, Section 12.4). | Domain: the staging send. Provider: production. |
 | Field inheritance, primary currency, and units | Defined product defaults, explicit variant overrides, exact quantities. | Schema and import contract freeze. |
 | Final role matrix and MCP write defaults | Granular permissions with explicit write consent. | Inviting live staff or connecting live AI clients. |
 | Audit retention and privacy treatment | Deferred by the owner. No silent event expiry; searchable archives; pseudonymize removed members (Section 12.4). | Onboarding live EU merchants. |
@@ -1355,3 +1380,4 @@ These primary sources support the vendor behavior and architecture constraints d
 | 0.2 | 14 November 2026 | Owner decisions: Shopify connector in V0 (8.5); full scope in V0; pack sizes (4.6); price ceiling of one tenth of Sortly (14.4); EU hosting (12.4); Workers Paid baseline. Reads logged through a durable queue and written to PostgreSQL in batches; R2 audit spool deferred until after the pilot (7.3). Operation registry generating REST and task-shaped MCP tools (9.3). TanStack grid. Allocation rule and shortage handling. Benchmark raised to 1 million audit events. Acceptance scenarios A27–A31. |
 | 0.3 | 14 November 2026 | Added competitor must-haves C22–C32 to V0: mobile scanning (3.4), reports with scheduled email (3.5), location-scoped permissions (2.4), labels (4.7), bundles (4.8), duplicate detection (4.9), lots/expiry/serials moved into V0 (6.7), purchase orders (6.8), reorder points and alerts (6.9), picking (6.10), moving average valuation (6.11). Acceptance scenarios A32–A43. |
 | 0.4 | 14 November 2026 | Owner confirmed the V0 limits: bundles without their own stock (kits later), shop-currency purchase orders, one average cost per variant per shop, reorder rules per warehouse, an installable web app without offline mode, picking that does not create Shopify fulfillments, report emails with a link only, and duplicate acknowledgment for API/MCP creates. Price benchmark confirmed as Sortly's list price ($4.90 entry ceiling). |
+| 0.5 | 14 November 2026 | Phase 0 findings P1–P15 ([report Section 7](phase-0-report.md#7-proposed-prd-v05-changes)). Shopify: compare-and-set push where only an unexplained difference is a conflict (8.5); expiring offline tokens (8.5); one shop per store at a time and protected customer data approval before going public (8.5); bundles wording (8.5). Audit: authentication before the audit queue (7.3, 10.3); one queue message per read (7.3, 14.2); UUIDv7 event IDs, monthly partitions on creation time, `UNIQUE (occurred_at, event_id)` (7.3, 7.4); 732 bytes per event and a separate project for the 1-million-event benchmark (12.3, 14.1). MCP: WorkOS AuthKit with standalone Connect and the platform's consent creating the grant (1.3, 9.4, 10.2); unbound grants expire after 10 minutes (9.4). Runtime: waited-on work runs in the request next to the database, with queues as the retry path (10.2, 10.3, 10.5); sweeps every 30 minutes (6.3, 10.2, 14.2); rate limits and batched access events before launch (7.3, 8.3, 9.2, 14.2). Neon in `aws-eu-central-1` (12.4). Email: Resend for the pilot, US data storage noted against C20 (12.4, 14.1, 14.2, 17). |

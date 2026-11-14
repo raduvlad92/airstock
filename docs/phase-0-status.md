@@ -25,7 +25,7 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 | --- | --- | --- |
 | E1 | Done | Repository public; CI in `.github/workflows/ci.yml` migrates and deploys staging on every push to `main`. |
 | E2 | Done | Requests run next to the database (4–8 ms per statement); jobs go through the fetch handler because consumers are not placed ([report, 4.4](phase-0-report.md#44-findings-that-changed-the-build)). |
-| E3 | Partly | Google on staging; invitations; one user in two shops with different owners in CI. Microsoft (passkey) and the email code need the owner. |
+| E3 | Partly | Google on staging, for two accounts; an invitation accepted on staging by the invited address (Section 7); one user in two shops with different owners in CI. Still needed from the owner: the emailed code, Microsoft (passkey), and a shop created by the invited user. |
 | E4 | Done | `pnpm parity` in CI, `packages/core/test/registry.test.ts`, `docs/api/openapi.json` checked in CI. 24 operations, 9 MCP tools. |
 | E5 | Done in CI | See Section 4. |
 | E6 | Done | Real ChatGPT run on staging, 14 November 2026 (Section 6), plus `apps/worker/test/mcp.test.ts` and `web.test.ts`. |
@@ -37,7 +37,7 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 ## 3. What the owner needs to provide
 
 1. **Phone scan matrix (E8):** iPhone Safari and Android Chrome, in a tab and installed ([report, Section 8](phase-0-report.md#8-owner-actions-to-close-phase-0)).
-2. **Sign-ins (E3):** accept the invitation sent to vlad@deletecookies.net with an emailed code, create a shop as that user, and sign in once with Microsoft.
+2. **Sign-ins (E3):** the invitation is accepted (Section 7). Still needed: as vlad@deletecookies.net, create a shop and sign in once with an emailed code; then sign in once with Microsoft.
 3. **Email domain (E9):** upgrade Resend to Pro or free one of its three domain slots, so `mail.airstock.deletecookies.dev` can be added.
 
 ## 4. Acceptance scenarios covered by tests
@@ -99,5 +99,25 @@ What real WorkOS tokens contain, as seen at binding: `client_id` is ChatGPT's me
 
 ChatGPT ran the write tools without asking for confirmation, so the server-side scope check is the guard that matters (step 3).
 
-Staging now holds test data from this run: shops "Bibica" and "Bibica B", items `MUG-001` and `INJECT-1`, reservation `TEST-1`, one revoked connection, and one active read-only connection. The Shopify and measurement runs added item `AIR-MUG-01` in both shops (mapped to the development stores), `BENCH-1` in "Bibica", test orders #1001–#1017 on store A and #1001 on store B, an API credential `phase0-bench`, and an MCP connection "Airstock Phase 0 bench"; the last two are revoked after the measurements.
+Staging now holds test data from this run: shops "Bibica" and "Bibica B", items `MUG-001` and `INJECT-1`, reservation `TEST-1`, one revoked connection, and one active read-only connection. The Shopify and measurement runs added item `AIR-MUG-01` in both shops (mapped to the development stores), `BENCH-1` in "Bibica", test orders #1001–#1017 on store A and #1001 on store B, an API credential `phase0-bench`, and an MCP connection "Airstock Phase 0 bench"; the last two are revoked after the measurements. Since the evening of 14 November, vlad@deletecookies.net is a viewer in "Bibica" (Section 7).
 
+## 7. After the report (14 November 2026, evening)
+
+### Invitation accepted on staging (E3)
+
+Checked in the staging database and the activity history. Times are UTC.
+
+| Time | Event |
+| --- | --- |
+| 14:13:06 | The owner of "Bibica" invited vlad@deletecookies.net as a viewer. The email went out through Resend at 14:13:10. |
+| 21:18:36 | The first account signed in with Google on an iPhone (`user.signed_in`, method `google`). |
+| 21:24:30 | vlad@deletecookies.net signed in with Google in Chrome on Windows. This sign-in created the platform user. |
+| 21:24:33 | The invitation was accepted (`member.invitation.accepted`), and the user became an active viewer in "Bibica". The user then opened the shop's members, locations, Shopify, and AI connections pages. |
+
+This is the first invitation accepted on staging. It used Google, not an emailed code, so the emailed code and Microsoft sign-ins are still untested on staging. The invited user owns no shop yet, so staging does not yet have one user in two shops with different owners (CI covers it).
+
+### Other changes
+
+- **P15 fixed** ([PR #17](https://github.com/raduvlad92/airstock/pull/17)): a connection grant that no client binds within 10 minutes of consent can no longer be bound, the dashboard lists it as expired, and the 30-minute sweep records it with a `connection.expired` event ([ADR 0007](adr/0007-mcp-connection-binding.md)). Staging's one abandoned grant (`01a1da72`, created 14:24:57 UTC) had already been revoked at 15:07.
+- **PRD v0.5** applies the report's 15 proposed changes ([PRD change history](ecommerce-platform-prd-and-architecture.md#change-history)).
+- Merged branches were deleted, locally and on GitHub.

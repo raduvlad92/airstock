@@ -27,6 +27,8 @@ export interface Session {
 export interface FlowState {
   /** OAuth `state`, for provider sign-in. */
   state?: string;
+  /** Which provider the sign-in started with (google, microsoft), for the activity history. */
+  provider?: string;
   /** The email a Magic Auth code was sent to. */
   email?: string;
   returnTo: string;

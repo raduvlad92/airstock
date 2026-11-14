@@ -201,3 +201,25 @@ describe('member invitations', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('sign-in history', () => {
+  it('records sign-ins with the method, and sign-outs, as platform events', async () => {
+    const before = t.sink.events.length;
+    const someone = user();
+    const { cookie } = await signInAs(t, someone);
+    const signedIn = t.sink.events.slice(before).find((e) => e.action === 'user.signed_in');
+    expect(signedIn).toMatchObject({
+      shop_id: null,
+      actor_type: 'user',
+      outcome: 'succeeded',
+      context: expect.objectContaining({ method: 'google' }),
+    });
+    const out = await t.app.request('/auth/logout', {
+      method: 'POST',
+      headers: { cookie, origin: PUBLIC_URL },
+    });
+    expect(out.status).toBe(303);
+    const signedOut = t.sink.events.slice(before).find((e) => e.action === 'user.signed_out');
+    expect(signedOut?.actor_id).toBe(signedIn?.actor_id);
+  });
+});

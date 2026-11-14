@@ -2011,7 +2011,7 @@
       "post": {
         "operationId": "connections.create",
         "summary": "Approve an AI or OAuth connection",
-        "description": "The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2).",
+        "description": "The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2); a connection no client uses within 10 minutes expires.",
         "x-permission": "shop.read",
         "x-connection-scope": "session",
         "x-audit-action": "connection.created",

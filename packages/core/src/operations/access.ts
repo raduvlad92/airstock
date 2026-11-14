@@ -175,6 +175,7 @@ const ConnectionSummary = z.object({
   clientId: z.string().nullable(),
   clientName: z.string().nullable(),
   scopes: z.array(z.string()),
+  /** `active`, `revoked`, or `expired` (no client used it within the bind window). */
   status: z.string(),
   membershipId: Id,
   createdAt: z.string(),
@@ -183,11 +184,18 @@ const ConnectionSummary = z.object({
   lastUsedAt: z.string().nullable(),
 });
 
+/**
+ * A grant's status as callers should see it: an unbound grant past the bind window is expired
+ * even before the sweep records it (report P15).
+ */
+const CURRENT_STATUS = `case when status = 'active' and bound_at is null
+    and created_at <= now() - connection_bind_window() then 'expired' else status end`;
+
 export const createConnection = defineOperation({
   id: 'connections.create',
   summary: 'Approve an AI or OAuth connection',
   description:
-    'The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2).',
+    'The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2); a connection no client uses within 10 minutes expires.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -246,8 +254,8 @@ export const listConnections = defineOperation({
       bound_at: Date | null;
       last_used_at: Date | null;
     }>(
-      `select id, client_id, client_name, scopes, status, membership_id, created_at, bound_at,
-         last_used_at
+      `select id, client_id, client_name, scopes, ${CURRENT_STATUS} as status, membership_id,
+         created_at, bound_at, last_used_at
        from connection_grants where ($1 or membership_id = $2) order by created_at desc limit 500`,
       [all, ctx.membership?.id ?? null],
     );
@@ -287,7 +295,8 @@ export const revokeConnection = defineOperation({
   mcp: { exception: SESSION_ONLY },
   async handler(ctx, input) {
     const [row] = await ctx.tx.query<{ status: string; membership_id: string }>(
-      'select status, membership_id from connection_grants where id = $1 for update',
+      `select ${CURRENT_STATUS} as status, membership_id from connection_grants
+       where id = $1 for update`,
       [input.grantId],
     );
     if (!row) throw errors.notFound('Connection');
@@ -299,6 +308,8 @@ export const revokeConnection = defineOperation({
     }
     if (row.status === 'revoked')
       throw errors.conflict('already_revoked', 'The connection is already revoked.');
+    if (row.status === 'expired')
+      throw errors.conflict('expired', 'The connection expired before any client used it.');
     await ctx.tx.query(
       `update connection_grants set status = 'revoked', revoked_at = now() where id = $1`,
       [input.grantId],

@@ -115,6 +115,53 @@ export async function sweepExpiredReservations(db: Database, maxShops = 50): Pro
   return expired;
 }
 
+/**
+ * Records unbound connection grants past the bind window as expired, shop by shop (report P15).
+ * Such a grant comes from a consent abandoned on the WorkOS screen. Resolving and binding
+ * already refuse it, so this sweep only tidies state and records the change.
+ */
+export async function sweepUnboundConnectionGrants(db: Database, maxShops = 50): Promise<number> {
+  const shops = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
+    tx.query<{ shop_id: string }>(
+      'select s as shop_id from shops_with_unbound_connection_grants($1) s',
+      [maxShops],
+    ),
+  );
+  let expired = 0;
+  for (const { shop_id: shopId } of shops) {
+    const base = {
+      shopId,
+      caller: systemCaller('connection-expiry', shopId),
+      requestId: uuidv7(),
+      attemptId: null,
+      idempotencyKey: null,
+    };
+    expired += await db.transaction({ shopId, userId: null }, async (tx) => {
+      const rows = await tx.query<{ id: string }>(
+        `update connection_grants set status = 'expired', expired_at = now()
+         where status = 'active' and bound_at is null
+           and created_at <= now() - connection_bind_window()
+         returning id`,
+      );
+      const events = rows.map((r) =>
+        auditEvent(base, {
+          action: 'connection.expired',
+          phase: 'outcome',
+          outcome: 'succeeded',
+          target_type: 'connection_grant',
+          target_id: r.id,
+          reason: 'No client used the connection within the bind window.',
+          changes: { status: 'expired' },
+          context: { trigger: 'sweeper' },
+        }),
+      );
+      if (events.length > 0) await tx.query(INSERT_AUDIT_EVENTS_SQL, [JSON.stringify(events)]);
+      return events.length;
+    });
+  }
+  return expired;
+}
+
 /** Keeps future monthly audit partitions in place so the default partition stays empty. */
 export async function ensureAuditPartitions(db: Database, monthsAhead = 3): Promise<number> {
   const [row] = await db.transaction({ shopId: null, userId: null }, (tx) =>

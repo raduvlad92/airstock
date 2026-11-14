@@ -101,7 +101,7 @@ Each decision gets a short ADR in `docs/adr/`. Proposed defaults may be overturn
 | --- | --- | --- | --- |
 | Workspace and tooling | pnpm workspaces, TypeScript strict, Biome (lint and format in one fast tool), Vitest. Node LTS and every dependency pinned to exact versions. | Setup | M0 |
 | Postgres driver | `pg` (node-postgres) through Hyperdrive | Smoke test | M1 |
-| Query layer | Kysely for typed queries, with raw SQL for inventory hot paths. Criteria: explicit transaction control, works with `set_config`, no hidden round trips, typed results. | M2 spike: write `reserve_stock` both ways and compare | M2 |
+| Query layer | **Decided:** plain parameterized SQL behind a small `Tx` interface; Kysely stays the candidate for Phase 1 filtering (ADR 0002) | M2 | M2 |
 | Migrations | Plain forward-only SQL files and a small runner, applied by the owner role | Setup | M2 |
 | IDs | UUIDv7 everywhere. The time order helps audit partitioning and index locality. | ADR | M2 |
 | Decimal representation | PostgreSQL `numeric(20,6)` for quantities and costs, decimal strings on the wire, a decimal library in TypeScript, rounding rule in an ADR | ADR | M2 |
@@ -150,7 +150,7 @@ docs/
 Conventions:
 
 - Every tenant table has `shop_id`. Foreign keys between tenant tables are composite, `(shop_id, x_id)` → `(shop_id, id)`, so a row cannot refer to another shop's record (PRD 2.2).
-- Row-level security is enabled and forced on every tenant table. The policy compares `shop_id` with `current_setting('app.shop_id')`, which is set with `set_config(..., true)` at the start of each transaction.
+- Row-level security is enabled on every tenant table. The policy compares `shop_id` with `current_setting('app.shop_id')`, which is set with `set_config(..., true)` at the start of each transaction. The runtime role owns nothing, so the policies always apply to it (ADR 0002).
 - Two roles. The owner role runs migrations. The app role is used by Hyperdrive: it does not own any table, has no `BYPASSRLS`, and has only `INSERT` and `SELECT` on audit tables.
 - Mutable records have an integer `version` for expected-version checks.
 - Times are `timestamptz` in UTC.
@@ -169,7 +169,7 @@ Conventions:
 
 ### 5.4 Operation registry
 
-Each operation is defined once. REST routes (through `@hono/zod-openapi`), the OpenAPI document, permission checks, and audit action names are generated from these entries.
+Each operation is defined once. REST routes, the OpenAPI document (from Zod's JSON Schema output, ADR 0005), permission checks, and audit action names are generated from these entries.
 
 ```ts
 export const reserveStock = defineOperation({
@@ -488,3 +488,4 @@ Secrets are the WorkOS API key and client ID, the Shopify API secret, the token 
 | 14 Nov 2026 | Staging email domain deferred (P6). | Owner |
 | 14 Nov 2026 | Magic Auth for email sign-in; Shopify reservations on `orders/create`. | Owner |
 | 14 Nov 2026 | Build proceeds without owner involvement until accounts are needed (Cloudflare, Neon, WorkOS, Shopify, ChatGPT). | Owner |
+| 14 Nov 2026 | Plain SQL query layer, OpenAPI from Zod, RLS enabled without FORCE, API credentials in Phase 0 (ADRs 0002, 0005). Progress is tracked in [Phase 0 status](phase-0-status.md). | Build |

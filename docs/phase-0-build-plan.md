@@ -489,3 +489,7 @@ Secrets are the WorkOS API key and client ID, the Shopify API secret, the token 
 | 14 Nov 2026 | Magic Auth for email sign-in; Shopify reservations on `orders/create`. | Owner |
 | 14 Nov 2026 | Build proceeds without owner involvement until accounts are needed (Cloudflare, Neon, WorkOS, Shopify, ChatGPT). | Owner |
 | 14 Nov 2026 | Plain SQL query layer, OpenAPI from Zod, RLS enabled without FORCE, API credentials in Phase 0 (ADRs 0002, 0005). Progress is tracked in [Phase 0 status](phase-0-status.md). | Build |
+| 14 Nov 2026 | Resend for transactional email for now, on a new subdomain; the owner's real address for the test send (ADR 0009). | Owner |
+| 14 Nov 2026 | Shopify: expiring encrypted tokens, compare-and-set push that processes unseen orders first (ADR 0008). | Build |
+| 14 Nov 2026 | Merchant-facing jobs run in the request next to the database, queues are the retry path; sweeps every 30 minutes (report, 4.4). | Build |
+| 14 Nov 2026 | React shell and dashboard inventory forms move to Phase 1 with the grid. | Build |

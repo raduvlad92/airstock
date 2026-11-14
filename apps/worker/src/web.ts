@@ -1,6 +1,7 @@
 import {
   AppError,
   acceptInvitation,
+  auditEvent,
   CONNECTION_SCOPES,
   type ConnectionScope,
   ensureUser,
@@ -108,11 +109,48 @@ function redirect(location: string, cookies: string[] = [], status = 303): Respo
   return new Response(null, { status, headers });
 }
 
+/**
+ * Sign-ins and sign-outs are platform events (no shop) in the activity history (PRD 7.3).
+ * Failed sign-ins are not: unauthenticated traffic never reaches the audit queue (plan P3), and
+ * WorkOS keeps its own record of them.
+ */
+async function recordSessionEvent(
+  c: Context<AppEnv>,
+  userId: string,
+  action: 'user.signed_in' | 'user.signed_out',
+  method?: string,
+): Promise<void> {
+  await c.get('audit').send([
+    auditEvent(
+      {
+        shopId: null,
+        caller: sessionCaller(userId),
+        requestId: c.get('requestId'),
+        attemptId: null,
+        idempotencyKey: null,
+      },
+      {
+        action,
+        phase: 'outcome',
+        outcome: 'succeeded',
+        target_type: 'user',
+        target_id: userId,
+        context: {
+          ...(method ? { method } : {}),
+          ipAddress: c.req.header('cf-connecting-ip') ?? null,
+          userAgent: c.req.header('user-agent')?.slice(0, 200) ?? null,
+        },
+      },
+    ),
+  ]);
+}
+
 async function startSession(
   c: Context<AppEnv>,
   config: WebConfig,
   user: WorkosUser,
   returnTo: string,
+  method: string,
 ): Promise<Response> {
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || null;
   const uid = await ensureUser(c.get('db'), {
@@ -127,6 +165,7 @@ async function startSession(
     exp: nowSeconds() + SESSION_TTL_SECONDS,
   };
   const value = await seal(config.sessionSecret, 'session', session);
+  await recordSessionEvent(c, uid, 'user.signed_in', method);
   return redirect(safeReturnTo(returnTo), [
     cookie(SESSION_COOKIE, value, SESSION_TTL_SECONDS),
     clearCookie(FLOW_COOKIE),
@@ -183,7 +222,13 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     const state = crypto.randomUUID();
     return redirect(
       config.workos.authorizeUrl(provider, state),
-      [await flowCookie(config, { state, returnTo: safeReturnTo(c.req.query('return_to')) })],
+      [
+        await flowCookie(config, {
+          state,
+          provider: c.req.param('provider'),
+          returnTo: safeReturnTo(c.req.query('return_to')),
+        }),
+      ],
       302,
     );
   });
@@ -201,7 +246,7 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     if (!code) return signInPage(flow.returnTo, 'Sign-in was cancelled.');
     try {
       const user = await config.workos.authenticateWithCode(code, requestMeta(c));
-      return await startSession(c, config, user, flow.returnTo);
+      return await startSession(c, config, user, flow.returnTo, flow.provider ?? 'oauth');
     } catch (error) {
       if (error instanceof WorkosError) {
         return signInPage(flow.returnTo, 'That sign-in did not work. Please try again.');
@@ -239,7 +284,7 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     if (!/^\d{6}$/.test(code)) return magicCodePage(flow.email, 'Enter the six-digit code.');
     try {
       const user = await config.workos.authenticateWithMagicCode(flow.email, code, requestMeta(c));
-      return await startSession(c, config, user, flow.returnTo);
+      return await startSession(c, config, user, flow.returnTo, 'email_code');
     } catch (error) {
       if (error instanceof WorkosError) {
         return magicCodePage(flow.email, 'That code did not work. Check it and try again.');
@@ -248,8 +293,10 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     }
   });
 
-  app.post('/auth/logout', (c) => {
+  app.post('/auth/logout', async (c) => {
     if (!sameOrigin(c, config)) return messagePage('Request blocked', 'Please try again.', 403);
+    const session = await readSession(c, config);
+    if (session) await recordSessionEvent(c, session.uid, 'user.signed_out');
     return redirect('/', [clearCookie(SESSION_COOKIE)]);
   });
 

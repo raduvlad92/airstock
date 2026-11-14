@@ -12,9 +12,9 @@
   "routes": [{ "pattern": "airstock.deletecookies.dev", "custom_domain": true }],
   "observability": { "enabled": true },
   // Run near the Neon database (aws-eu-central-1): every SQL statement is a round trip. Smart
-  // Placement measured faster than an explicit "aws:eu-central-1" hint on staging (about 4 ms
-  // against 6 ms per statement; Phase 0 report). Placement applies to fetch handlers only, so
-  // the jobs consumer calls this Worker's fetch handler (SELF).
+  // Placement and an explicit "aws:eu-central-1" hint both measured 4–8 ms per statement on
+  // staging, within run-to-run variation (Phase 0 report, 4.1). Placement applies to fetch
+  // handlers only, so the jobs consumer calls this Worker's fetch handler (SELF).
   "placement": { "mode": "smart" },
   "services": [{ "binding": "SELF", "service": "airstock-staging" }],
   "hyperdrive": [

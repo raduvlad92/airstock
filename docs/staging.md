@@ -18,7 +18,7 @@ too. Airstock therefore:
 
 | What | Name or ID | Notes |
 | --- | --- | --- |
-| Worker | `airstock-staging` | Custom domain `airstock.deletecookies.dev`; `workers.dev` and preview URLs are off |
+| Worker | `airstock-staging` | Custom domain `airstock.deletecookies.dev`; `workers.dev` and preview URLs are off; Smart Placement; bound to itself as `SELF` (jobs run in the fetch handler, next to the database); sweeps every 30 minutes and partitions daily at 03:00 UTC |
 | Hyperdrive | `airstock-staging` (`d4107a1ef7aa4b6ea8935a208edb0512`) | Query caching **off**: cached reads could cross tenants |
 | Queues | `airstock-staging-audit`, `airstock-staging-jobs`, each with a `-dlq` | |
 | R2 | `airstock-staging-files` | EU jurisdiction |
@@ -60,6 +60,7 @@ Values are never committed. Names only:
 | GitHub environment `staging` | `CLOUDFLARE_ACCOUNT_ID` | |
 | GitHub environment `staging` | `DATABASE_OWNER_URL` | `airstock_owner`, direct (unpooled) host, `sslmode=verify-full` |
 | Worker secret | `SMOKE_SECRET` | Enables `/internal/smoke` |
+| Worker secret | `INTERNAL_SECRET` | Authenticates the jobs consumer's calls to `/internal/jobs` through the `SELF` service binding |
 | Worker secret | `SHOPIFY_API_SECRET` | Shopify app client secret: verifies webhooks and the install redirect |
 | Worker secret | `RESEND_API_KEY` | Resend key `airstock-staging`: sending access to the `EMAIL_FROM` domain only (ADR 0009) |
 | Worker secret | `SHOPIFY_TOKEN_KEY` | 32 random bytes (Base64) that encrypt stored Shopify tokens; key ID `k1` in `SHOPIFY_TOKEN_KEY_ID` |
@@ -80,4 +81,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://airstock.deletecookies.dev/api/
 
 First readings from the Frankfurt colo (14 Nov 2026): the first query on a new connection took
 37–53 ms and each later round trip 3–6 ms; an R2 put, get and delete took 245–339 ms together,
-and a queue send 69–295 ms. M8 records proper distributions.
+and a queue send 69–295 ms. The distributions are in the [Phase 0 report](phase-0-report.md).
+
+Every response carries `Server-Timing` (Worker, database, and audit queue time, with transaction,
+statement, and send counts). To measure: `scripts/bench/run.ts` against staging and
+`wrangler tail --format json` for CPU time.

@@ -15,6 +15,8 @@ export const PERMISSIONS = [
   'activity.read',
   'credentials.manage',
   'connections.manage',
+  /** Records what a connected sales channel reports, such as a Shopify order. */
+  'integrations.sync',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -60,6 +62,14 @@ export const CONNECTION_SCOPES = [
 ] as const;
 export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
 export type RequiredScope = ConnectionScope | 'session';
+
+/** The permissions a member actually has: an explicit set for connectors, else the role's. */
+export function effectivePermissions(membership: {
+  role: Role;
+  permissions?: ReadonlySet<Permission>;
+}): ReadonlySet<Permission> {
+  return membership.permissions ?? ROLE_PERMISSIONS[membership.role];
+}
 
 export function isRole(value: string): value is Role {
   return (ROLES as readonly string[]).includes(value);

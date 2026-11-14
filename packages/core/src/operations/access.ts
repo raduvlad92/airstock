@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { errors } from '../errors.ts';
 import { sha256Hex } from '../hash.ts';
-import { CONNECTION_SCOPES, ROLE_PERMISSIONS } from '../permissions.ts';
+import { CONNECTION_SCOPES, effectivePermissions } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
 
@@ -233,7 +233,7 @@ export const listConnections = defineOperation({
   mcp: { exception: SESSION_ONLY },
   async handler(ctx) {
     const all = ctx.membership
-      ? ROLE_PERMISSIONS[ctx.membership.role].has('connections.manage')
+      ? effectivePermissions(ctx.membership).has('connections.manage')
       : false;
     const rows = await ctx.tx.query<{
       id: string;
@@ -292,7 +292,7 @@ export const revokeConnection = defineOperation({
     );
     if (!row) throw errors.notFound('Connection');
     const canManage = ctx.membership
-      ? ROLE_PERMISSIONS[ctx.membership.role].has('connections.manage')
+      ? effectivePermissions(ctx.membership).has('connections.manage')
       : false;
     if (!canManage && row.membership_id !== ctx.membership?.id) {
       throw errors.forbidden('You can revoke only your own connections.');

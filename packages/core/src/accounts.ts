@@ -46,3 +46,38 @@ export function systemCaller(id: string, shopId: string): Caller {
     source: 'scheduled',
   };
 }
+
+/**
+ * The Shopify connector acting for one connected store. It is bound to the connection's shop
+ * and acts with a fixed permission set: it reads stock and reserves it for orders, and records
+ * what the store reports. It never acts for a person (PRD 8.5).
+ */
+export function shopifyConnectorCaller(
+  shopId: string,
+  connectionId: string,
+  installedByMembershipId: string,
+): Caller {
+  return {
+    kind: 'connector',
+    id: connectionId,
+    userId: null,
+    boundShopId: shopId,
+    membership: {
+      id: installedByMembershipId,
+      role: 'inventory_operator',
+      allLocations: true,
+      locationScopeIds: [],
+      permissions: new Set([
+        'shop.read',
+        'catalog.read',
+        'storage.read',
+        'inventory.read',
+        'inventory.reserve',
+        'integrations.sync',
+      ]),
+    },
+    scopes: new Set(['shop:read', 'catalog:read', 'inventory:read', 'inventory:write']),
+    clientId: 'shopify',
+    source: 'shopify',
+  };
+}

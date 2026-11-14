@@ -1,5 +1,17 @@
-export { ensureUser, sessionCaller, systemCaller, type VerifiedIdentity } from './accounts.ts';
-export { type AuditEvent, type AuditOutcome, type AuditSink, auditEvent } from './audit.ts';
+export {
+  ensureUser,
+  sessionCaller,
+  shopifyConnectorCaller,
+  systemCaller,
+  type VerifiedIdentity,
+} from './accounts.ts';
+export {
+  type AuditEvent,
+  type AuditOutcome,
+  type AuditSink,
+  auditEvent,
+  INSERT_AUDIT_EVENTS_SQL,
+} from './audit.ts';
 export {
   dispatchOutbox,
   ensureAuditPartitions,
@@ -18,10 +30,12 @@ export { uuidv7, uuidv7Time } from './ids.ts';
 export { buildMcpTools, type McpToolDef, resolveToolCall } from './mcp-tools.ts';
 export { formatApiToken, parseApiToken } from './operations/access.ts';
 export * as ops from './operations/index.ts';
-export { operations, operationsById } from './operations/index.ts';
+export { integrationCallbacks, operations, operationsById } from './operations/index.ts';
+export { shopifyNumericId } from './operations/shopify.ts';
 export {
   CONNECTION_SCOPES,
   type ConnectionScope,
+  effectivePermissions,
   PERMISSIONS,
   ROLE_PERMISSIONS,
 } from './permissions.ts';
@@ -33,3 +47,4 @@ export {
   type PipelineDeps,
 } from './pipeline.ts';
 export { type AnyOperation, isMcpExposure, type Operation } from './registry.ts';
+export { normalizeSku } from './schemas.ts';

@@ -123,19 +123,15 @@ function buildServer(
       async (args: Record<string, unknown>) => {
         try {
           const call = resolveToolCall(tool, args);
-          const res = await execute(
-            { db, audit, logger: deps.logger },
-            call.operation,
-            {
-              caller,
-              shopId: caller.boundShopId,
-              input: call.input,
-              idempotencyKey:
-                call.idempotencyKey ??
-                (call.operation.idempotency === 'required' ? crypto.randomUUID() : null),
-              requestId,
-            },
-          );
+          const res = await execute({ db, audit, logger: deps.logger }, call.operation, {
+            caller,
+            shopId: caller.boundShopId,
+            input: call.input,
+            idempotencyKey:
+              call.idempotencyKey ??
+              (call.operation.idempotency === 'required' ? crypto.randomUUID() : null),
+            requestId,
+          });
           if (res.outbox > 0) onOutbox();
           const structured = {
             ...(res.result as object),

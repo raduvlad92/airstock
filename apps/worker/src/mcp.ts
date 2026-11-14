@@ -61,33 +61,41 @@ const OAUTH_SCOPES = ['openid', 'profile', 'email', 'offline_access'];
  * connection grant from the database on every request, so a revoked connection stops at
  * the next call even while its token is unexpired (PRD 9.4).
  */
+type AuthResult = { caller: Caller } | { caller: null; reason: string; detail?: unknown };
+
 async function authenticate(
   db: Database,
   config: McpAuthConfig,
   header: string | undefined,
-): Promise<Caller | null> {
-  if (!header?.startsWith('Bearer ')) return null;
+): Promise<AuthResult> {
+  if (!header?.startsWith('Bearer ')) return { caller: null, reason: 'no_token' };
+  let payload: Awaited<ReturnType<typeof jwtVerify>>['payload'];
   try {
-    const { payload } = await jwtVerify(header.slice(7).trim(), config.keys, {
+    ({ payload } = await jwtVerify(header.slice(7).trim(), config.keys, {
       issuer: config.issuer,
       audience: config.audience,
-    });
-    // WorkOS marks tokens issued to an agent identity rather than a person; Airstock serves
-    // people, and a connection always acts for the user who approved it.
-    if (payload.sub_profile === 'ai_agent') return null;
-    const grantId = payload[config.grantClaim];
-    const clientId = (payload.client_id ?? payload.azp) as unknown;
-    if (
-      typeof grantId !== 'string' ||
-      typeof payload.sub !== 'string' ||
-      typeof clientId !== 'string'
-    )
-      return null;
-    if (!/^[0-9a-f-]{36}$/.test(grantId)) return null;
-    return await resolveConnectionGrant(db, grantId, { subject: payload.sub, clientId });
-  } catch {
-    return null;
+    }));
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    const claim = (error as { claim?: unknown }).claim;
+    return { caller: null, reason: 'token_invalid', detail: { code, claim } };
   }
+  // WorkOS marks tokens issued to an agent identity rather than a person; Airstock serves
+  // people, and a connection always acts for the user who approved it.
+  if (payload.sub_profile === 'ai_agent') return { caller: null, reason: 'agent_identity' };
+  const grantId = payload[config.grantClaim];
+  const clientId = (payload.client_id ?? payload.azp) as unknown;
+  if (
+    typeof grantId !== 'string' ||
+    !/^[0-9a-f-]{36}$/.test(grantId) ||
+    typeof payload.sub !== 'string' ||
+    typeof clientId !== 'string'
+  ) {
+    // Claim names only, never values: enough to see what an authorization server sends.
+    return { caller: null, reason: 'claims_missing', detail: { claims: Object.keys(payload) } };
+  }
+  const caller = await resolveConnectionGrant(db, grantId, { subject: payload.sub, clientId });
+  return caller ? { caller } : { caller: null, reason: 'grant_rejected' };
 }
 
 function buildServer(deps: AppDeps, db: Database, caller: Caller, requestId: string): McpServer {
@@ -168,8 +176,16 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
         c.get('requestId'),
       );
     }
-    const caller = await authenticate(c.get('db'), config, c.req.header('authorization'));
+    const auth = await authenticate(c.get('db'), config, c.req.header('authorization'));
+    const caller = auth.caller;
     if (!caller) {
+      if (!auth.caller && auth.reason !== 'no_token') {
+        deps.logger.error('mcp_token_rejected', {
+          requestId: c.get('requestId'),
+          reason: auth.reason,
+          detail: auth.detail,
+        });
+      }
       const metadata = new URL('/.well-known/oauth-protected-resource', config.resource).toString();
       return new Response(JSON.stringify(errors.unauthenticated().toProblem(c.get('requestId'))), {
         status: 401,

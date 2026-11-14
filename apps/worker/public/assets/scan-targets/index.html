@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scan test targets · Airstock</title>
+<style>
+  body { margin: 0; padding: 16px; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #fff; color: #111; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  p { margin: 0 0 16px; color: #555; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+  figure { margin: 0; padding: 16px; border: 1px solid #ddd; border-radius: 12px; text-align: center; }
+  img { width: 100%; max-width: 360px; height: auto; image-rendering: pixelated; }
+  figcaption { margin-top: 8px; font-weight: 600; }
+  @media print { .grid { grid-template-columns: 1fr 1fr; } figure { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<h1>Scan test targets</h1>
+<p>Show this page on a second screen at full brightness, or print it. Then open /scan-test on the phone.</p>
+<div class="grid">
+  <figure><img src="ean-13.svg" alt="EAN-13 barcode 4006381333931"><figcaption>EAN-13 · 4006381333931</figcaption></figure>
+  <figure><img src="upc-a.svg" alt="UPC-A barcode 036000291452"><figcaption>UPC-A · 036000291452</figcaption></figure>
+  <figure><img src="code-128.svg" alt="Code 128 barcode AIRSTOCK-0042"><figcaption>Code 128 · AIRSTOCK-0042</figcaption></figure>
+  <figure><img src="qr.svg" alt="QR code for an Airstock item link"><figcaption>QR code · item link</figcaption></figure>
+</div>
+</body>
+</html>

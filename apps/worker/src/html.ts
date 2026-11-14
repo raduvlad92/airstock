@@ -41,15 +41,19 @@ export interface PageOptions {
   formActions?: string[];
   scripts?: string[];
   status?: number;
+  /** Allows WebAssembly compilation (the barcode decoder on the scan test page). */
+  wasm?: boolean;
 }
 
 export function contentSecurityPolicy(options: PageOptions = {}): string {
   return [
     "default-src 'none'",
-    "script-src 'self'",
+    `script-src 'self'${options.wasm ? " 'wasm-unsafe-eval'" : ''}`,
     "style-src 'self'",
     "img-src 'self' data:",
     "connect-src 'self'",
+    "manifest-src 'self'",
+    "worker-src 'self'",
     `form-action 'self'${options.formActions?.length ? ` ${options.formActions.join(' ')}` : ''}`,
     "frame-ancestors 'none'",
     "base-uri 'none'",
@@ -64,6 +68,10 @@ export function page(title: string, body: SafeHtml, options: PageOptions = {}): 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="same-origin">
 <title>${title} · Airstock</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f5f4a">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
 <link rel="stylesheet" href="/assets/app.css">
 ${(options.scripts ?? []).map((src) => html`<script src="${src}" defer></script>`)}
 </head>
@@ -240,5 +248,59 @@ export function invitationPage(input: {
     <button type="submit">Accept invitation</button>
   </form>
 </section>`,
+  );
+}
+
+/** The camera decode spike (plan M7, E8). The script does the work; results go to /scan-test/results. */
+export function scanTestPage(input: { email: string }): Response {
+  return page(
+    'Scan test',
+    html`<section class="card">
+  <div class="row"><h1>Scan test</h1><a href="/app">Dashboard</a></div>
+  <p class="fine">Signed in as ${input.email}. Point the camera at a barcode from <a href="/assets/scan-targets/index.html" target="_blank" rel="noopener">the test targets</a>, shown on another screen or printed. Each attempt is saved for the Phase 0 report.</p>
+  <div id="scan" data-wasm="/assets/vendor/zxing-wasm-3.1.6/">
+    <div class="scan-controls">
+      <label>Barcode
+        <select name="target">
+          <option value="ean-13">EAN-13 · 4006381333931</option>
+          <option value="upc-a">UPC-A · 036000291452</option>
+          <option value="code-128">Code 128 · AIRSTOCK-0042</option>
+          <option value="qr">QR code</option>
+        </select>
+      </label>
+      <label>Decoder
+        <select name="decoder">
+          <option value="both">Both, side by side</option>
+          <option value="native">Built-in BarcodeDetector</option>
+          <option value="zxing">zxing-wasm</option>
+        </select>
+      </label>
+      <label>Distance
+        <select name="distance">
+          <option value="close">Close (about 10 cm)</option>
+          <option value="arm" selected>Arm's length (about 30 cm)</option>
+          <option value="far">Far (about 60 cm)</option>
+        </select>
+      </label>
+      <label>Light
+        <select name="light">
+          <option value="good">Good light</option>
+          <option value="dim">Dim light</option>
+        </select>
+      </label>
+    </div>
+    <button type="button" data-action="scan">Start a scan (10 s)</button>
+    <video playsinline muted></video>
+    <p class="fine" data-status>Camera off.</p>
+    <label>Hardware scanner (keyboard wedge): focus here and scan
+      <input name="wedge" autocomplete="off" inputmode="none">
+    </label>
+    <h2>This device</h2>
+    <pre data-device></pre>
+    <h2>Attempts</h2>
+    <div class="table-wrap"><table><thead><tr><th>Barcode</th><th>Decoder</th><th>Conditions</th><th>Result</th><th>Time</th></tr></thead><tbody data-results></tbody></table></div>
+  </div>
+</section>`,
+    { scripts: ['/assets/vendor/zxing-wasm-3.1.6/zxing-reader.js', '/assets/scan.js'], wasm: true },
   );
 }

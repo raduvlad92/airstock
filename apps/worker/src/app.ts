@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
 import { mountRestRoutes } from './rest.ts';
+import { type FileStore, mountScanTest } from './scan.ts';
 import { type JobMessage, mountShopify, type ShopifyAppConfig } from './shopify.ts';
 import { mountWeb, readSession, sameOrigin, type WebConfig } from './web.ts';
 
@@ -29,6 +30,8 @@ export interface AppDeps {
   jobs?: { send(message: JobMessage): Promise<void> };
   /** Publishes committed outbox rows to the jobs queue now instead of at the next sweep. */
   dispatch?: (db: Database) => Promise<number>;
+  /** File storage (R2): scan-test results. */
+  files?: FileStore;
   logger: Logger;
 }
 
@@ -120,6 +123,7 @@ export function createApp(deps: AppDeps) {
   mountMcp(app, deps);
   mountWeb(app, deps);
   mountShopify(app, deps);
+  mountScanTest(app, deps);
 
   app.notFound((c) => problem(errors.notFound('Route'), c.get('requestId') ?? uuidv7()));
   app.onError((error, c) => {

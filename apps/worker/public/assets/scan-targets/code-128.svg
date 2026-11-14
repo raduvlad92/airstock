@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="748" height="233" version="1.1" xmlns="http://www.w3.org/2000/svg">
+ <desc>Zint Generated Symbol</desc>
+ <g id="barcode" fill="#000000">
+  <rect x="0" y="0" width="748" height="233" fill="#FFFFFF"/>
+  <path d="M40 0h8v200h-8ZM52 0h4v200h-4ZM64 0h4v200h-4ZM84 0h4v200h-4ZM92 0h4v200h-4ZM108 0h8v200h-8ZM128 0h8v200h-8ZM148 0h4v200h-4ZM164 0h4v200h-4ZM172 0h8v200h-8ZM192 0h4v200h-4ZM200 0h12v200h-12ZM216 0h8v200h-8ZM228 0h12v200h-12ZM244 0h4v200h-4ZM260 0h8v200h-8ZM272 0h12v200h-12ZM296 0h4v200h-4ZM304 0h4v200h-4ZM320 0h12v200h-12ZM336 0h8v200h-8ZM348 0h4v200h-4ZM364 0h4v200h-4ZM380 0h8v200h-8ZM392 0h4v200h-4ZM400 0h8v200h-8ZM420 0h12v200h-12ZM436 0h4v200h-4ZM448 0h8v200h-8ZM460 0h12v200h-12ZM480 0h4v200h-4ZM488 0h12v200h-12ZM504 0h16v200h-16ZM524 0h8v200h-8ZM536 0h8v200h-8ZM552 0h8v200h-8ZM568 0h4v200h-4ZM576 0h8v200h-8ZM588 0h12v200h-12ZM612 0h8v200h-8ZM628 0h4v200h-4ZM636 0h12v200h-12ZM656 0h8v200h-8ZM676 0h12v200h-12ZM692 0h4v200h-4ZM700 0h8v200h-8Z"/>
+  <text x="374" y="226.69" text-anchor="middle" font-family="Arimo, Arial, sans-serif" font-size="28">
+   AIRSTOCK-0042
+  </text>
+ </g>
+</svg>

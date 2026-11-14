@@ -127,6 +127,19 @@ export default {
         },
       },
       dispatch: (db) => publishOutbox(env, db),
+      files: {
+        async put(key, body) {
+          await env.FILES.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+        },
+        async list(prefix) {
+          const listed = await env.FILES.list({ prefix, limit: 1000 });
+          return listed.objects.map((o) => o.key);
+        },
+        async get(key) {
+          const object = await env.FILES.get(key);
+          return object ? object.text() : null;
+        },
+      },
       logger,
     });
     return app.fetch(request, env, ctx);

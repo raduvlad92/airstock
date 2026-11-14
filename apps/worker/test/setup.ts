@@ -74,6 +74,7 @@ export interface TestOptions {
   shopify?: ShopifyAppConfig;
   jobs?: AppDeps['jobs'];
   dispatch?: AppDeps['dispatch'];
+  files?: AppDeps['files'];
 }
 
 export interface TestApp {
@@ -117,6 +118,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     shopify: options.shopify ?? null,
     jobs: options.jobs,
     dispatch: options.dispatch,
+    files: options.files,
     logger: { error: () => {} },
   });
   return {

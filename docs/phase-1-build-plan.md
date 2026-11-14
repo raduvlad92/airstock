@@ -1,8 +1,8 @@
 # Phase 1 build plan — universal catalog foundation
 
-**Version:** 0.1 — draft for owner review  
+**Version:** 0.2 — owner decisions recorded  
 **Date:** 14 November 2026  
-**Based on:** [PRD and architecture v0.4](ecommerce-platform-prd-and-architecture.md), Section 15, Phase 1; the proposed v0.5 changes in the [Phase 0 report](phase-0-report.md), Section 7  
+**Based on:** [PRD and architecture v0.6](ecommerce-platform-prd-and-architecture.md), Section 15, Phase 1, and the [Phase 0 report](phase-0-report.md)  
 **Builds on:** [Phase 0 build plan](phase-0-build-plan.md), [Phase 0 status](phase-0-status.md), [ADRs 0001–0009](adr/README.md)  
 **Audience:** Product owner and implementation agents
 
@@ -45,7 +45,7 @@ Decision labels follow the PRD: **Confirmed**, **Selected direction**, **Propose
 | Duplicate-name warnings (SKU duplicates are already rejected) | Status, Section 5 | N2 |
 | Rate limits per API credential and MCP connection | Report P13 | N0 |
 | Kysely or another way to build dynamic filters | ADR 0002 "revisit when" | N2, decision D2 |
-| PRD v0.5 changes P1–P15, and the P15 fix (expire unbound grants) | Report, Section 7 | Running in a separate session; not part of this plan |
+| PRD v0.5 changes P1–P15, and the P15 fix (expire unbound grants) | Report, Section 7 | Done: PRs #17 and #19 |
 
 ### 1.3 Phase 0 exit
 
@@ -108,9 +108,9 @@ Each gets a short ADR in `docs/adr/`, numbered when written.
 | --- | --- | --- | --- | --- |
 | D1 | Custom field storage | Typed JSONB `attributes` on products and variants, keyed by field ID, with a typed encoding per field type (Section 5.2). Relationships in a relation table. | ADR | N1 |
 | D2 | Building dynamic filters | A small typed filter compiler that emits parameterized SQL from a whitelisted grammar, behind the existing `Tx` interface. Kysely only if the compiler grows past what is easy to review. | Spike in N2, ADR | N2 |
-| D3 | Edit concurrency | Field-level compare-and-set: each edit carries the expected previous value of each field it changes. The record version still increments and is returned. | ADR | N1 |
+| D3 | Edit concurrency | **Confirmed (Q4):** field-level compare-and-set. Each edit carries the expected previous value of each field it changes. The record version still increments and is returned. | Owner, ADR | N1 |
 | D4 | Bulk edits | Up to 500 records per bulk edit, previewed and then committed all-or-nothing; a stale preview is rejected and re-previewed. Bigger changes go through import. | ADR | N3 |
-| D5 | Media access logging | **Owner question Q1.** | Owner | N4 |
+| D5 | Media access logging | **Confirmed (Q1):** one access event per list or detail request, naming the media it returned; one event per original download. | Owner | N4 |
 | D6 | Media pipeline | Upload through the Worker to R2 with a SHA-256 check while streaming. The browser makes the derivatives (thumbnail and display WebP); the server checks file signatures and sizes. Delivery through short-lived signed URLs served by the Worker. | ADR | N4 |
 | D7 | Grid rows | Two modes: **Variants** (one row per variant, the editing workhorse for SKU, price, barcode, stock) and **Products** (one row per product, descriptive fields, variant values summarised). | ADR | N3 |
 | D8 | Web app shape | `apps/web`: React, Vite, TanStack Table, Virtual, Query, and Router. It builds into the Worker's static assets and is served at `/app` under the existing CSP. Sign-in, consent, invitation, and scan-test pages stay server-rendered. | ADR | N0 |
@@ -120,7 +120,18 @@ Each gets a short ADR in `docs/adr/`, numbered when written.
 | D12 | MCP tool budget | 16 tools or fewer after Phase 1, leaving room for Phase 2 under the 25 in ADR 0005 (Section 5.17). | ADR 0005 update | N1 |
 | D13 | Rich text | A Markdown subset stored as text and rendered escaped. Converted to HTML when syncing to Shopify in Phase 3. | ADR | N1 |
 
-### 4.2 Owner questions
+### 4.2 Owner answers
+
+Answered on 14 November 2026.
+
+| ID | Question | Answer |
+| --- | --- | --- |
+| Q1 | How are picture views logged (C08)? | **(a)** One access event per list or detail request, naming the images it returned; a separate event for each original download. |
+| Q2 | Ship starter families? | **(a)** Yes: Apparel, Furniture, Food, and Spare parts templates, added with one click and then edited. |
+| Q3 | Upgrade staging Neon to the Launch plan for the benchmark? | **Only when needed, and ask the owner again before upgrading.** Until then the benchmark uses a temporary separate Neon project where it fits. |
+| Q4 | Conflict per field or per record? | **(a)** Per field: different fields both succeed; the same field conflicts. |
+
+The options as proposed:
 
 | ID | Question | Options | Recommendation |
 | --- | --- | --- | --- |
@@ -167,7 +178,7 @@ Each gets a short ADR in `docs/adr/`, numbered when written.
 - **Limits (proposed):** 300 active field definitions per shop, 500 options per select field, 32 KB of attributes per record. Each limit is visible in settings and enforced with a clear error.
 - **Indexes:** a GIN `jsonb_path_ops` index on `attributes` for equality and option filters. Range filters and sorts on custom fields run without a dedicated index at Phase 1 scale; expression indexes are added only where the benchmark shows a need (PRD 10.4).
 - **Product families** list their fields (each optional or required, in a set order and group) and suggested option names and values. A shop can have many families; a product has at most one, and fields outside its family stay available as "other fields".
-- **Starter templates (Q2):** Apparel (size, colour, material, care instructions), Furniture (material, finish, assembled dimensions, assembly required, shipping packages), Food (net contents, ingredients, allergens, storage requirements, shelf life), Spare parts (manufacturer number, replaces, compatible with, condition). Adding a template copies it into the shop as ordinary fields and a family.
+- **Starter templates (confirmed, Q2):** Apparel (size, colour, material, care instructions), Furniture (material, finish, assembled dimensions, assembly required, shipping packages), Food (net contents, ingredients, allergens, storage requirements, shelf life), Spare parts (manufacturer number, replaces, compatible with, condition). Adding a template copies it into the shop as ordinary fields and a family.
 
 ### 5.3 Measurements, packs, and shipping packages
 
@@ -208,7 +219,7 @@ Each gets a short ADR in `docs/adr/`, numbered when written.
 - **Derivatives:** the browser makes a 320 px thumbnail and a 1,600 px display image in WebP before upload and sends them with the same intent. Safari can convert iPhone HEIC photos; other browsers ask for a JPEG instead.
 - **Finalize** creates the media record, its links, and the audit event in one transaction. An intent that expires unfinalized is swept and its objects deleted, so a failed upload never leaves an attachment (PRD 4.5).
 - **Links:** media attach to a product, to one or more variants, or both, with a role (merchant-defined; starter roles primary, lifestyle, detail, packaging, dimension diagram, swatch), an order, a primary flag per scope, and alt text.
-- **Delivery:** list and detail responses include signed URLs valid for 15 minutes, served by the Worker from R2 with `Cache-Control: private`. Downloading an original is its own operation. Logging follows Q1.
+- **Delivery:** list and detail responses include signed URLs valid for 15 minutes, served by the Worker from R2 with `Cache-Control: private`. Downloading an original is its own operation. Logging (Q1): the list or detail request records one access event naming the media it returned; each original download records its own event.
 
 ### 5.9 Warehouses and locations
 
@@ -407,7 +418,7 @@ Same setup as Phase 0: core and database tests in Node against `postgres:17`, Wo
 
 ### 7.2 Staging
 
-- The 10,000-variant benchmark (Section 8) in a separate Neon project or on the Launch plan (Q3).
+- The 10,000-variant benchmark (Section 8) in a temporary separate Neon project. If it does not fit the free plan, ask the owner before moving to the Launch plan (Q3).
 - A real browser session per milestone, with the events checked in `audit_events`.
 
 ### 7.3 ChatGPT run (F13)
@@ -445,13 +456,13 @@ On staging, with the same account type as Phase 0:
 | R4 | Import throughput is limited by per-row audit events and statements | Benchmark over 5 minutes | Larger chunks, set-based validation of a staged table, then per-record events written in one multi-row insert per chunk |
 | R5 | iPhone HEIC photos cannot be converted outside Safari | Upload errors | A clear message, and accept HEIC as an original without derivatives until a later decision |
 | R6 | Grid reads multiply audit events and queue cost | Events per user-hour above the cost model | Larger pages, debounced filters, and a per-user rate limit |
-| R7 | The benchmark data exceeds Neon Free | Storage warnings | Q3 |
+| R7 | The benchmark data exceeds Neon Free | Storage warnings | Shrink the audit-event share of the seed, or ask the owner for the Launch plan (Q3) |
 | R8 | New front-end dependencies arrive too new for the 14-day cooldown (ADR 0001) | Install fails the policy | Pin the newest version older than 14 days |
 
 ## 10. Environments, accounts, and dependencies
 
 - **No new accounts.** Cloudflare (Workers Rate Limiting is included in Workers Paid), Neon, WorkOS, Shopify, ChatGPT, and Resend as in Phase 0.
-- **Neon:** a separate project or the Launch plan for the benchmark (Q3).
+- **Neon:** a temporary separate project for the benchmark. The Launch plan only if needed, and only after asking the owner (Q3).
 - **New dependencies,** pinned exactly with the 14-day cooldown: `react`, `react-dom`, `vite`, `@vitejs/plugin-react`, `@tanstack/react-table`, `@tanstack/react-virtual`, `@tanstack/react-query`, `@tanstack/react-router`, `bwip-js`, `pdf-lib`, and `@playwright/test` (development only). `zxing-wasm` is already vendored. CSV parsing uses a small RFC 4180 parser in `packages/core`, so the Worker carries no large dependency.
 - **No new secrets,** except a signing key for media URLs, set with `wrangler secret put`.
 
@@ -467,4 +478,6 @@ On staging, with the same account type as Phase 0:
 | Date | Decision | By |
 | --- | --- | --- |
 | 14 Nov 2026 | Keep sending email from `mail.tracker.deletecookies.dev` for testing; the dedicated domain waits (Phase 0 E9). | Owner |
-| 14 Nov 2026 | Phase 1 plan drafted; Q1–Q4 open. | Build |
+| 14 Nov 2026 | Phase 1 plan drafted. | Build |
+| 14 Nov 2026 | Q1: one access event per list or detail request naming its pictures, one per original download. Q2: ship the four starter families. Q3: Neon Launch only when needed, asking the owner first. Q4: field-level edit conflicts. Recorded in PRD v0.6. | Owner |
+| 14 Nov 2026 | Hono upgraded to 4.13.16 for five security advisories, waiving the 14-day cooldown by a few hours (PR #21). | Owner |

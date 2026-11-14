@@ -116,6 +116,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/internal/smoke') return smoke(request, env);
+    if (url.pathname === '/internal/jobs') return internalJobs(request, env);
     app ??= createApp({
       database: (hooks) => database(env, hooks),
       audit: queueSink(env),
@@ -158,62 +159,37 @@ export default {
         batch.ackAll();
         return;
       }
-      const shopify = await shopifyConfigFromEnv(env);
-      const deps: SyncDeps | null = shopify
-        ? {
-            db,
-            audit: queueSink(env),
-            logger,
-            shopify,
-            dispatch: () => publishOutbox(env, db),
-          }
-        : null;
-      for (const message of batch.messages) {
-        const body = message.body as OutboxMessage | JobMessage;
+      // Jobs touch the database many times. Placement moves only fetch handlers next to it, so
+      // the consumer hands the batch to this Worker's own fetch handler through a service binding;
+      // if that call fails, it runs the batch here.
+      const items = batch.messages.map((m) => ({
+        id: m.id,
+        attempts: m.attempts,
+        body: m.body as OutboxMessage | JobMessage,
+      }));
+      let outcomes: JobsOutcome[] | null = null;
+      if (env.SELF && env.INTERNAL_SECRET) {
         try {
-          if ('job' in body) {
-            if (!deps) {
-              message.retry({ delaySeconds: 300 });
-              continue;
-            }
-            const outcome = await runJob(deps, body.job.shopId, body.job.jobId);
-            if (outcome.status === 'retry') message.retry({ delaySeconds: outcome.delaySeconds });
-            else message.ack();
-          } else if (body.topic === 'email.member_invitation') {
-            if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
-              logger.error('email_not_configured', { topic: body.topic });
-              message.retry({ delaySeconds: 600 });
-              continue;
-            }
-            await sendInvitationEmail(
-              {
-                db,
-                audit: queueSink(env),
-                email: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
-                publicUrl: env.PUBLIC_URL,
-              },
-              body.shopId,
-              (body.payload as { invitationId: string }).invitationId,
-            );
-            message.ack();
-          } else if (body.topic === 'inventory.availability_changed') {
-            // The Shopify availability push (plan Section 8.2, step 5).
-            if (deps) {
-              await pushAvailability(deps, body.shopId, body.payload as AvailabilityChanged);
-            }
-            message.ack();
-          } else {
-            logger.error('outbox_event_unhandled', { topic: body.topic, id: body.id });
-            message.ack();
-          }
+          const res = await env.SELF.fetch('https://airstock.internal/internal/jobs', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-internal-secret': env.INTERNAL_SECRET,
+            },
+            body: JSON.stringify(items),
+          });
+          if (res.ok) outcomes = ((await res.json()) as { outcomes: JobsOutcome[] }).outcomes;
+          else logger.error('internal_jobs_failed', { status: res.status });
         } catch (error) {
-          if (error instanceof NotConnectedError) {
-            message.ack();
-            continue;
-          }
-          logger.error('jobs_message_failed', { error: String(error) });
-          message.retry({ delaySeconds: Math.min(300, 30 * message.attempts) });
+          logger.error('internal_jobs_failed', { error: String(error) });
         }
+      }
+      outcomes ??= await runJobsBatch(env, db, items);
+      const byId = new Map(outcomes.map((o) => [o.id, o]));
+      for (const message of batch.messages) {
+        const outcome = byId.get(message.id);
+        if (outcome?.retryAfter === undefined || outcome.retryAfter === null) message.ack();
+        else message.retry({ delaySeconds: outcome.retryAfter });
       }
     } finally {
       await db.close();
@@ -299,4 +275,101 @@ async function smoke(request: Request, env: Env): Promise<Response> {
     timings,
     colo: (request as Request & { cf?: { colo?: string } }).cf?.colo ?? null,
   });
+}
+
+interface JobsItem {
+  id: string;
+  attempts: number;
+  body: OutboxMessage | JobMessage;
+}
+
+/** Null retryAfter means acknowledge; a number means retry after that many seconds. */
+interface JobsOutcome {
+  id: string;
+  retryAfter: number | null;
+}
+
+/**
+ * Runs a batch from the jobs queue: Shopify order jobs, availability pushes, and emails. Called
+ * through the self service binding, so placement runs it next to the database.
+ */
+async function internalJobs(request: Request, env: Env): Promise<Response> {
+  const secret = request.headers.get('x-internal-secret') ?? '';
+  if (
+    request.method !== 'POST' ||
+    !env.INTERNAL_SECRET ||
+    !timingSafeEqualText(secret, env.INTERNAL_SECRET)
+  ) {
+    return new Response('Not found', { status: 404 });
+  }
+  const items = (await request.json()) as JobsItem[];
+  const db = database(env);
+  try {
+    return Response.json({ outcomes: await runJobsBatch(env, db, items) });
+  } finally {
+    await db.close();
+  }
+}
+
+function timingSafeEqualText(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function runJobsBatch(env: Env, db: Database, items: JobsItem[]): Promise<JobsOutcome[]> {
+  const shopify = await shopifyConfigFromEnv(env);
+  const deps: SyncDeps | null = shopify
+    ? { db, audit: queueSink(env), logger, shopify, dispatch: () => publishOutbox(env, db) }
+    : null;
+  const outcomes: JobsOutcome[] = [];
+  for (const item of items) {
+    outcomes.push({ id: item.id, retryAfter: await runJobsMessage(env, db, deps, item) });
+  }
+  return outcomes;
+}
+
+async function runJobsMessage(
+  env: Env,
+  db: Database,
+  deps: SyncDeps | null,
+  item: JobsItem,
+): Promise<number | null> {
+  const { body } = item;
+  try {
+    if ('job' in body) {
+      if (!deps) return 300;
+      const outcome = await runJob(deps, body.job.shopId, body.job.jobId);
+      return outcome.status === 'retry' ? outcome.delaySeconds : null;
+    }
+    if (body.topic === 'email.member_invitation') {
+      if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
+        logger.error('email_not_configured', { topic: body.topic });
+        return 600;
+      }
+      await sendInvitationEmail(
+        {
+          db,
+          audit: queueSink(env),
+          email: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
+          publicUrl: env.PUBLIC_URL,
+        },
+        body.shopId,
+        (body.payload as { invitationId: string }).invitationId,
+      );
+      return null;
+    }
+    if (body.topic === 'inventory.availability_changed') {
+      // The Shopify availability push (plan Section 8.2, step 5).
+      if (deps) await pushAvailability(deps, body.shopId, body.payload as AvailabilityChanged);
+      return null;
+    }
+    logger.error('outbox_event_unhandled', { topic: body.topic, id: body.id });
+    return null;
+  } catch (error) {
+    if (error instanceof NotConnectedError) return null;
+    logger.error('jobs_message_failed', { error: String(error) });
+    return Math.min(300, 30 * Math.max(1, item.attempts));
+  }
 }

@@ -32,4 +32,8 @@ export interface Env {
   RESEND_API_KEY?: string;
   /** Sender, for example: Airstock <invites@mail.airstock.example>. */
   EMAIL_FROM?: string;
+  /** This Worker, bound to itself: the jobs consumer runs batches through its fetch handler. */
+  SELF?: Fetcher;
+  /** Authenticates the jobs consumer's calls to /internal/jobs. */
+  INTERNAL_SECRET?: string;
 }

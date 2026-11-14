@@ -5,6 +5,7 @@ import {
   type Caller,
   errors,
   type Logger,
+  sessionCaller,
   uuidv7,
 } from '@airstock/core';
 import type { Database } from '@airstock/db';
@@ -12,12 +13,15 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
 import { mountRestRoutes } from './rest.ts';
+import { mountWeb, readSession, sameOrigin, type WebConfig } from './web.ts';
 
 export interface AppDeps {
   /** A database handle for one request; the app closes it when the request ends. */
   database(): Database;
   audit: AuditSink;
   mcp: McpAuthConfig | null;
+  /** Sign-in, connect consent, and dashboard pages; off until WorkOS is configured. */
+  web: WebConfig | null;
   logger: Logger;
 }
 
@@ -69,7 +73,15 @@ export function createApp(deps: AppDeps) {
   app.use('/api/v1/*', async (c, next) => {
     const header = c.req.header('authorization') ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-    const caller = token ? await authenticateApiToken(c.get('db'), token) : null;
+    let caller: Caller | null = null;
+    if (token) {
+      caller = await authenticateApiToken(c.get('db'), token);
+    } else if (deps.web && c.req.header('x-airstock-request') === '1' && sameOrigin(c, deps.web)) {
+      // The dashboard: a session cookie, plus a custom header that a cross-site page cannot send
+      // without a CORS preflight, which Airstock never approves.
+      const session = await readSession(c, deps.web);
+      if (session) caller = sessionCaller(session.uid);
+    }
     if (!caller) return problem(errors.unauthenticated(), c.get('requestId'));
     c.set('caller', caller);
     await next();
@@ -77,6 +89,7 @@ export function createApp(deps: AppDeps) {
 
   mountRestRoutes(app, deps);
   mountMcp(app, deps);
+  mountWeb(app, deps);
 
   app.notFound((c) => problem(errors.notFound('Route'), c.get('requestId') ?? uuidv7()));
   app.onError((error, c) => {

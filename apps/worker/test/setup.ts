@@ -10,6 +10,13 @@ import {
 } from '../../../test/helpers.ts';
 import { createApp } from '../src/app.ts';
 import type { McpAuthConfig } from '../src/mcp.ts';
+import type { WebConfig } from '../src/web.ts';
+import {
+  type ConsentOption,
+  type WorkosClient,
+  WorkosError,
+  type WorkosUser,
+} from '../src/workos.ts';
 
 // biome-ignore lint/suspicious/noExplicitAny: tests read many different JSON shapes
 type Json = Record<string, any>;
@@ -17,11 +24,57 @@ export const json = (res: Response): Promise<Json> => res.json() as Promise<Json
 
 export const ISSUER = 'https://auth.test.example';
 export const AUDIENCE = 'https://api.test.example/mcp';
+export const PUBLIC_URL = 'https://airstock.test';
+export const GRANT_CLAIM = 'urn:airstock:grant';
+
+/** Records what Airstock asked WorkOS for; codes map to users the test registered. */
+export class FakeWorkos implements WorkosClient {
+  readonly users = new Map<string, WorkosUser>();
+  readonly sentCodes: string[] = [];
+  readonly completed: Array<{
+    externalAuthId: string;
+    user: WorkosUser;
+    consent: ConsentOption[];
+  }> = [];
+  failComplete = false;
+
+  /** Registers a user who signs in with `code` (OAuth) or with `123456` (Magic Auth). */
+  addUser(code: string, user: WorkosUser): void {
+    this.users.set(code, user);
+  }
+  authorizeUrl(provider: string, state: string): string {
+    return `https://workos.test/authorize?provider=${provider}&state=${state}`;
+  }
+  async authenticateWithCode(code: string): Promise<WorkosUser> {
+    const user = this.users.get(code);
+    if (!user) throw new WorkosError(400, 'invalid_grant');
+    return user;
+  }
+  async sendMagicCode(email: string): Promise<void> {
+    this.sentCodes.push(email);
+  }
+  async authenticateWithMagicCode(email: string, code: string): Promise<WorkosUser> {
+    const user = [...this.users.values()].find((u) => u.email === email);
+    if (!user || code !== '123456') throw new WorkosError(400, 'invalid_one_time_code');
+    return user;
+  }
+  async completeConnect(input: {
+    externalAuthId: string;
+    user: WorkosUser;
+    consent: ConsentOption[];
+  }): Promise<{ redirectUri: string }> {
+    if (this.failComplete) throw new WorkosError(400, 'invalid_external_auth_id');
+    this.completed.push(input);
+    return { redirectUri: `${ISSUER}/oauth2/consent?ext=${input.externalAuthId}` };
+  }
+}
 
 export interface TestApp {
   app: ReturnType<typeof createApp>;
   db: Database;
   sink: MemoryAuditSink;
+  workos: FakeWorkos;
+  web: WebConfig;
   sign(claims: Record<string, unknown>): Promise<string>;
   close(): Promise<void>;
 }
@@ -35,22 +88,33 @@ export async function testApp(): Promise<TestApp> {
   const mcp: McpAuthConfig = {
     issuer: ISSUER,
     audience: AUDIENCE,
-    grantClaim: 'grant_id',
+    grantClaim: GRANT_CLAIM,
     resource: AUDIENCE,
     authorizationServer: ISSUER,
     keys,
+  };
+  const workos = new FakeWorkos();
+  const web: WebConfig = {
+    publicUrl: PUBLIC_URL,
+    sessionSecret: 'test-session-secret-0123456789abcdef',
+    workos,
+    authkitOrigin: ISSUER,
+    grantClaim: GRANT_CLAIM,
   };
   const app = createApp({
     // The shared pool outlives requests in tests; the Worker closes its per-request handle.
     database: () => ({ transaction: db.transaction.bind(db), close: async () => {} }),
     audit: sink,
     mcp,
+    web,
     logger: { error: () => {} },
   });
   return {
     app,
     db,
     sink,
+    workos,
+    web,
     sign: (claims) =>
       new SignJWT(claims)
         .setProtectedHeader({ alg: 'RS256', kid: 'test' })
@@ -95,7 +159,7 @@ export async function apiToken(
   return res.result as { token: string; credentialId: string };
 }
 
-/** Inserts an approved MCP connection grant, as the consent step will (plan Section 7.2). */
+/** Inserts an MCP connection grant already bound to its client and token subject. */
 export async function connectionGrant(
   shop: SeededShop,
   scopes: string[],
@@ -111,8 +175,10 @@ export async function connectionGrant(
   );
   const grantId = uuidv7();
   await ownerQuery(
-    'insert into connection_grants (shop_id, id, membership_id, client_id, client_name, scopes) values ($1, $2, $3, $4, $5, $6)',
-    [shop.shopId, grantId, member!.id, clientId, 'ChatGPT', scopes],
+    `insert into connection_grants
+       (shop_id, id, membership_id, client_id, client_name, scopes, token_subject, bound_at)
+     values ($1, $2, $3, $4, $5, $6, $7, now())`,
+    [shop.shopId, grantId, member!.id, clientId, 'ChatGPT', scopes, user!.workos_user_id],
   );
   return { grantId, sub: user!.workos_user_id, clientId };
 }

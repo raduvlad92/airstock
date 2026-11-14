@@ -1,6 +1,7 @@
 import type { AnyOperation } from '../registry.ts';
 import {
   createApiCredential,
+  createConnection,
   listApiCredentials,
   listConnections,
   revokeApiCredential,
@@ -9,12 +10,13 @@ import {
 import { getOperationOutcome, listActivity } from './activity.ts';
 import { createItem, searchVariants } from './catalog.ts';
 import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
-import { createShop, getShopContext } from './shops.ts';
+import { createShop, getShopContext, listShops } from './shops.ts';
 import { createLocation, createWarehouse, listLocations } from './storage.ts';
 
 /** The operation registry: the single source for REST, OpenAPI, MCP tools, and audit names. */
 export const operations: readonly AnyOperation[] = [
   createShop,
+  listShops,
   getShopContext,
   createItem,
   searchVariants,
@@ -30,6 +32,7 @@ export const operations: readonly AnyOperation[] = [
   createApiCredential,
   listApiCredentials,
   revokeApiCredential,
+  createConnection,
   listConnections,
   revokeConnection,
 ];
@@ -40,6 +43,7 @@ export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
 
 export {
   createApiCredential,
+  createConnection,
   createItem,
   createLocation,
   createShop,
@@ -51,6 +55,7 @@ export {
   listApiCredentials,
   listConnections,
   listLocations,
+  listShops,
   receiveStock,
   releaseReservation,
   reserveStock,

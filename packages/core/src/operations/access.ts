@@ -171,13 +171,49 @@ export const revokeApiCredential = defineOperation({
 
 const ConnectionSummary = z.object({
   grantId: Id,
-  clientId: z.string(),
+  /** Null until the first MCP request binds the grant to its OAuth client. */
+  clientId: z.string().nullable(),
   clientName: z.string().nullable(),
   scopes: z.array(z.string()),
   status: z.string(),
   membershipId: Id,
   createdAt: z.string(),
+  /** When the first MCP request bound the grant to its client; null until then. */
+  boundAt: z.string().nullable(),
   lastUsedAt: z.string().nullable(),
+});
+
+export const createConnection = defineOperation({
+  id: 'connections.create',
+  summary: 'Approve an AI or OAuth connection',
+  description:
+    'The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2).',
+  kind: 'command',
+  scope: 'shop',
+  input: z.object({
+    scopes: z.array(z.enum(CONNECTION_SCOPES)).min(1),
+  }),
+  output: z.object({ grantId: Id, scopes: z.array(z.string()) }),
+  permission: 'shop.read',
+  connectionScope: 'session',
+  audit: { action: 'connection.created' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/connections', status: 201 },
+  mcp: { exception: SESSION_ONLY },
+  async handler(ctx, input) {
+    if (!ctx.membership) throw errors.forbidden('A shop membership is required.');
+    const grantId = ctx.newId();
+    const scopes = CONNECTION_SCOPES.filter((s) => input.scopes.includes(s));
+    await ctx.tx.query(
+      `insert into connection_grants (shop_id, id, membership_id, scopes)
+       values (app_shop_id(), $1, $2, $3)`,
+      [grantId, ctx.membership.id, scopes],
+    );
+    return {
+      result: { grantId, scopes },
+      audit: { targetType: 'connection_grant', targetId: grantId, changes: { scopes } },
+    };
+  },
 });
 
 export const listConnections = defineOperation({
@@ -201,15 +237,17 @@ export const listConnections = defineOperation({
       : false;
     const rows = await ctx.tx.query<{
       id: string;
-      client_id: string;
+      client_id: string | null;
       client_name: string | null;
       scopes: string[];
       status: string;
       membership_id: string;
       created_at: Date;
+      bound_at: Date | null;
       last_used_at: Date | null;
     }>(
-      `select id, client_id, client_name, scopes, status, membership_id, created_at, last_used_at
+      `select id, client_id, client_name, scopes, status, membership_id, created_at, bound_at,
+         last_used_at
        from connection_grants where ($1 or membership_id = $2) order by created_at desc limit 500`,
       [all, ctx.membership?.id ?? null],
     );
@@ -223,6 +261,7 @@ export const listConnections = defineOperation({
           status: r.status,
           membershipId: r.membership_id,
           createdAt: iso(r.created_at) as string,
+          boundAt: iso(r.bound_at),
           lastUsedAt: iso(r.last_used_at),
         })),
       },

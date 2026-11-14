@@ -52,26 +52,53 @@ export async function authenticateApiToken(db: Database, token: string): Promise
   };
 }
 
+export interface VerifiedConnectionToken {
+  /** `sub` of the verified access token. */
+  subject: string;
+  /** OAuth client the token was issued to (`client_id` or `azp`). */
+  clientId: string;
+  clientName?: string | null;
+}
+
 /**
  * Resolves an MCP connection grant on every request, so revocation and membership changes
  * apply to the next tool call even while the access token is unexpired (PRD 9.4).
+ *
+ * The consent step creates the grant before WorkOS issues a token, so the first verified token
+ * that carries it binds the grant to its client and subject. Every later request must match
+ * both: a grant can never move to another client or user. Only Airstock chooses the grant ID
+ * that WorkOS puts in a token, at the consent step for the signed-in user.
  */
 export async function resolveConnectionGrant(
   db: Database,
   grantId: string,
-  verified: { providerUserId: string; clientId: string },
+  verified: VerifiedConnectionToken,
 ): Promise<Caller | null> {
   const [row] = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
-    tx.query<ResolvedRow & { grant_id: string; client_id: string; workos_user_id: string | null }>(
-      'select * from resolve_connection_grant($1)',
-      [grantId],
-    ),
+    tx.query<
+      ResolvedRow & {
+        grant_id: string;
+        client_id: string | null;
+        token_subject: string | null;
+        workos_user_id: string | null;
+      }
+    >('select * from resolve_connection_grant($1)', [grantId]),
   );
   if (!row || !isRole(row.role)) return null;
-  // The grant must belong to the user and client the token was issued to: a token for one
-  // user can never use another user's grant, whatever the grant ID claims.
-  if (row.workos_user_id !== verified.providerUserId || row.client_id !== verified.clientId)
-    return null;
+  let clientId = row.client_id;
+  let subject = row.token_subject;
+  if (clientId === null || subject === null) {
+    const [bound] = await db.transaction({ shopId: null, userId: null }, (tx) =>
+      tx.query<{ client_id: string; token_subject: string }>(
+        'select * from bind_connection_grant($1, $2, $3, $4)',
+        [grantId, verified.clientId, verified.subject, verified.clientName ?? null],
+      ),
+    );
+    if (!bound) return null;
+    clientId = bound.client_id;
+    subject = bound.token_subject;
+  }
+  if (clientId !== verified.clientId || subject !== verified.subject) return null;
   return {
     kind: 'connection',
     id: row.grant_id,
@@ -84,7 +111,7 @@ export async function resolveConnectionGrant(
       locationScopeIds: row.location_scope_ids,
     },
     scopes: toScopes(row.scopes),
-    clientId: row.client_id,
+    clientId,
     grantId: row.grant_id,
     source: 'mcp',
   };

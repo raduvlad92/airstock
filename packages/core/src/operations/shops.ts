@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { errors } from '../errors.ts';
-import { PERMISSIONS, ROLE_PERMISSIONS } from '../permissions.ts';
+import { PERMISSIONS, ROLE_PERMISSIONS, ROLES } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, isTimeZone } from '../schemas.ts';
 
@@ -111,5 +111,48 @@ export const getShopContext = defineOperation({
       },
       audit: { targetType: 'shop', targetId: ctx.shopId },
     };
+  },
+});
+
+export const listShops = defineOperation({
+  id: 'shops.list',
+  summary: 'List your shops',
+  description: 'The shops where you are an active member, with your role in each.',
+  kind: 'read',
+  scope: 'account',
+  input: z.object({}),
+  output: z.object({
+    shops: z.array(
+      z.object({
+        id: Id,
+        name: z.string(),
+        currency: z.string(),
+        timezone: z.string(),
+        role: z.enum(ROLES),
+      }),
+    ),
+  }),
+  permission: 'authenticated',
+  connectionScope: 'session',
+  audit: { action: 'shops.listed' },
+  idempotency: 'none',
+  http: { method: 'GET', path: '/shops' },
+  mcp: { exception: 'Account-level: an MCP connection is bound to one existing shop.' },
+  async handler(ctx) {
+    if (!ctx.caller.userId) throw errors.forbidden('Only a signed-in user can list shops.');
+    const shops = await ctx.tx.query<{
+      id: string;
+      name: string;
+      currency: string;
+      timezone: string;
+      role: (typeof ROLES)[number];
+    }>(
+      `select s.id, s.name, s.currency, s.timezone, m.role
+       from memberships m join shops s on s.id = m.shop_id
+       where m.user_id = $1 and m.status = 'active'
+       order by s.name, s.id limit 200`,
+      [ctx.caller.userId],
+    );
+    return { result: { shops }, audit: { targetType: 'shop', targetId: 'list' } };
   },
 });

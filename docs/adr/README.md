@@ -10,3 +10,4 @@ Short records of decisions made while building, with the reason and what would m
 | [0004](0004-audit-pipeline.md) | Queue for attempts, reads, and failures; success events in the business transaction; monthly partitions | Accepted |
 | [0005](0005-operation-registry.md) | One registry generates REST, OpenAPI, permissions, audit names, and task-shaped MCP tools | Accepted |
 | [0006](0006-inventory-concurrency.md) | Position locks in id order, a database check on allocations, lazy expiry | Accepted |
+| [0007](0007-mcp-connection-binding.md) | MCP shop binding through WorkOS standalone Connect: Airstock consent creates the grant, the first token binds its client | Accepted |

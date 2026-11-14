@@ -13,8 +13,8 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 | M1 Staging infrastructure | Done | Neon `aws-eu-central-1` PostgreSQL 17, Hyperdrive with caching off, the EU R2 bucket, queues with dead-letter queues, crons, and the custom domain. CI migrates and deploys every push to `main`. First latency readings are in [staging.md](staging.md). |
 | M2 Core spine | Done | Schema, roles, row-level security, registry, pipeline, audit producer and consumer, outbox, parity check. |
 | M3 Representative inventory command | Done | Receive, reserve, release, lazy expiry, availability, outcome lookup, with the Section 9 tests. |
-| M4 Sign-in and dashboard shell | In progress | WorkOS staging is configured (Google, Microsoft, Magic Auth; no passwords). |
-| M5 MCP and ChatGPT | Server side done | `/mcp` serves 9 tools through the same pipeline, verifies tokens against a JWKS, and checks the connection grant on every call. WorkOS Connect is configured for standalone sign-in, DCR, and CIMD; the shop-binding spike (plan 7.2) is next. |
+| M4 Sign-in and dashboard shell | In progress | Sign-in with Google, Microsoft, or an emailed code (no passwords); sealed host-only session cookie; a minimal dashboard to list and create shops and revoke connections, calling `/api/v1`. Still to come: member invitations, inventory forms, WorkOS sign-in events in the audit trail, and the React shell. |
+| M5 MCP and ChatGPT | Server side done | `/mcp` serves 9 tools through the same pipeline, verifies tokens against a JWKS, and checks the connection grant on every call. The shop-binding spike chose option A on WorkOS standalone Connect ([ADR 0007](adr/0007-mcp-connection-binding.md)); all five pass criteria are tested in `apps/worker/test/web.test.ts`. The recorded ChatGPT run is next. |
 | M6 Shopify slice | Not started | The app `Airstock Staging` and stores `airstock-dev-a` and `airstock-dev-b` exist. The outbox already announces `inventory.availability_changed`. |
 | M7 Scanning and email | Not started | Scanning needs the staging URL (camera access requires HTTPS). Email provider evaluation can proceed; the send waits for a domain (P6). |
 | M8 Measurement and exit | Not started | Needs staging. Statement counting is built into the database layer. |
@@ -28,7 +28,7 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 | E3 | Waiting | M4. |
 | E4 | Done | `pnpm parity` in CI, `packages/core/test/registry.test.ts`, `docs/api/openapi.json` checked in CI. |
 | E5 | Done in CI | See Section 4. |
-| E6 | Server side tested | `apps/worker/test/mcp.test.ts` (A14–A16 with test tokens). The real ChatGPT run waits for M5. |
+| E6 | Server side tested | `apps/worker/test/mcp.test.ts` and `web.test.ts` (A14–A16 and the Section 7.2 criteria with test tokens). The real ChatGPT run is next. |
 | E7–E10 | Waiting | M6–M8. |
 
 ## 3. What the owner needs to provide

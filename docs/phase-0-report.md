@@ -143,7 +143,7 @@ Measured per unit:
 | --- | --- | --- | --- | --- |
 | Read | 11 ms | 3 (one access event) | 1 | 0.7 KB |
 | Command | 24 ms | 3 (attempt event; outbox delivered in the request) | 2, plus 1 push event when mapped | 2.2 KB |
-| Shopify order, 2 lines | about 50 ms | 12 (webhook attempt, delayed safety copy, two reservation attempts) | 6 | 4.4 KB |
+| Shopify order, 2 lines | about 50 ms (estimated: two commands plus the webhook; not captured separately) | 12 (webhook attempt, delayed safety copy, two reservation attempts) | 6 | 4.4 KB |
 
 Per shop per month: 36,900 requests, 519,000 CPU-ms, 118,800 queue operations, 53,400 audit events (39 MB a month, 117 MB in the 3-month hot window).
 

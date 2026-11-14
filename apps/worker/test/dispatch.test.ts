@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { apiToken, shopWithStock, type TestApp, testApp } from './setup.ts';
+import {
+  apiToken,
+  connectionGrant,
+  GRANT_CLAIM,
+  shopWithStock,
+  type TestApp,
+  testApp,
+} from './setup.ts';
 
 let t: TestApp;
 let published = 0;
@@ -38,5 +45,42 @@ describe('outbox publishing', () => {
     expect(reserve.headers.get('server-timing')).toContain('desc="sends 1, events 1"');
     await new Promise((r) => setTimeout(r, 10));
     expect(published).toBe(1);
+  });
+});
+
+describe('MCP request lifetime', () => {
+  it('finishes the tool before the request ends, so its work is measured and its handle open', async () => {
+    const { shop, variantId } = await shopWithStock(t, 'MCP lifetime shop');
+    const grant = await connectionGrant(shop, ['inventory:read', 'inventory:write']);
+    const token = await t.sign({
+      sub: grant.sub,
+      client_id: grant.clientId,
+      [GRANT_CLAIM]: grant.grantId,
+    });
+    const before = published;
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const res = await t.app.request('/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name, arguments: args },
+        }),
+      });
+      return { res, text: await res.text() };
+    };
+    const read = await call('get_availability', { variantId });
+    expect(read.text).not.toContain('"isError":true');
+    expect(read.res.headers.get('server-timing')).toContain('desc="sends 1, events 1"');
+    const reserve = await call('reserve_stock', { action: 'reserve', variantId, quantity: '1' });
+    expect(reserve.text).not.toContain('"isError":true');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(published).toBe(before + 1);
   });
 });

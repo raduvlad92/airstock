@@ -206,13 +206,17 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
           c.set('outboxWritten', true),
         ),
       {
-        // Complete JSON responses: the request's database handle closes when the response returns.
         responseMode: 'json',
         onerror: (error) => deps.logger.error('mcp_error', { error: String(error) }),
       },
     );
     try {
-      return await handler.fetch(c.req.raw);
+      // The SDK can answer with a stream that the tool writes into after fetch() returns. Read it
+      // to the end here, so the tool finishes while this request's database handle is open, and
+      // its measurements and outbox events belong to this request.
+      const res = await handler.fetch(c.req.raw);
+      const body = await res.arrayBuffer();
+      return new Response(body, { status: res.status, headers: res.headers });
     } finally {
       await handler.close();
     }

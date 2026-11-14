@@ -636,6 +636,9 @@ export async function pushLevel(
 ): Promise<PushOutcome> {
   const key = [pair.connectionId, pair.inventoryItemId, pair.shopifyLocationId];
   const { shopId } = store;
+  // Recorded on the push event, so the P1 path is visible in the activity history.
+  let refusedWrites = 0;
+  let ordersCaughtUp = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
     // The level row stays locked while Shopify is called, so pushes and order lines for the
     // same level apply one at a time.
@@ -681,7 +684,10 @@ export async function pushLevel(
           syncEvent(store, pair, {
             action: 'shopify.inventory.pushed',
             outcome: 'succeeded',
-            changes: { available: { from, to: target } },
+            changes: {
+              available: { from, to: target },
+              ...(refusedWrites > 0 ? { refusedWrites, ordersCaughtUp } : {}),
+            },
           }),
         ]),
       ]);
@@ -693,7 +699,7 @@ export async function pushLevel(
     if (step.kind === 'init') {
       // First push for this level: process orders Shopify already counted, then read Shopify's
       // quantity as the starting point.
-      await catchUpOrders(deps, store, store.createdAt);
+      ordersCaughtUp += await catchUpOrders(deps, store, store.createdAt);
       const readAt = new Date();
       const actual = await store.admin.getAvailable(pair.inventoryItemId, pair.shopifyLocationId);
       if (actual === null) {
@@ -715,7 +721,9 @@ export async function pushLevel(
     const since = new Date(
       Math.max(store.createdAt.getTime(), (step.asOf ? new Date(step.asOf).getTime() : 0) - 60_000),
     );
+    refusedWrites++;
     const processed = await catchUpOrders(deps, store, since);
+    ordersCaughtUp += processed;
     if (processed > 0) continue;
     const actual = await store.admin.getAvailable(pair.inventoryItemId, pair.shopifyLocationId);
     await recordConflict(deps, store, pair, { expected: step.from, airstock: step.target, actual });

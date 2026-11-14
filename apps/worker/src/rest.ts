@@ -42,6 +42,7 @@ export function mountRestRoutes(app: Hono<AppEnv>, deps: AppDeps): void {
           requestId: c.get('requestId'),
         },
       );
+      if (result.outbox > 0) c.set('outboxWritten', true);
       if (result.replayed) c.header('idempotent-replayed', 'true');
       return c.json(result.result as object, result.replayed ? 200 : (op.http.status ?? 200));
     });

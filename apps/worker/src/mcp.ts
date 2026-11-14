@@ -98,7 +98,13 @@ async function authenticate(
   return caller ? { caller } : { caller: null, reason: 'grant_rejected' };
 }
 
-function buildServer(deps: AppDeps, db: Database, caller: Caller, requestId: string): McpServer {
+function buildServer(
+  deps: AppDeps,
+  db: Database,
+  caller: Caller,
+  requestId: string,
+  onOutbox: () => void,
+): McpServer {
   const server = new McpServer({ name: 'airstock', version: '0.1.0' });
   for (const tool of TOOLS) {
     server.registerTool(
@@ -128,6 +134,7 @@ function buildServer(deps: AppDeps, db: Database, caller: Caller, requestId: str
               requestId,
             },
           );
+          if (res.outbox > 0) onOutbox();
           const structured = {
             ...(res.result as object),
             ...(res.replayed ? { replayed: true } : {}),
@@ -196,7 +203,10 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
       });
     }
     const handler = createMcpHandler(
-      () => buildServer(deps, c.get('db'), caller, c.get('requestId')),
+      () =>
+        buildServer(deps, c.get('db'), caller, c.get('requestId'), () =>
+          c.set('outboxWritten', true),
+        ),
       {
         // Complete JSON responses: the request's database handle closes when the response returns.
         responseMode: 'json',

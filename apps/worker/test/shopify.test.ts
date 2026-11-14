@@ -432,6 +432,16 @@ describe('Shopify orders and availability', () => {
     ]);
     expect(storeA.sets.at(-1)).toMatchObject({ from: 6, to: 11 });
     expect(storeA.sets.some((s) => s.to === 12)).toBe(false);
+    const [pushed] = await ownerQuery<{ changes: object }>(
+      `select changes from audit_events where shop_id = $1 and action = 'shopify.inventory.pushed'
+       order by occurred_at desc limit 1`,
+      [a.shopId],
+    );
+    expect(pushed?.changes).toEqual({
+      available: { from: 6, to: 11 },
+      refusedWrites: 1,
+      ordersCaughtUp: 1,
+    });
     expect(await availability(a.cookie, a.shopId, a.variantId)).toBe('11.000000');
     // The late webhook changes nothing.
     await deliver(domainA, 'orders/create', storeA.webhookBody(order));

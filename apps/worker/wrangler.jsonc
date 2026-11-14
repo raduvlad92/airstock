@@ -1,0 +1,49 @@
+// Staging Worker (plan Section 5.1). IDs marked REPLACE are filled in during M1, when the
+// Cloudflare and Neon resources are created; secrets are set with `wrangler secret put`.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "airstock-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // Run near the Neon database (aws-eu-central-1): every SQL statement is a round trip.
+  // M1 compares this with Smart Placement and records the result.
+  "placement": { "mode": "smart" },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_HYPERDRIVE_ID",
+      "localConnectionString": "postgres://airstock_app:airstock_app@localhost:54329/airstock_dev"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "airstock-staging-files", "jurisdiction": "eu" }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "AUDIT_QUEUE", "queue": "airstock-staging-audit" },
+      { "binding": "JOBS_QUEUE", "queue": "airstock-staging-jobs" }
+    ],
+    "consumers": [
+      {
+        "queue": "airstock-staging-audit",
+        "max_batch_size": 100,
+        "max_batch_timeout": 2,
+        "max_retries": 10,
+        "dead_letter_queue": "airstock-staging-audit-dlq"
+      },
+      {
+        "queue": "airstock-staging-jobs",
+        "max_batch_size": 10,
+        "max_retries": 10,
+        "dead_letter_queue": "airstock-staging-jobs-dlq"
+      }
+    ]
+  },
+  "triggers": { "crons": ["* * * * *", "0 3 * * *"] },
+  "vars": {
+    "MCP_GRANT_CLAIM": "grant_id"
+  }
+}

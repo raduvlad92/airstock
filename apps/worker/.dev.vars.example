@@ -1,0 +1,9 @@
+# Copy to .dev.vars for `wrangler dev`. Never commit .dev.vars.
+# MCP OAuth (plan M5). /mcp answers 503 until these are set.
+MCP_ISSUER=
+MCP_AUDIENCE=
+MCP_JWKS_URL=
+MCP_RESOURCE_URL=
+MCP_AUTHORIZATION_SERVER=
+# Enables /internal/smoke (plan M1).
+SMOKE_SECRET=

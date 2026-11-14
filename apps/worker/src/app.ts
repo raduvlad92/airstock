@@ -1,0 +1,90 @@
+import {
+  AppError,
+  type AuditSink,
+  authenticateApiToken,
+  type Caller,
+  errors,
+  type Logger,
+  uuidv7,
+} from '@airstock/core';
+import type { Database } from '@airstock/db';
+import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { type McpAuthConfig, mountMcp } from './mcp.ts';
+import { mountRestRoutes } from './rest.ts';
+
+export interface AppDeps {
+  /** A database handle for one request; the app closes it when the request ends. */
+  database(): Database;
+  audit: AuditSink;
+  mcp: McpAuthConfig | null;
+  logger: Logger;
+}
+
+export type AppEnv = {
+  Variables: {
+    requestId: string;
+    db: Database;
+    caller: Caller;
+  };
+};
+
+export function problem(error: AppError, requestId: string): Response {
+  return new Response(JSON.stringify(error.toProblem(requestId)), {
+    status: error.status,
+    headers: {
+      'content-type': 'application/problem+json',
+      'x-request-id': requestId,
+      ...(error.status === 401 ? { 'www-authenticate': 'Bearer' } : {}),
+    },
+  });
+}
+
+export function createApp(deps: AppDeps) {
+  const app = new Hono<AppEnv>();
+
+  app.use('*', async (c, next) => {
+    c.set('requestId', uuidv7());
+    const db = deps.database();
+    c.set('db', db);
+    try {
+      await next();
+    } finally {
+      await db.close();
+    }
+    c.header('x-request-id', c.get('requestId'));
+  });
+
+  app.use(
+    '*',
+    bodyLimit({
+      maxSize: 1024 * 1024,
+      onError: () =>
+        problem(errors.validation([{ path: 'body', message: 'At most 1 MB.' }]), uuidv7()),
+    }),
+  );
+
+  // Only authenticated callers are served (plan P3). A request without a valid credential is
+  // answered here, before anything is written to the audit queue.
+  app.use('/api/v1/*', async (c, next) => {
+    const header = c.req.header('authorization') ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    const caller = token ? await authenticateApiToken(c.get('db'), token) : null;
+    if (!caller) return problem(errors.unauthenticated(), c.get('requestId'));
+    c.set('caller', caller);
+    await next();
+  });
+
+  mountRestRoutes(app, deps);
+  mountMcp(app, deps);
+
+  app.notFound((c) => problem(errors.notFound('Route'), c.get('requestId') ?? uuidv7()));
+  app.onError((error, c) => {
+    const requestId = c.get('requestId') ?? uuidv7();
+    if (error instanceof AppError) return problem(error, requestId);
+    deps.logger.error('unhandled_error', { requestId, error: String(error) });
+    return problem(errors.internal(), requestId);
+  });
+
+  return app;
+}

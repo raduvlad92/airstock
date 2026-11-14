@@ -1,0 +1,12 @@
+{
+  "name": "@airstock/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@airstock/db": "workspace:*",
+    "zod": "4.6.7"
+  }
+}

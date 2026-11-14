@@ -3,19 +3,19 @@
 **Updated:** 14 November 2026  
 **Plan:** [Phase 0 build plan](phase-0-build-plan.md)
 
-The code that does not need external accounts is built and tested. What remains needs accounts only the owner can create (Section 3).
+Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.md)). All accounts exist: Cloudflare, Neon, WorkOS, the Shopify app and two development stores, and ChatGPT. The email domain is still deferred.
 
 ## 1. Milestones
 
 | Milestone | State | Notes |
 | --- | --- | --- |
-| M0 Repository and CI | Done | Public repository, secret scanning and push protection, Dependabot alerts, one CI job, SHA-pinned actions. Branch protection is turned on once the first CI run passes. |
-| M1 Staging infrastructure | Ready, waiting for accounts | `apps/worker/wrangler.jsonc` declares Hyperdrive, the EU R2 bucket, two queues with dead-letter queues, and crons. `/internal/smoke` measures database, R2, and queue latency once `SMOKE_SECRET` is set. CI migrates and deploys when the `staging` secrets exist. |
+| M0 Repository and CI | Done | Public repository, secret scanning and push protection, Dependabot alerts, one CI job, SHA-pinned actions. Branch protection on `main` requires the `verify` check. |
+| M1 Staging infrastructure | Done | Neon `aws-eu-central-1` PostgreSQL 17, Hyperdrive with caching off, the EU R2 bucket, queues with dead-letter queues, crons, and the custom domain. CI migrates and deploys every push to `main`. First latency readings are in [staging.md](staging.md). |
 | M2 Core spine | Done | Schema, roles, row-level security, registry, pipeline, audit producer and consumer, outbox, parity check. |
 | M3 Representative inventory command | Done | Receive, reserve, release, lazy expiry, availability, outcome lookup, with the Section 9 tests. |
-| M4 Sign-in and dashboard shell | Not started | Needs the WorkOS staging environment. User creation (`upsert_user_by_workos_id`) and session callers already exist. |
-| M5 MCP and ChatGPT | Server side done | `/mcp` serves 9 tools through the same pipeline, verifies tokens against a JWKS, and checks the connection grant on every call. The WorkOS shop-binding spike (plan 7.2) and the ChatGPT run need WorkOS. |
-| M6 Shopify slice | Not started | Needs a Shopify Partners account and two development stores. The outbox already announces `inventory.availability_changed`. |
+| M4 Sign-in and dashboard shell | In progress | WorkOS staging is configured (Google, Microsoft, Magic Auth; no passwords). |
+| M5 MCP and ChatGPT | Server side done | `/mcp` serves 9 tools through the same pipeline, verifies tokens against a JWKS, and checks the connection grant on every call. WorkOS Connect is configured for standalone sign-in, DCR, and CIMD; the shop-binding spike (plan 7.2) is next. |
+| M6 Shopify slice | Not started | The app `Airstock Staging` and stores `airstock-dev-a` and `airstock-dev-b` exist. The outbox already announces `inventory.availability_changed`. |
 | M7 Scanning and email | Not started | Scanning needs the staging URL (camera access requires HTTPS). Email provider evaluation can proceed; the send waits for a domain (P6). |
 | M8 Measurement and exit | Not started | Needs staging. Statement counting is built into the database layer. |
 
@@ -23,8 +23,8 @@ The code that does not need external accounts is built and tested. What remains 
 
 | ID | State | Evidence |
 | --- | --- | --- |
-| E1 | Partly | Repository public; CI in `.github/workflows/ci.yml`. Staging deploy waits for M1. |
-| E2 | Waiting | M1. |
+| E1 | Done | Repository public; CI in `.github/workflows/ci.yml` migrates and deploys staging on every push to `main`. |
+| E2 | Partly | Staging serves; first readings in [staging.md](staging.md). M8 records distributions. |
 | E3 | Waiting | M4. |
 | E4 | Done | `pnpm parity` in CI, `packages/core/test/registry.test.ts`, `docs/api/openapi.json` checked in CI. |
 | E5 | Done in CI | See Section 4. |
@@ -33,14 +33,9 @@ The code that does not need external accounts is built and tested. What remains 
 
 ## 3. What the owner needs to provide
 
-In rough order of how much each one unblocks:
+1. **Email domain (M7).** Deferred by the owner.
 
-1. **Cloudflare (M1).** An API token that can edit Workers scripts, Hyperdrive, Queues, and R2, plus the account ID. Store both as secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in the GitHub `staging` environment.
-2. **Neon (M1).** A free project in `aws-eu-central-1` (Frankfurt) on PostgreSQL 17. Store the owner connection string as `DATABASE_OWNER_URL` in the `staging` environment. Bootstrap creates the `airstock_app` role; its password is then set once and used for the Hyperdrive configuration.
-3. **WorkOS (M4, M5).** A staging environment with Google, Microsoft, and Magic Auth enabled, plus its API key and client ID.
-4. **Shopify (M6).** A Partners account and two development stores.
-5. **ChatGPT (M5).** An account that can add custom MCP connections (developer mode), for the recorded run.
-6. **Email domain (M7).** Deferred by the owner.
+Everything else was set up on 14 November 2026; [staging.md](staging.md) lists each resource and secret.
 
 ## 4. Acceptance scenarios covered by tests
 

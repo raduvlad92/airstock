@@ -26,7 +26,7 @@ export class AppError extends Error {
 
   toProblem(requestId?: string): ProblemDetails {
     return {
-      type: `https://airstock.dev/problems/${this.code}`,
+      type: `urn:airstock:problem:${this.code}`,
       title: this.message,
       status: this.status,
       code: this.code,

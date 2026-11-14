@@ -1,4 +1,4 @@
-import { uuidv7 } from '@airstock/core';
+import { sweepUnboundConnectionGrants, uuidv7 } from '@airstock/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
 import { seal, unseal } from '../src/session.ts';
@@ -412,6 +412,69 @@ describe('connect consent and shop binding (plan Section 7.2, option A)', () => 
       [shop],
     );
     expect(rows.map((r) => r.status)).toEqual(['revoked']);
+  });
+
+  it('expires a grant that no client binds within the bind window (report P15)', async () => {
+    const user = newUser();
+    const { cookie } = await signIn(user);
+    const shop = await createShop(cookie, 'Abandoned shop');
+    const grantOf = () => t.workos.completed.at(-1)!.consent[0]!.choices[0]!.value;
+    // Approved in Airstock, then abandoned on the WorkOS screen: no client ever gets a token.
+    await approve(cookie, shop, ['shop:read']);
+    const abandoned = grantOf();
+    // Approved and used at once, as ChatGPT does.
+    await approve(cookie, shop, ['shop:read']);
+    const used = grantOf();
+    const usedClaims = { sub: user.id, client_id: 'client_used', [GRANT_CLAIM]: used };
+    expect((await mcpCall(await t.sign(usedClaims), 'get_shop_context')).status).toBe(200);
+    await ownerQuery(
+      `update connection_grants set created_at = now() - interval '11 minutes'
+       where id = any($1::uuid[])`,
+      [[abandoned, used]],
+    );
+
+    // Before any sweep: listed as expired, not revocable, and a late token cannot bind it.
+    const listed = await json(await dashboardApi(cookie, `/shops/${shop}/connections`));
+    const statusOf = (id: string) =>
+      listed.connections.find((c: { grantId: string }) => c.grantId === id)?.status;
+    expect(statusOf(abandoned)).toBe('expired');
+    expect(statusOf(used)).toBe('active');
+    const revoke = await dashboardApi(cookie, `/shops/${shop}/connections/${abandoned}/revoke`, {
+      method: 'POST',
+    });
+    expect(revoke.status).toBe(409);
+    const late = await mcpCall(
+      await t.sign({ sub: user.id, client_id: 'client_late', [GRANT_CLAIM]: abandoned }),
+      'get_shop_context',
+    );
+    expect(late.status).toBe(401);
+
+    // The sweep records the expiry once, as the system; the bound grant keeps working.
+    expect(await sweepUnboundConnectionGrants(t.db)).toBeGreaterThanOrEqual(1);
+    await sweepUnboundConnectionGrants(t.db);
+    const rows = await ownerQuery<{ id: string; status: string; client_id: string | null }>(
+      'select id, status, client_id from connection_grants where shop_id = $1 order by id',
+      [shop],
+    );
+    expect(rows).toEqual([
+      { id: abandoned, status: 'expired', client_id: null },
+      { id: used, status: 'active', client_id: 'client_used' },
+    ]);
+    const events = await ownerQuery(
+      `select target_id, actor_type, actor_id, source, outcome from audit_events
+       where shop_id = $1 and action = 'connection.expired'`,
+      [shop],
+    );
+    expect(events).toEqual([
+      {
+        target_id: abandoned,
+        actor_type: 'system',
+        actor_id: 'connection-expiry',
+        source: 'scheduled',
+        outcome: 'succeeded',
+      },
+    ]);
+    expect((await mcpCall(await t.sign(usedClaims), 'get_shop_context')).status).toBe(200);
   });
 
   it('rejects tokens issued to an agent identity rather than a person', async () => {

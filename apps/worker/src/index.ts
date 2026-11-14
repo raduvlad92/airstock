@@ -9,6 +9,7 @@ import {
   type OutboxMessage,
   sendInvitationEmail,
   sweepExpiredReservations,
+  sweepUnboundConnectionGrants,
   systemCaller,
   uuidv7,
 } from '@airstock/core';
@@ -241,6 +242,7 @@ export default {
         );
       }
       await sweepExpiredReservations(db);
+      await sweepUnboundConnectionGrants(db);
       if (controller.cron === '0 3 * * *') await ensureAuditPartitions(db);
     } finally {
       await db.close();

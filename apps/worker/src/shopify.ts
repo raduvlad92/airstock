@@ -112,9 +112,9 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
         ?.send(message, deps.runJobNow ? 60 : undefined)
         .catch((error) => deps.logger.error('job_enqueue_failed', { error: String(error) }));
       if (deps.runJobNow) {
-        const run = deps.runJobNow(message).catch((error) =>
-          deps.logger.error('job_inline_failed', { error: String(error) }),
-        );
+        const run = deps
+          .runJobNow(message)
+          .catch((error) => deps.logger.error('job_inline_failed', { error: String(error) }));
         try {
           c.executionCtx.waitUntil(run);
         } catch {

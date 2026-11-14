@@ -102,6 +102,28 @@ function database(env: Env, hooks?: DatabaseHooks) {
   return new PgDatabase(requestScopedSource(env.HYPERDRIVE.connectionString), hooks);
 }
 
+/**
+ * Delivers committed outbox events right away, here: a Shopify push or an email. Only events
+ * that fail go to the jobs queue, which retries them. Used after a request commits, where the
+ * fetch handler runs next to the database; the cron sweep uses publishOutbox instead.
+ */
+function deliverOutbox(env: Env, db: Database): Promise<number> {
+  return dispatchOutbox(db, async (messages) => {
+    const outcomes = await runJobsBatch(
+      env,
+      db,
+      messages.map((body) => ({ id: body.id, attempts: 1, body })),
+    );
+    const retry = new Set(outcomes.filter((o) => o.retryAfter !== null).map((o) => o.id));
+    const failed = messages.filter((m) => retry.has(m.id));
+    if (failed.length > 0) {
+      await env.JOBS_QUEUE.sendBatch(
+        failed.map((body) => ({ body, contentType: 'json' as const, delaySeconds: 30 })),
+      );
+    }
+  });
+}
+
 function publishOutbox(env: Env, db: Database): Promise<number> {
   return dispatchOutbox(db, async (messages) => {
     await env.JOBS_QUEUE.sendBatch(
@@ -139,7 +161,7 @@ export default {
           await own.close();
         }
       },
-      dispatch: (db) => publishOutbox(env, db),
+      dispatch: (db) => deliverOutbox(env, db),
       files: {
         async put(key, body) {
           await env.FILES.put(key, body, { httpMetadata: { contentType: 'application/json' } });
@@ -332,7 +354,7 @@ function timingSafeEqualText(a: string, b: string): boolean {
 async function runJobsBatch(env: Env, db: Database, items: JobsItem[]): Promise<JobsOutcome[]> {
   const shopify = await shopifyConfigFromEnv(env);
   const deps: SyncDeps | null = shopify
-    ? { db, audit: queueSink(env), logger, shopify, dispatch: () => publishOutbox(env, db) }
+    ? { db, audit: queueSink(env), logger, shopify, dispatch: () => deliverOutbox(env, db) }
     : null;
   const outcomes: JobsOutcome[] = [];
   for (const item of items) {

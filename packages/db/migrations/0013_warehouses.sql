@@ -1,5 +1,5 @@
 -- Phase 1, milestone N6: warehouse records, commercial terms, and the location hierarchy rules
--- (ADR 0017).
+-- (ADR 0016).
 --
 -- `contract` holds commercial terms: dates, fee description, rates, notes, and attachment IDs.
 -- Only members with storage.commercial.read see or change it. Row-level security already limits

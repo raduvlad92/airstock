@@ -7,7 +7,7 @@ import { effectivePermissions } from '../permissions.ts';
 import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id, iso, isTimeZone } from '../schemas.ts';
 
-// Warehouses and locations (PRD 5.1, 5.2; plan Section 5.9; ADR 0017).
+// Warehouses and locations (PRD 5.1, 5.2; plan Section 5.9; ADR 0016).
 //
 // Structural changes in a warehouse (creating, renaming, moving, archiving, or restoring its
 // locations) lock the warehouse row first, then the locations in id order. Commands that need an

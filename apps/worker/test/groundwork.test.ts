@@ -189,11 +189,13 @@ describe('rate limits (D11, plan 5.15)', () => {
 });
 
 describe('client-reported events (plan 5.14)', () => {
+  let clock = 0;
   let t: TestApp;
   let cookie: string;
   let shopId: string;
   beforeAll(async () => {
-    t = await testApp({ rateLimiter: memoryLimiter({ client_events: 1 }, 1000) });
+    // A clock the tests move forward, so each test starts in a fresh one-second window.
+    t = await testApp({ rateLimiter: memoryLimiter({ client_events: 1 }, 1000, () => clock) });
     ({ cookie } = await signInAs(t, {
       id: `user_${uuidv7()}`,
       email: 'events@example.test',
@@ -249,7 +251,7 @@ describe('client-reported events (plan 5.14)', () => {
     const res = await post(events);
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({ accepted: 3, duplicates: 1, rejected: 0 });
-    await new Promise((r) => setTimeout(r, 1100));
+    clock += 1000;
     // The same batch again, as after a lost response: nothing new lands.
     expect((await post(events.slice(0, 3))).status).toBe(200);
     await t.sink.drain(t.db);
@@ -277,7 +279,7 @@ describe('client-reported events (plan 5.14)', () => {
   });
 
   it('drops events dated too far in the past or future', async () => {
-    await new Promise((r) => setTimeout(r, 1100));
+    clock += 1000;
     const res = await post([
       { eventId: uuidv7(Date.now() - 2 * 24 * 3600_000), seq: 1, type: 'page.viewed' },
       { eventId: uuidv7(Date.now() + 3600_000), seq: 2, type: 'page.viewed' },
@@ -286,14 +288,14 @@ describe('client-reported events (plan 5.14)', () => {
   });
 
   it('allows one batch per second per user', async () => {
-    await new Promise((r) => setTimeout(r, 1100));
+    clock += 1000;
     const first = await post([{ eventId: uuidv7(), seq: 9, type: 'page.viewed' }]);
     const second = await post([{ eventId: uuidv7(), seq: 10, type: 'page.viewed' }]);
     expect([first.status, second.status]).toEqual([200, 429]);
   });
 
   it('accepts no unknown event type and is not open to API credentials', async () => {
-    await new Promise((r) => setTimeout(r, 1100));
+    clock += 1000;
     expect((await post([{ eventId: uuidv7(), seq: 1, type: 'catalog.deleted' }])).status).toBe(400);
     const shop = await seedShop(t.db, t.sink, 'Token shop');
     const { token } = await apiToken(t, shop, ['shop:read']);

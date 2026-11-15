@@ -101,6 +101,9 @@ export const listMembers = defineOperation({
         displayName: z.string().nullable(),
         role: z.string(),
         allLocations: z.boolean(),
+        locationScopeIds: z
+          .array(Id)
+          .describe('Warehouses and locations the member is limited to, when not all locations.'),
         status: z.string(),
       }),
     ),
@@ -129,9 +132,12 @@ export const listMembers = defineOperation({
       display_name: string | null;
       role: string;
       all_locations: boolean;
+      scope_ids: string[];
       status: string;
     }>(
-      `select m.id, m.user_id, u.email, u.display_name, m.role, m.all_locations, m.status
+      `select m.id, m.user_id, u.email, u.display_name, m.role, m.all_locations, m.status,
+         array(select s.scope_id from membership_location_scopes s
+           where s.shop_id = m.shop_id and s.membership_id = m.id order by s.scope_id) as scope_ids
        from memberships m join users u on u.id = m.user_id
        where m.shop_id = app_shop_id() order by m.created_at`,
     );
@@ -155,6 +161,7 @@ export const listMembers = defineOperation({
           displayName: m.display_name,
           role: m.role,
           allLocations: m.all_locations,
+          locationScopeIds: m.all_locations ? [] : m.scope_ids,
           status: m.status,
         })),
         invitations: invitations.map((i) => ({
@@ -167,6 +174,124 @@ export const listMembers = defineOperation({
         })),
       },
       audit: { targetType: 'membership', targetId: 'list' },
+    };
+  },
+});
+
+export const setLocationScope = defineOperation({
+  id: 'members.location_scopes.set',
+  summary: 'Give a member all locations, or limit them to some warehouses and locations',
+  description:
+    'Replaces the member’s location scope (PRD 2.4). A warehouse covers all of its locations; a location covers everything inside it. Owners always have every location. Applies from the member’s next request, including their API credentials and AI connections.',
+  kind: 'command',
+  scope: 'shop',
+  input: z.object({
+    membershipId: Id,
+    allLocations: z.boolean(),
+    scopeIds: z
+      .array(Id)
+      .max(200)
+      .optional()
+      .describe('Warehouse and location IDs; required when allLocations is false.'),
+  }),
+  output: z.object({
+    membershipId: Id,
+    allLocations: z.boolean(),
+    locationScopeIds: z.array(Id),
+    version: z.number().int(),
+  }),
+  permission: 'members.manage',
+  connectionScope: 'session',
+  audit: { action: 'member.location_scope.set' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/members/{membershipId}/location-scope' },
+  mcp: { exception: INTERACTIVE },
+  async handler(ctx, input) {
+    // Someone limited to some locations could otherwise widen their own access.
+    if (ctx.locationScope !== null) {
+      throw new AppError(
+        403,
+        'location_out_of_scope',
+        'Only members with access to every location can change location access.',
+        'denied',
+      );
+    }
+    const scopeIds = [...new Set(input.scopeIds ?? [])].sort();
+    if (input.allLocations && scopeIds.length > 0) {
+      throw errors.validation([
+        { path: 'scopeIds', message: 'Leave this empty when the member has all locations.' },
+      ]);
+    }
+    if (!input.allLocations && scopeIds.length === 0) {
+      throw errors.validation([
+        { path: 'scopeIds', message: 'Choose at least one warehouse or location.' },
+      ]);
+    }
+    const [member] = await ctx.tx.query<{
+      role: string;
+      status: string;
+      all_locations: boolean;
+      version: number;
+      scope_ids: string[];
+    }>(
+      `select m.role, m.status, m.all_locations, m.version,
+         array(select s.scope_id from membership_location_scopes s
+           where s.shop_id = m.shop_id and s.membership_id = m.id order by s.scope_id) as scope_ids
+       from memberships m where m.id = $1 for update`,
+      [input.membershipId],
+    );
+    if (member?.status !== 'active') throw errors.notFound('Member');
+    if (member.role === 'owner' && !input.allLocations) {
+      throw errors.unprocessable('owner_all_locations', 'Owners always have every location.');
+    }
+    if (scopeIds.length > 0) {
+      const found = await ctx.tx.query<{ id: string }>(
+        `select id from warehouses where id = any($1::uuid[])
+         union select id from locations where id = any($1::uuid[])`,
+        [scopeIds],
+      );
+      if (found.length !== scopeIds.length) throw errors.notFound('Warehouse or location');
+    }
+    const before = { allLocations: member.all_locations, scopeIds: member.scope_ids };
+    if (before.allLocations === input.allLocations && before.scopeIds.join() === scopeIds.join()) {
+      return {
+        result: {
+          membershipId: input.membershipId,
+          allLocations: member.all_locations,
+          locationScopeIds: member.scope_ids,
+          version: member.version,
+        },
+        audit: { targetType: 'membership', targetId: input.membershipId, outcome: 'no_change' },
+      };
+    }
+    // Separate statements: one statement cannot delete a row and insert its key again.
+    await ctx.tx.query('delete from membership_location_scopes where membership_id = $1', [
+      input.membershipId,
+    ]);
+    const [row] = await ctx.tx.query<{ version: number }>(
+      `with added as (
+         insert into membership_location_scopes (shop_id, membership_id, scope_id)
+         select app_shop_id(), $1, unnest($3::uuid[]))
+       update memberships set all_locations = $2, version = version + 1
+       where id = $1 returning version`,
+      [input.membershipId, input.allLocations, scopeIds],
+    );
+    return {
+      result: {
+        membershipId: input.membershipId,
+        allLocations: input.allLocations,
+        locationScopeIds: scopeIds,
+        version: row!.version,
+      },
+      audit: {
+        targetType: 'membership',
+        targetId: input.membershipId,
+        changes: {
+          allLocations: { from: before.allLocations, to: input.allLocations },
+          scopeIds: { from: before.scopeIds, to: scopeIds },
+          version: row!.version,
+        },
+      },
     };
   },
 });

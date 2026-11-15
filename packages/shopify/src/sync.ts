@@ -584,7 +584,8 @@ export async function pushAvailability(
 /** Airstock's sellable availability for a variant at one location, as Shopify's integer. */
 async function availableAt(tx: Tx, variantId: string, locationId: string): Promise<number> {
   const [row] = await tx.query<{ available: string }>(
-    `select coalesce(sum(case when l.status = 'active' and l.fulfillment_eligible
+    `select coalesce(sum(case when l.status = 'active'
+           and location_fulfillment_eligible(l.shop_id, l.path_ids)
          then p.on_hand - p.allocated + coalesce(x.expired, 0) else 0 end), 0)::text as available
      from inventory_positions p
      join locations l on l.shop_id = p.shop_id and l.id = p.location_id

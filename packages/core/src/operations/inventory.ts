@@ -163,9 +163,11 @@ export const receiveStock = defineOperation({
   locations: (input) => [input.locationId],
   async handler(ctx, input) {
     await loadStockableVariant(ctx.tx, input.variantId, input.quantity);
+    // The share lock waits for an archive or move of this location to finish, and holds off
+    // one that starts later, so neither can pass its no-stock check while stock arrives.
     const [location] = await ctx.tx.query<{ status: string; has_children: boolean }>(
       `select l.status, exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as has_children
-       from locations l where l.id = $1`,
+       from locations l where l.id = $1 for share`,
       [input.locationId],
     );
     if (!location) throw errors.notFound('Location');
@@ -304,7 +306,7 @@ export const reserveStock = defineOperation({
        from inventory_positions p
        join locations l on l.shop_id = p.shop_id and l.id = p.location_id
        where p.variant_id = $1 and p.condition = 'sellable' and l.status = 'active'
-         and l.fulfillment_eligible
+         and location_fulfillment_eligible(l.shop_id, l.path_ids)
          and ($2::uuid is null or p.location_id = $2)
          and ($3::uuid[] is null or l.path_ids && $3::uuid[])
        order by p.id
@@ -646,7 +648,8 @@ export const getAvailability = defineOperation({
       `with rows as (
          select p.id, p.location_id, l.path, l.warehouse_id, p.condition, p.on_hand,
            p.allocated - coalesce(x.expired, 0) as reserved,
-           case when p.condition = 'sellable' and l.status = 'active' and l.fulfillment_eligible
+           case when p.condition = 'sellable' and l.status = 'active'
+             and location_fulfillment_eligible(l.shop_id, l.path_ids)
              then p.on_hand - p.allocated + coalesce(x.expired, 0) else 0 end as available
          from inventory_positions p
          join locations l on l.shop_id = p.shop_id and l.id = p.location_id

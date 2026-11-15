@@ -86,6 +86,22 @@ test('a phone-sized screen has no horizontal scroll', async ({ page }) => {
   await page.getByRole('button', { name: 'Edit' }).first().click();
   await expect(page.getByRole('group', { name: 'Contract' })).toBeVisible();
   expect(await overflow()).toBeLessThanOrEqual(0);
+  // Suppliers with the new-supplier form open, and both kinds of label.
+  await page.getByRole('link', { name: 'Suppliers' }).click();
+  await expect(page.getByRole('heading', { name: 'Suppliers' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add supplier' }).click();
+  await expect(page.getByRole('button', { name: 'Create supplier' })).toBeVisible();
+  expect(await overflow()).toBeLessThanOrEqual(0);
+  await page.getByRole('link', { name: 'Labels' }).click();
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeVisible();
+  expect(await overflow()).toBeLessThanOrEqual(0);
+  await page.getByRole('button', { name: 'Location labels' }).click();
+  await page
+    .getByLabel(/Main stock/)
+    .first()
+    .check();
+  await expect(page.getByRole('img', { name: 'Preview of the first label' })).toBeVisible();
+  expect(await overflow()).toBeLessThanOrEqual(0);
 });
 
 test('warehouse records, contract terms, and the location tree', async ({ page }) => {

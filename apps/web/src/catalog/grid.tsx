@@ -67,6 +67,8 @@ export interface GridProps {
   /** Values saved after the page loaded, by `${rowId}:${column}`. */
   overrides: Map<string, CellValue>;
   onSaved(key: string, value: CellValue): void;
+  /** The loaded rows the selection covers, for toolbar actions such as printing labels. */
+  onSelectRows?(rows: Row[]): void;
 }
 
 const ROW_HEIGHT = { compact: 32, comfortable: 42 } as const;
@@ -314,6 +316,13 @@ export function Grid(props: GridProps) {
   }, [editing]);
 
   useEffect(() => scrollTo(selection.active), [selection.active, scrollTo]);
+
+  const { onSelectRows } = props;
+  const selectedTop = Math.min(selection.anchor.row, selection.active.row);
+  const selectedBottom = Math.max(selection.anchor.row, selection.active.row);
+  useEffect(() => {
+    onSelectRows?.(rows.slice(selectedTop, selectedBottom + 1).filter((r): r is Row => Boolean(r)));
+  }, [onSelectRows, rows, selectedTop, selectedBottom]);
 
   /** Edits from a range: one cell saves directly; several become a bulk preview (D4). */
   const applyToCells = (

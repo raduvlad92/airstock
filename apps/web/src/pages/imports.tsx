@@ -65,6 +65,8 @@ export function ImportsPage() {
   const list = useQuery({
     queryKey: ['shop', shopId, 'imports'],
     queryFn: () => api<Out<typeof ops.listImports>>(`/shops/${shopId}/imports`),
+    // Jobs change in the background; never show a cached list on arrival.
+    staleTime: 0,
   });
   const start = useMutation({
     mutationFn: async (file: File) => {
@@ -83,7 +85,7 @@ export function ImportsPage() {
   return (
     <>
       <PageHeader
-        title="Import products"
+        title="Import and export"
         subtitle="CSV files of up to 20 MB and 50,000 rows. Rows whose SKU exists update that variant; the rest create products."
         actions={
           <Link to="/shops/$shopId/products" params={{ shopId }} className="button-link">
@@ -132,8 +134,80 @@ export function ImportsPage() {
           ))}
         </ul>
       </Card>
+      <RecentExports shopId={shopId} />
     </>
   );
+}
+
+/**
+ * Exports started anywhere (the products page, the API, or an AI assistant) and their files,
+ * which download here while signed in.
+ */
+function RecentExports({ shopId }: { shopId: string }) {
+  const list = useQuery({
+    queryKey: ['shop', shopId, 'exports'],
+    queryFn: () => api<Out<typeof ops.listExports>>(`/shops/${shopId}/exports`),
+    staleTime: 0,
+    refetchInterval: (q) =>
+      q.state.data?.exports.some((e) => e.status === 'pending' || e.status === 'running')
+        ? 2000
+        : false,
+  });
+  const download = useMutation({ mutationFn: downloadExport });
+  return (
+    <Card title="Recent exports">
+      <ErrorNotice error={list.error ?? download.error} />
+      {list.isPending ? <Loading /> : null}
+      {list.data?.exports.length === 0 ? (
+        <Empty>No exports yet. Export from the products page.</Empty>
+      ) : null}
+      <ul className="plain-list">
+        {list.data?.exports.map((e) => (
+          <li key={e.exportId}>
+            <span>
+              <span className="muted">{formatDateTime(e.createdAt)}</span>{' '}
+              <Badge
+                tone={e.status === 'completed' ? 'ok' : e.status === 'failed' ? 'error' : 'muted'}
+              >
+                {e.status}
+              </Badge>{' '}
+              {e.rowCount !== null ? <span>{e.rowCount} rows</span> : null}
+            </span>
+            {e.status === 'completed' && e.downloadPath ? (
+              <button
+                type="button"
+                className="small ghost"
+                onClick={() => download.mutate(e.downloadPath!)}
+                disabled={download.isPending}
+              >
+                Download
+              </button>
+            ) : e.status === 'completed' ? (
+              <span className="muted small-text">Expired</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** The session needs the custom header, so the file is fetched and saved from memory. */
+async function downloadExport(path: string) {
+  const res = await fetch(path, {
+    headers: { 'x-airstock-request': '1' },
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error('The download is no longer available.');
+  const name =
+    /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ??
+    'airstock-export.csv';
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 function ImportWizard({ shopId, importId }: { shopId: string; importId: string }) {
@@ -382,23 +456,7 @@ export function ExportButton({
         : 1500,
   });
   const download = useMutation({
-    mutationFn: async () => {
-      // The session needs the custom header, so the file is fetched and saved from memory.
-      const res = await fetch(job.data!.export.downloadPath!, {
-        headers: { 'x-airstock-request': '1' },
-        credentials: 'same-origin',
-      });
-      if (!res.ok) throw new Error('The download is no longer available.');
-      const name =
-        /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ??
-        'airstock-export.csv';
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    },
+    mutationFn: () => downloadExport(job.data!.export.downloadPath!),
   });
   const status = job.data?.export.status;
   return (

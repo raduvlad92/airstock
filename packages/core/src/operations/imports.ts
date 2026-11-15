@@ -1178,7 +1178,9 @@ const ExportOut = z.object({
   downloadPath: z
     .string()
     .nullable()
-    .describe('For the dashboard: the file downloads there while signed in.'),
+    .describe(
+      'An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.',
+    ),
 });
 
 interface ExportRow {
@@ -1235,7 +1237,7 @@ export const createExport = defineOperation({
   id: 'exports.create',
   summary: 'Export products or variants as CSV',
   description:
-    'Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Runs as a job; the file is ready for 24 hours and deleted after 7 days. Downloading needs the dashboard or the API.',
+    'Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Runs as a job; the file is ready for 24 hours and deleted after 7 days. The person downloads it in the Airstock dashboard: Products, then Import, under Recent exports (or through the API).',
   kind: 'command',
   scope: 'shop',
   input: ExportQuery.partial(),

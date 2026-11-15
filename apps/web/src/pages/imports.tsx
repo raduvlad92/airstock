@@ -27,6 +27,7 @@ const BUILTINS: Array<[string, string]> = [
   ['product', 'Product key (groups variants)'],
   ['name', 'Name'],
   ['sku', 'SKU'],
+  ['barcode', 'Barcode'],
   ['price', 'Price'],
   ['description', 'Description'],
   ['status', 'Status'],

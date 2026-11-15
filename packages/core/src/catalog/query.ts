@@ -1,3 +1,4 @@
+import { normalizeBarcode } from './barcodes.ts';
 import { compare, isDecimal, normalize } from './decimal.ts';
 import type { FieldDefinition, FieldType } from './fields.ts';
 import { toCanonical, unitKind } from './units.ts';
@@ -497,12 +498,21 @@ export function compileSearch(
     mode === 'variants'
       ? `v.sku_normalized = ${sku} or v.sku_normalized like ${params.add(`${escapeLike(search.trim().toUpperCase())}%`)}`
       : `exists (select 1 from variants sv where sv.shop_id = p.shop_id and sv.product_id = p.id and sv.sku_normalized = ${sku})`;
+  // A scanned or typed barcode, and a supplier's SKU, find the variant that carries it (ADR 0019).
+  const barcode = params.add(normalizeBarcode(search));
+  const variantIds = `(select b.variant_id from barcodes b where b.code_normalized = ${barcode}
+    union all select si.variant_id from supplier_items si
+      where si.supplier_sku_normalized = ${sku} and si.status = 'active')`;
+  const codeMatch =
+    mode === 'variants'
+      ? `v.id in ${variantIds}`
+      : `p.id in (select cv.product_id from variants cv where cv.id in ${variantIds})`;
   // Products whose words or name match, found through the full-text and trigram indexes.
   const byName = `p.id in (select sp.id from products sp where to_tsvector('simple', sp.name || ' ' || coalesce(sp.description, ''))
     @@ plainto_tsquery('simple', ${q}) or sp.name % ${q})`;
   return {
-    where: `(${skuMatch} or ${byName})`,
-    rank: `(${mode === 'variants' ? `(case when v.sku_normalized = ${sku} then 3 else 0 end)` : '0'}
+    where: `(${skuMatch} or ${codeMatch} or ${byName})`,
+    rank: `(${mode === 'variants' ? `(case when v.sku_normalized = ${sku} or v.id in ${variantIds} then 3 else 0 end)` : '0'}
       + ts_rank(${doc}, plainto_tsquery('simple', ${q})) + similarity(p.name, ${q}))::numeric(12, 6)`,
   };
 }

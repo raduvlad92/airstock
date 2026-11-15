@@ -58,6 +58,24 @@ export function normalizeBarcode(text: string): string {
   return t.toUpperCase();
 }
 
+/**
+ * The symbology a bare code most likely has, for paths that take a code without one (creating an
+ * item, importing a CSV): a GTIN by its length, else Code 128 when it fits, else other.
+ */
+export function inferSymbology(text: string): Symbology {
+  const code = text.trim().replace(/[\s-]/g, '');
+  if (isValidGtin(code)) {
+    if (code.length === 13) return 'ean13';
+    if (code.length === 12) return 'upca';
+    if (code.length === 8) return 'ean8';
+    return 'other';
+  }
+  const raw = text.trim();
+  return raw.length <= BARCODE_LIMITS.code128Length && /^[\x20-\x7e]+$/.test(raw)
+    ? 'code128'
+    : 'other';
+}
+
 export type BarcodeCheck =
   | { ok: true; code: string; normalized: string }
   | { ok: false; message: string };

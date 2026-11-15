@@ -259,6 +259,59 @@ describe('CSV import (plan 5.12)', () => {
   });
 });
 
+describe('barcodes in CSV (ADR 0019)', () => {
+  it('imports a barcode column, refuses codes held elsewhere, and exports it back', async () => {
+    const tag = uuidv7().slice(-6).toUpperCase();
+    const held = (await run(ops.createItem, {
+      name: `Held ${tag}`,
+      sku: `HELD-${tag}`,
+      barcode: '5901234123457',
+      acknowledgeSimilar: true,
+    })) as { variantId: string };
+    const csv = [
+      'name,sku,EAN',
+      `Scanned tea ${tag},BC-${tag}-1,4006381333931`,
+      `Scanned tea ${tag} B,BC-${tag}-2,05901234123457`,
+      `Scanned tea ${tag} C,BC-${tag}-3,4006381333931`,
+      `Scanned tea ${tag} D,BC-${tag}-4,12345`,
+    ].join('\n');
+    const { importId, suggested, preview } = await upload(csv);
+    expect(suggested.EAN).toBe('barcode');
+    const problems = new Map(preview.problems.map((p) => [p.rowNumber, p.errors.join(' ')]));
+    expect(problems.get(3)).toContain(`already belongs to HELD-${tag}`);
+    expect(problems.get(4)).toContain('repeats row 2');
+    expect(problems.has(5)).toBe(false);
+    await run(ops.commitImport, { importId });
+    while ((await runImportJob(deps(), shop.shopId, importId)) === 'more') {}
+    const [stored1] = await ownerQuery<{ symbology: string; code: string; sku: string }>(
+      `select b.symbology, b.code, v.sku from barcodes b join variants v on v.id = b.variant_id
+       where b.shop_id = $1 and b.code_normalized = $2`,
+      [shop.shopId, '04006381333931'],
+    );
+    expect(stored1).toMatchObject({ symbology: 'ean13', sku: `BC-${tag}-1` });
+    const [short] = await ownerQuery<{ symbology: string }>(
+      `select b.symbology from barcodes b join variants v on v.id = b.variant_id
+       where v.shop_id = $1 and v.sku = $2`,
+      [shop.shopId, `BC-${tag}-4`],
+    );
+    expect(short).toMatchObject({ symbology: 'code128' });
+    expect(held.variantId).toBeTruthy();
+
+    const created = (await run(ops.createExport, {
+      mode: 'variants',
+      filter: [{ field: 'sku', op: 'starts_with', value: `BC-${tag}` }],
+    })) as { export: { exportId: string } };
+    await runExportJob(deps(), shop.shopId, created.export.exportId);
+    const text = stored.get(`shops/${shop.shopId}/exports/${created.export.exportId}.csv`)!;
+    const [header, ...rows] = parseCsv(text.replace(/^\uFEFF/, ''));
+    const at = header!.indexOf('barcode');
+    expect(rows.map((r) => r[at]).sort()).toEqual(['12345', '4006381333931']);
+    // Importing the export again changes nothing about the barcodes.
+    const back = await upload(text.replace(/^\uFEFF/, ''));
+    expect(back.preview.import.counts).toMatchObject({ updates: 2, errors: 0 });
+  });
+});
+
 describe('CSV export (plan 5.12)', () => {
   it('writes the query as importable CSV that previews back as updates only', async () => {
     const created = (await run(ops.createExport, {

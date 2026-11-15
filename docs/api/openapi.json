@@ -2778,6 +2778,12 @@
                     },
                     "additionalProperties": {}
                   },
+                  "barcode": {
+                    "description": "The barcode printed on the item, such as its EAN-13. The type is detected from the code; a code another item or pack already has is refused.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
                   "acknowledgeSimilar": {
                     "default": false,
                     "description": "Products with similar names make the create fail with `similar_items_found` and the matches. Show them, and only after the person confirms it is a different product, retry with true.",
@@ -7654,7 +7660,7 @@
       "post": {
         "operationId": "imports.preview",
         "summary": "Map an import’s columns and validate every row",
-        "description": "Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, price, weight, dimensions, field:<key>, option:<name>, stock:<locationId>, ignore.",
+        "description": "Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, barcode, price, weight, dimensions, field:<key>, option:<name>, stock:<locationId>, ignore.",
         "x-permission": "imports.run",
         "x-connection-scope": "catalog:write",
         "x-audit-action": "catalog.import.previewed",

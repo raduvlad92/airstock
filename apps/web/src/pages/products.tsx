@@ -608,6 +608,7 @@ function CreateProduct({
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
   const [price, setPrice] = useState('');
+  const [barcode, setBarcode] = useState('');
   const [family, setFamily] = useState('');
   const [status, setStatus] = useState<'active' | 'draft'>('active');
   const [similar, setSimilar] = useState<Array<{ productId: string; name: string }> | null>(null);
@@ -619,6 +620,7 @@ function CreateProduct({
         name,
         sku,
         ...(price ? { price } : {}),
+        ...(barcode.trim() ? { barcode: barcode.trim() } : {}),
         ...(family ? { family } : {}),
         status,
         acknowledgeSimilar,
@@ -657,6 +659,14 @@ function CreateProduct({
         </Field>
         <Field label="Price">
           <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" />
+        </Field>
+        <Field label="Barcode">
+          <input
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            maxLength={200}
+            placeholder="Optional, such as an EAN-13"
+          />
         </Field>
         <Field label="Family">
           <select value={family} onChange={(e) => setFamily(e.target.value)}>

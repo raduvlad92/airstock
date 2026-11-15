@@ -75,4 +75,10 @@
 
 - Phase 2 counts and receipts in packs can use `pack_versions` directly.
 - The label renderer is the only consumer of `bwip-js` and `pdf-lib`. Both load only on the labels page, so other screens don't pay for them.
-- Barcode and supplier-SKU search, duplicate blocking by barcode, and pack, barcode, and supplier-SKU columns in CSV imports and exports build on `findBarcodeOwners` and the supplier-item tables.
+- **Across milestones:**
+  - `create_product` takes an optional `barcode`. Its symbology is inferred: a valid GTIN by its length, else Code 128 when it fits, else other.
+  - The one duplicate check (plan 5.7) refuses a code another variant or pack holds, matched on the normalized form. `check_duplicates` names that owner.
+  - Catalog search matches a barcode (normalized, so a scanner's leading zero still finds an EAN-13) and an active supplier SKU exactly, and ranks those matches with exact SKUs.
+  - CSV imports take a `barcode` column, suggested for headers such as `EAN`, `UPC`, or `GTIN`. The preview refuses a code that repeats in the file or that another record holds. A code the row's variant already has is a no-op.
+  - Exports write each variant's first barcode, so an export imports back unchanged.
+  - Pack and supplier-SKU columns in CSV are left for later.

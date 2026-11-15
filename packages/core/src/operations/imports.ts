@@ -196,7 +196,7 @@ export const previewImport = defineOperation({
   id: 'imports.preview',
   summary: 'Map an import’s columns and validate every row',
   description:
-    'Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, price, weight, dimensions, field:<key>, option:<name>, stock:<locationId>, ignore.',
+    'Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, barcode, price, weight, dimensions, field:<key>, option:<name>, stock:<locationId>, ignore.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -960,6 +960,7 @@ async function commitChunk(
       }
       const fields: Record<string, unknown> = {
         ...(r.data.variant.price !== undefined ? { price: { to: r.data.variant.price } } : {}),
+        ...(r.data.variant.barcode ? { barcode: { added: r.data.variant.barcode.code } } : {}),
         ...Object.fromEntries(
           Object.entries(r.data.variant.attributes).map(([id, v]) => [id, { to: v }]),
         ),
@@ -986,6 +987,45 @@ async function commitChunk(
     'id, field_id, source_type, source_id, target_type, target_id, position',
     'id uuid, field_id uuid, source_type text, source_id uuid, target_type text, target_id uuid, position int',
   );
+  // Barcodes from a barcode column, for the variants this chunk created or updated. The preview
+  // refused codes another record holds; one taken since then is skipped, not moved.
+  const variantOf = new Map(
+    outcomes.filter((o) => o.status === 'done').map((o) => [o.row_number, o.variant_id]),
+  );
+  const barcodes = rows.flatMap((r) => {
+    const b = r.data.variant.barcode;
+    const variantId = variantOf.get(r.row_number);
+    return b && variantId
+      ? [
+          {
+            id: uuidv7(),
+            variant_id: variantId,
+            symbology: b.symbology,
+            code: b.code,
+            normalized: b.normalized,
+          },
+        ]
+      : [];
+  });
+  if (barcodes.length > 0) {
+    await tx.query(
+      `with x as (
+         select * from jsonb_to_recordset($1::jsonb)
+           as x(id uuid, variant_id uuid, symbology text, code text, normalized text)),
+       added as (
+         insert into barcodes (shop_id, id, variant_id, symbology, code, code_normalized, position)
+         select app_shop_id(), x.id, x.variant_id, x.symbology, x.code, x.normalized,
+           coalesce((select max(b.position) + 1 from barcodes b where b.variant_id = x.variant_id), 0)
+         from x
+         on conflict (shop_id, code_normalized) do nothing
+         returning variant_id)
+       insert into variant_packaging (shop_id, variant_id, barcodes_version)
+       select app_shop_id(), variant_id, 1 from added group by variant_id
+       on conflict (shop_id, variant_id)
+       do update set barcodes_version = variant_packaging.barcodes_version + 1`,
+      [JSON.stringify(barcodes)],
+    );
+  }
   const received = await receiveOpeningStock(tx, receipts, base, importId);
   for (const e of received.events) events.push(e);
   await tx.query(
@@ -1397,7 +1437,17 @@ export async function runExportJob(
                   [result.rows.map((r) => r.variantId)],
                 )
               : [];
-          return { result, wanted, options, families, variantOptions };
+          // The variant's own first barcode, so an export imports back unchanged.
+          const barcodes =
+            mode === 'variants'
+              ? await tx.query<{ variant_id: string; code: string }>(
+                  `select distinct on (variant_id) variant_id, code from barcodes
+                   where variant_id = any($1::uuid[]) and pack_id is null
+                   order by variant_id, position`,
+                  [result.rows.map((r) => r.variantId)],
+                )
+              : [];
+          return { result, wanted, options, families, variantOptions, barcodes };
         },
       );
       if (!columns) {
@@ -1417,6 +1467,7 @@ export async function runExportJob(
             r.productId,
             r.name,
             r.sku ?? '',
+            page.barcodes.find((b) => b.variant_id === r.variantId)?.code ?? '',
             r.price ?? r.priceRange?.min ?? '',
             r.productStatus,
             page.families.find((f) => f.id === r.familyId)?.name ?? '',
@@ -1440,6 +1491,7 @@ export async function runExportJob(
       'product',
       'name',
       'sku',
+      'barcode',
       'price',
       'status',
       'family',

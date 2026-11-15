@@ -13,3 +13,5 @@ Short records of decisions made while building, with the reason and what would m
 | [0007](0007-mcp-connection-binding.md) | MCP shop binding through WorkOS standalone Connect: Airstock consent creates the grant, the first token binds its client | Accepted |
 | [0008](0008-shopify-sync.md) | Shopify: expiring encrypted tokens, receipts with jobs, orders reserved by the connector, compare-and-set push that processes unseen orders before calling a conflict | Accepted |
 | [0009](0009-transactional-email.md) | Resend for invitations, links without secrets, idempotent sends; account data in the US until revisited | Accepted for Phase 0 |
+| [0010](0010-web-app.md) | React, Vite, and TanStack app at `/app`, built into the Worker's static assets under the same CSP | Accepted |
+| [0011](0011-rate-limits-and-client-events.md) | Workers Rate Limiting per user, credential, and connection with per-minute refusal summaries; client events batched into one queue message | Accepted |

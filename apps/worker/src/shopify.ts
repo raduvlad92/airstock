@@ -213,7 +213,11 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
           missingScopes: done.missingScopes,
         });
       }
-      return redirect(`/app?shopify=${done.connectionId}`, [clearCookie(INSTALL_COOKIE)], 303);
+      return redirect(
+        `/app/shops/${flow.shopId}/integrations/shopify?connected=${done.connectionId}`,
+        [clearCookie(INSTALL_COOKIE)],
+        303,
+      );
     } catch (error) {
       if (error instanceof AppError && error.status < 500) {
         return messagePage('Store not connected', error.message, error.status);

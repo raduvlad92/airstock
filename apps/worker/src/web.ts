@@ -5,16 +5,18 @@ import {
   CONNECTION_SCOPES,
   type ConnectionScope,
   ensureUser,
+  errors,
   execute,
   ops,
   sessionCaller,
   viewInvitation,
 } from '@airstock/core';
 import type { Context, Hono } from 'hono';
-import type { AppDeps, AppEnv } from './app.ts';
+import { type AppDeps, type AppEnv, problem } from './app.ts';
 import {
+  APP_ASSETS,
+  appShellPage,
   connectPage,
-  dashboardPage,
   invitationPage,
   landingPage,
   magicCodePage,
@@ -300,11 +302,21 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     return redirect('/', [clearCookie(SESSION_COOKIE)]);
   });
 
-  app.get('/app', async (c) => {
+  // The React dashboard (ADR 0010). Built files under /app/assets are served by the static asset
+  // handler before the Worker runs; a missing one is a 404, never the shell. Every other path
+  // under /app is a client-side route and gets the shell.
+  const shell = async (c: Context<AppEnv>) => {
     const session = await readSession(c, config);
-    if (!session) return redirect(`/auth/login?return_to=${encodeURIComponent('/app')}`, [], 302);
-    return dashboardPage({ email: session.email, mcpUrl: new URL('/mcp', config.publicUrl).href });
-  });
+    if (!session) {
+      const url = new URL(c.req.url);
+      const back = safeReturnTo(`${url.pathname}${url.search}`);
+      return redirect(`/auth/login?return_to=${encodeURIComponent(back)}`, [], 302);
+    }
+    return appShellPage({ email: session.email, mcpUrl: new URL('/mcp', config.publicUrl).href });
+  };
+  app.get(`${APP_ASSETS}/*`, (c) => problem(errors.notFound('File'), c.get('requestId')));
+  app.get('/app', shell);
+  app.get('/app/*', shell);
 
   // Member invitations (plan M4). The link carries no secret: the invitation is accepted only by
   // a user signed in with the invited, provider-verified email address.

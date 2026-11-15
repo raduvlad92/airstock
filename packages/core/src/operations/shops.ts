@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { errors } from '../errors.ts';
+import { RATE_LIMITS } from '../limits.ts';
 import { effectivePermissions, PERMISSIONS, ROLES } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, isTimeZone } from '../schemas.ts';
@@ -85,6 +86,9 @@ export const getShopContext = defineOperation({
     allLocations: z.boolean(),
     locationScopeIds: z.array(Id),
     connectionScopes: z.union([z.literal('all'), z.array(z.string())]),
+    rateLimits: z
+      .array(z.object({ kind: z.string(), label: z.string(), perSecond: z.number() }))
+      .describe('Requests allowed per second; more are refused with 429 and Retry-After.'),
   }),
   permission: 'shop.read',
   connectionScope: 'shop:read',
@@ -108,6 +112,11 @@ export const getShopContext = defineOperation({
         allLocations: ctx.membership.allLocations,
         locationScopeIds: ctx.membership.locationScopeIds,
         connectionScopes: ctx.caller.scopes === 'all' ? ('all' as const) : [...ctx.caller.scopes],
+        rateLimits: Object.entries(RATE_LIMITS).map(([kind, l]) => ({
+          kind,
+          label: l.label,
+          perSecond: l.perSecond,
+        })),
       },
       audit: { targetType: 'shop', targetId: ctx.shopId },
     };

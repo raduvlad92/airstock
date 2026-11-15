@@ -220,6 +220,7 @@ export async function execute(
           location_ids: audit.locationIds ?? null,
           context: audit.context ?? { input },
         }),
+        ...(outcome.handled.events ?? []),
       ]);
     } catch {
       throw errors.auditUnavailable();

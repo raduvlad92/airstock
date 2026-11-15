@@ -25,9 +25,11 @@ import {
   TokenCipher,
 } from '@airstock/shopify';
 import { createApp } from './app.ts';
+import { packAuditEvents, unpackAuditMessages } from './audit-queue.ts';
 import { resendSender } from './email.ts';
 import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
+import { bindingLimiter } from './rate-limit.ts';
 import { requestScopedSource } from './request-db.ts';
 import type { JobMessage, ShopifyAppConfig } from './shopify.ts';
 import type { WebConfig } from './web.ts';
@@ -38,12 +40,18 @@ const logger: Logger = {
   info: (message, data) => console.log(JSON.stringify({ level: 'info', message, ...data })),
 };
 
-/** Awaited send: resolves once Cloudflare Queues has durably accepted the events (PRD 7.3). */
+/**
+ * Awaited send: resolves once Cloudflare Queues has durably accepted the events (PRD 7.3). The
+ * events of one send travel in one message, split only to stay under the message size limit, so a
+ * batch of client events is one queue write.
+ */
 function queueSink(env: Env): AuditSink {
   return {
     async send(events: AuditEvent[]) {
+      const messages = packAuditEvents(events);
+      if (messages.length === 0) return;
       await env.AUDIT_QUEUE.sendBatch(
-        events.map((body) => ({ body, contentType: 'json' as const })),
+        messages.map((body) => ({ body, contentType: 'json' as const })),
       );
     },
   };
@@ -163,6 +171,12 @@ export default {
         }
       },
       dispatch: (db) => deliverOutbox(env, db),
+      rateLimiter: bindingLimiter({
+        session: env.RATE_LIMIT_SESSION,
+        api_credential: env.RATE_LIMIT_API,
+        connection: env.RATE_LIMIT_MCP,
+        client_events: env.RATE_LIMIT_CLIENT_EVENTS,
+      }),
       files: {
         async put(key, body) {
           await env.FILES.put(key, body, { httpMetadata: { contentType: 'application/json' } });
@@ -186,10 +200,10 @@ export default {
     try {
       if (batch.queue.includes('audit')) {
         // One multi-row insert per batch; redelivered events are ignored by event ID.
-        await ingestAuditEvents(
-          db,
-          batch.messages.map((m) => m.body as AuditEvent),
-        );
+        const events = unpackAuditMessages(batch.messages.map((m) => m.body));
+        for (let i = 0; i < events.length; i += 1000) {
+          await ingestAuditEvents(db, events.slice(i, i + 1000));
+        }
         batch.ackAll();
         return;
       }

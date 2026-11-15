@@ -9,7 +9,7 @@
   "scripts": {
     "check": "biome check .",
     "format": "biome check --write .",
-    "typecheck": "tsc -p tsconfig.json && tsc -p apps/worker/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/worker/tsconfig.json && tsc -p apps/web/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:up": "docker compose up -d --wait postgres",
@@ -17,9 +17,10 @@
     "parity": "tsx scripts/parity-check.ts",
     "openapi": "tsx scripts/generate-openapi.ts",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
-    "build": "pnpm --filter @airstock/worker build",
+    "build": "pnpm --filter @airstock/web build && pnpm --filter @airstock/worker build",
     "verify": "pnpm check && pnpm typecheck && pnpm parity && pnpm openapi:check && pnpm test && pnpm build",
-    "dev:setup": "tsx scripts/dev-setup.ts"
+    "dev:setup": "tsx scripts/dev-setup.ts",
+    "e2e": "pnpm --filter @airstock/web e2e"
   },
   "devDependencies": {
     "@airstock/core": "workspace:*",

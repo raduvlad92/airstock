@@ -217,19 +217,44 @@ export function landingPage(): Response {
   );
 }
 
-export function dashboardPage(input: { email: string; mcpUrl: string }): Response {
-  return page(
-    'Dashboard',
-    html`<section class="card">
-  <div class="row"><h1>Dashboard</h1>
-    <form method="post" action="/auth/logout"><button class="link" type="submit">Sign out ${input.email}</button></form>
-  </div>
-  <p class="fine">To use Airstock from ChatGPT, add a custom connector with the URL <code>${input.mcpUrl}</code>.</p>
-  <div id="app" data-mcp-url="${input.mcpUrl}"><p class="muted">Loading…</p></div>
-</section>`,
-    { scripts: ['/assets/app.js'] },
-  );
+/**
+ * The dashboard shell (ADR 0010): the React app at /app, built by apps/web into the Worker's
+ * static assets. The page carries no shop data, only who is signed in; everything else comes
+ * from /api/v1. Same CSP as every other page: no inline scripts or styles.
+ */
+export function appShellPage(input: { email: string; mcpUrl: string }): Response {
+  const doc = html`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>Airstock</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f5f4a">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<link rel="stylesheet" href="${APP_ASSETS}/app.css">
+<script type="module" src="${APP_ASSETS}/app.js"></script>
+</head>
+<body>
+<div id="root" data-email="${input.email}" data-mcp-url="${input.mcpUrl}"></div>
+<noscript><p>Airstock needs JavaScript. <a href="/auth/login">Sign in again</a> after enabling it.</p></noscript>
+</body>
+</html>`;
+  return new Response(doc.value, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': contentSecurityPolicy(),
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'same-origin',
+      'cache-control': 'no-store',
+    },
+  });
 }
+
+/** Where apps/web puts its build (vite.config.ts). */
+export const APP_ASSETS = '/app/assets';
 
 export function invitationPage(input: {
   invitationId: string;

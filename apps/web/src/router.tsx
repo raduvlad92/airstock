@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/
 import { RootLayout, ShopLayout } from './components/layout.tsx';
 import { ActivityPage } from './pages/activity.tsx';
 import { FamiliesSettingsPage, FieldsSettingsPage } from './pages/catalog-settings.tsx';
+import { ImportsPage } from './pages/imports.tsx';
 import {
   AiConnectionsPage,
   ApiCredentialsPage,
@@ -50,6 +51,11 @@ const productsRoute = createRoute({
     typeof search.item === 'string' && /^[0-9a-f-]{36}$/.test(search.item)
       ? { item: search.item }
       : {},
+});
+const importsRoute = createRoute({
+  getParentRoute: () => shopRoute,
+  path: '/imports',
+  component: ImportsPage,
 });
 const inventoryRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -135,6 +141,7 @@ export const routeTree = rootRoute.addChildren([
   shopRoute.addChildren([
     shopIndexRoute,
     productsRoute,
+    importsRoute,
     inventoryRoute,
     warehousesRoute,
     activityRoute,

@@ -6,9 +6,10 @@ import { readSession, sameOrigin } from './web.ts';
 
 /** Where scan-test results are kept: the EU R2 bucket on staging (plan M7). */
 export interface FileStore {
-  put(key: string, body: string): Promise<void>;
+  put(key: string, body: string, contentType?: string): Promise<void>;
   list(prefix: string): Promise<string[]>;
   get(key: string): Promise<string | null>;
+  delete?(key: string): Promise<void>;
 }
 
 const MAX_RESULTS = 200;

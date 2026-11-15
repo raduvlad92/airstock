@@ -12,10 +12,13 @@
  * Stock positions are written without ledger entries, so a seeded shop is for measurement only and
  * never for inventory tests.
  */
+
+import { createHash, randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import pg from 'pg';
 import { uuidv7 } from '../../packages/core/src/ids.ts';
+import { formatApiToken } from '../../packages/core/src/operations/access.ts';
 
 const { values: args } = parseArgs({
   options: {
@@ -23,6 +26,8 @@ const { values: args } = parseArgs({
     variants: { type: 'string', default: '10000' },
     'owner-user': { type: 'string' },
     seed: { type: 'string', default: '42' },
+    // Writes an API token per shop into the --out file (keep it out of the repository).
+    tokens: { type: 'boolean', default: false },
     out: { type: 'string', default: 'seed.json' },
   },
 });
@@ -101,6 +106,7 @@ const shopsOut: Array<{
   variants: number;
   products: number;
   locationIds: string[];
+  token?: string;
 }> = [];
 const started = performance.now();
 for (let s = 0; s < Number(args.shops); s++) {
@@ -120,11 +126,29 @@ for (let s = 0; s < Number(args.shops); s++) {
     'insert into shops (id, name, currency, timezone, created_by) values ($1, $2, $3, $4, $5)',
     [shopId, `Bench shop ${s + 1}`, 'EUR', 'Europe/Berlin', userId],
   );
+  const membershipId = uuidv7();
   await q(`insert into memberships (shop_id, id, user_id, role) values ($1, $2, $3, 'owner')`, [
     shopId,
-    uuidv7(),
+    membershipId,
     userId,
   ]);
+  let token: string | undefined;
+  if (args.tokens) {
+    const credentialId = uuidv7();
+    const secret = randomBytes(32).toString('base64url');
+    await q(
+      `insert into api_credentials (shop_id, id, membership_id, name, secret_hash, scopes)
+       values ($1, $2, $3, 'benchmark', $4, $5)`,
+      [
+        shopId,
+        credentialId,
+        membershipId,
+        createHash('sha256').update(secret).digest('hex'),
+        ['shop:read', 'catalog:read', 'catalog:write', 'inventory:read'],
+      ],
+    );
+    token = formatApiToken(credentialId, secret);
+  }
   await q(`insert into warehouses (shop_id, id, name) values ($1, $2, 'Main stock')`, [
     shopId,
     warehouseId,
@@ -357,6 +381,7 @@ for (let s = 0; s < Number(args.shops); s++) {
     variants: variants.length,
     products: products.length,
     locationIds: locations,
+    ...(token ? { token } : {}),
   });
   console.log(`shop ${s + 1}: ${products.length} products, ${variants.length} variants`);
 }

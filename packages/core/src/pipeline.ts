@@ -5,7 +5,7 @@ import { AppError, errors } from './errors.ts';
 import { canonicalJson, sha256Hex } from './hash.ts';
 import { UUID_PATTERN, uuidv7 } from './ids.ts';
 import { effectivePermissions, isRole } from './permissions.ts';
-import type { AnyOperation, HandlerContext, HandlerResult } from './registry.ts';
+import type { AnyOperation, FileAccess, HandlerContext, HandlerResult } from './registry.ts';
 
 export interface Logger {
   error(message: string, data?: Record<string, unknown>): void;
@@ -17,6 +17,7 @@ export interface PipelineDeps {
   db: Database;
   audit: AuditSink;
   logger?: Logger;
+  files?: FileAccess;
 }
 
 export interface ExecuteRequest {
@@ -171,6 +172,7 @@ export async function execute(
         }
         const ctx: HandlerContext = {
           tx,
+          ...(deps.files ? { files: deps.files } : {}),
           shopId: resolvedShopId ?? '',
           caller,
           membership,

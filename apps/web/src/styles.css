@@ -1256,3 +1256,29 @@ button.danger {
 .detail-head > button {
   align-self: flex-start;
 }
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.42rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.button-link.small {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+.export-control {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.small-text {
+  font-size: 0.8rem;
+}

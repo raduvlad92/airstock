@@ -1,6 +1,6 @@
 import { type AnyOperation, execute, operations } from '@airstock/core';
 import type { Hono } from 'hono';
-import type { AppDeps, AppEnv } from './app.ts';
+import { type AppDeps, type AppEnv, fileAccess } from './app.ts';
 
 const INVALID_JSON = Symbol('invalid-json');
 
@@ -32,7 +32,7 @@ export function mountRestRoutes(app: Hono<AppEnv>, deps: AppDeps): void {
             ? undefined
             : body;
       const result = await execute(
-        { db: c.get('db'), audit: c.get('audit'), logger: deps.logger },
+        { db: c.get('db'), audit: c.get('audit'), logger: deps.logger, ...fileAccess(deps) },
         op,
         {
           caller: c.get('caller'),

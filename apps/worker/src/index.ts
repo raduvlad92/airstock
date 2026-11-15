@@ -5,10 +5,14 @@ import {
   dispatchOutbox,
   ensureAuditPartitions,
   ingestAuditEvents,
+  type JobDeps,
   type Logger,
   type OutboxMessage,
+  runExportJob,
+  runImportJob,
   sendInvitationEmail,
   sweepExpiredReservations,
+  sweepExportFiles,
   sweepUnboundConnectionGrants,
   systemCaller,
   uuidv7,
@@ -31,6 +35,7 @@ import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
 import { bindingLimiter } from './rate-limit.ts';
 import { requestScopedSource } from './request-db.ts';
+import type { FileStore } from './scan.ts';
 import type { JobMessage, ShopifyAppConfig } from './shopify.ts';
 import type { WebConfig } from './web.ts';
 import { createWorkosClient } from './workos.ts';
@@ -141,6 +146,40 @@ function publishOutbox(env: Env, db: Database): Promise<number> {
   });
 }
 
+/** The EU R2 bucket: scan-test results, import uploads, and export files. */
+function filesFor(env: Env): FileStore {
+  return {
+    async put(key, body, contentType = 'application/json') {
+      await env.FILES.put(key, body, { httpMetadata: { contentType } });
+    },
+    async list(prefix) {
+      const listed = await env.FILES.list({ prefix, limit: 1000 });
+      return listed.objects.map((o) => o.key);
+    },
+    async get(key) {
+      const object = await env.FILES.get(key);
+      return object ? object.text() : null;
+    },
+    async delete(key) {
+      await env.FILES.delete(key);
+    },
+  };
+}
+
+function jobDeps(env: Env, db: Database): JobDeps {
+  const files = filesFor(env);
+  return {
+    db,
+    audit: queueSink(env),
+    logger,
+    files: {
+      get: files.get,
+      put: (k, b, ct) => files.put(k, b, ct),
+      delete: (k) => files.delete!(k),
+    },
+  };
+}
+
 let app: ReturnType<typeof createApp> | null = null;
 
 export default {
@@ -177,19 +216,7 @@ export default {
         connection: env.RATE_LIMIT_MCP,
         client_events: env.RATE_LIMIT_CLIENT_EVENTS,
       }),
-      files: {
-        async put(key, body) {
-          await env.FILES.put(key, body, { httpMetadata: { contentType: 'application/json' } });
-        },
-        async list(prefix) {
-          const listed = await env.FILES.list({ prefix, limit: 1000 });
-          return listed.objects.map((o) => o.key);
-        },
-        async get(key) {
-          const object = await env.FILES.get(key);
-          return object ? object.text() : null;
-        },
-      },
+      files: filesFor(env),
       logger,
     });
     return app.fetch(request, env, ctx);
@@ -257,7 +284,31 @@ export default {
       }
       await sweepExpiredReservations(db);
       await sweepUnboundConnectionGrants(db);
-      if (controller.cron === '0 3 * * *') await ensureAuditPartitions(db);
+      // Imports whose job stopped (a lost message, a crash) resume from their checkpoint.
+      const stuck = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
+        tx.query<{ shop_id: string; id: string }>(
+          'select shop_id, id from stale_imports($1)',
+          [20],
+        ),
+      );
+      if (stuck.length > 0) {
+        await env.JOBS_QUEUE.sendBatch(
+          stuck.map((r) => ({
+            body: {
+              id: crypto.randomUUID(),
+              shopId: r.shop_id,
+              topic: 'catalog.import.run',
+              payload: { importId: r.id },
+              createdAt: new Date().toISOString(),
+            },
+            contentType: 'json' as const,
+          })),
+        );
+      }
+      if (controller.cron === '0 3 * * *') {
+        await ensureAuditPartitions(db);
+        await sweepExportFiles(db, jobDeps(env, db).files);
+      }
     } finally {
       await db.close();
     }
@@ -406,6 +457,22 @@ async function runJobsMessage(
         },
         body.shopId,
         (body.payload as { invitationId: string }).invitationId,
+      );
+      return null;
+    }
+    if (body.topic === 'catalog.import.run') {
+      // Chunks run until the time budget; the rest continues in a new message right away.
+      const importId = (body.payload as { importId: string }).importId;
+      const outcome = await runImportJob(jobDeps(env, db), body.shopId, importId);
+      if (outcome === 'more')
+        await env.JOBS_QUEUE.send({ ...body, id: crypto.randomUUID() }, { contentType: 'json' });
+      return null;
+    }
+    if (body.topic === 'catalog.export.run') {
+      await runExportJob(
+        jobDeps(env, db),
+        body.shopId,
+        (body.payload as { exportId: string }).exportId,
       );
       return null;
     }

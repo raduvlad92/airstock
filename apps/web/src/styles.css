@@ -1315,3 +1315,98 @@ button.danger {
 .small-text {
   font-size: 0.8rem;
 }
+
+/* Packaging, barcodes, bundles, and suppliers in the detail panel (N5). */
+.edit-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.edit-card .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.checks-inline {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+}
+
+.conflict-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.supplier-items li {
+  display: block;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.bundle-availability p {
+  margin: 0;
+}
+
+/* Labels page (D9): options and the list beside the preview. */
+.labels-page > .segmented {
+  align-self: flex-start;
+}
+
+.labels-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: 1rem;
+  align-items: start;
+}
+
+.label-preview {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.label-preview canvas {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.label-entries input.copies {
+  width: 4.5rem;
+  text-align: right;
+}
+
+.label-entries select {
+  max-width: 11rem;
+}
+
+.location-choices {
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.location-choices li {
+  justify-content: flex-start;
+}
+
+@media (max-width: 900px) {
+  .labels-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

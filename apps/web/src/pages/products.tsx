@@ -1,4 +1,5 @@
 import type { ops } from '@airstock/core';
+import { LABEL_LIMITS } from '@airstock/core/labels';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,6 +83,7 @@ export function ProductsPage() {
   const [bulk, setBulk] = useState<BulkEdit[] | null>(null);
   const [overrides, setOverrides] = useState<Map<string, CellValue>>(new Map());
   const [viewId, setViewId] = useState<string | null>(null);
+  const [selectedRows, setSelectedRows] = useState<Row[]>([]);
   const mode = prefs.mode;
   const layout = prefs.layouts[mode];
 
@@ -137,6 +139,16 @@ export function ProductsPage() {
   const needMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Label printing takes variants; at most the labels page's limit of entries.
+  const onSelectRows = useCallback((r: Row[]) => setSelectedRows(r), []);
+  const selected = useMemo(
+    () =>
+      [
+        ...new Map(selectedRows.filter((r) => r.variantId).map((r) => [r.variantId, r])).values(),
+      ].slice(0, LABEL_LIMITS.entries),
+    [selectedRows],
+  );
 
   const update = (patch: Partial<Prefs>) => setPrefs((p) => ({ ...p, ...patch }));
   const updateLayout = (patch: Partial<Layout>) =>
@@ -291,6 +303,17 @@ export function ProductsPage() {
               Import
             </Link>
           ) : null}
+          {prefs.viewType === 'grid' && mode === 'variants' && selected.length > 0 ? (
+            <Link
+              to="/shops/$shopId/labels"
+              params={{ shopId }}
+              search={{ variants: selected.map((r) => r.variantId).join(',') }}
+              className="button-link small"
+              title="Labels for the selected rows"
+            >
+              Print labels ({selected.length})
+            </Link>
+          ) : null}
           {canWrite ? (
             <button
               type="button"
@@ -405,6 +428,7 @@ export function ProductsPage() {
               telemetry.track(shopId, 'grid.column_order_changed', { order, mode });
             }}
             onBulk={setBulk}
+            onSelectRows={onSelectRows}
             overrides={overrides}
             onSaved={(key, value) => setOverrides((m) => new Map(m).set(key, value))}
           />

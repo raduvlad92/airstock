@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
 import { RootLayout, ShopLayout } from './components/layout.tsx';
+import { parseLabelsSearch } from './labels/search.ts';
 import { ActivityPage } from './pages/activity.tsx';
 import { FamiliesSettingsPage, FieldsSettingsPage } from './pages/catalog-settings.tsx';
 import { ImportsPage } from './pages/imports.tsx';
@@ -10,9 +11,11 @@ import {
   ShopifyPage,
 } from './pages/integrations.tsx';
 import { InventoryPage } from './pages/inventory.tsx';
+import { LabelsPage } from './pages/labels.tsx';
 import { ProductsPage } from './pages/products.tsx';
 import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.tsx';
 import { ShopsPage } from './pages/shops.tsx';
+import { SuppliersPage } from './pages/suppliers.tsx';
 import { WarehousesPage } from './pages/warehouses.tsx';
 
 const rootRoute = createRootRoute({ component: RootLayout });
@@ -66,6 +69,21 @@ const warehousesRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/warehouses',
   component: WarehousesPage,
+});
+const suppliersRoute = createRoute({
+  getParentRoute: () => shopRoute,
+  path: '/suppliers',
+  component: SuppliersPage,
+  validateSearch: (search: Record<string, unknown>): { supplier?: string } =>
+    typeof search.supplier === 'string' && /^[0-9a-f-]{36}$/.test(search.supplier)
+      ? { supplier: search.supplier }
+      : {},
+});
+const labelsRoute = createRoute({
+  getParentRoute: () => shopRoute,
+  path: '/labels',
+  component: LabelsPage,
+  validateSearch: parseLabelsSearch,
 });
 const activityRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -144,6 +162,8 @@ export const routeTree = rootRoute.addChildren([
     importsRoute,
     inventoryRoute,
     warehousesRoute,
+    suppliersRoute,
+    labelsRoute,
     activityRoute,
     integrationsRoute.addChildren([integrationsIndexRoute, shopifyRoute, aiRoute, apiRoute]),
     settingsRoute.addChildren([

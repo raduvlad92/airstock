@@ -67,18 +67,13 @@ export function memoryMediaStore(): MediaStore & {
 
 export function nodeHasher(): StreamHasher {
   const hash = createHash('sha256');
-  let resolve: (value: ArrayBuffer) => void = () => {};
-  const digest = new Promise<ArrayBuffer>((r) => {
-    resolve = r;
-  });
-  const writable = new WritableStream<Uint8Array>({
+  return {
     write(chunk) {
       hash.update(chunk);
     },
-    close() {
+    async digest() {
       const out = hash.digest();
-      resolve(out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer);
+      return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
     },
-  });
-  return { writable, digest };
+  };
 }

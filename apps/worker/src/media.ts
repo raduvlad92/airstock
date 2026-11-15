@@ -44,10 +44,13 @@ export interface MediaStore {
   delete(keys: string[]): Promise<void>;
 }
 
-/** SHA-256 over a stream: crypto.DigestStream in Workers, node:crypto in tests. */
+/**
+ * SHA-256 fed chunk by chunk as the body passes: crypto.DigestStream in Workers, node:crypto in
+ * tests. Hashing inside the stream keeps backpressure from storage, so a body is never buffered.
+ */
 export interface StreamHasher {
-  writable: WritableStream<Uint8Array>;
-  digest: Promise<ArrayBuffer>;
+  write(chunk: Uint8Array): void | Promise<void>;
+  digest(): Promise<ArrayBuffer>;
 }
 
 export interface MediaConfig {
@@ -108,7 +111,39 @@ export function r2MediaStore(bucket: R2Bucket): MediaStore {
 
 export function digestStreamHasher(): StreamHasher {
   const stream = new crypto.DigestStream('SHA-256');
-  return { writable: stream as WritableStream<Uint8Array>, digest: stream.digest };
+  const writer = stream.getWriter();
+  return {
+    // A copy: the same chunk goes on to R2, whatever the digest stream does with what it is given.
+    write: (chunk) => writer.write(chunk.slice()),
+    async digest() {
+      await writer.close();
+      return stream.digest;
+    },
+  };
+}
+
+/** Reads a small body whose length was not sent, refusing it past `max` bytes. */
+async function readAtMost(body: ReadableStream<Uint8Array>, max: number): Promise<Uint8Array> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      throw uploadRejected('file_too_large', `At most ${max} bytes.`, { maxBytes: max });
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }
 
 const hex = (buffer: ArrayBuffer) =>
@@ -129,8 +164,9 @@ export function isUploadRequest(method: string, path: string): boolean {
  * Counts bytes, keeps the head, and checks the signature as the body passes. A failure errors the
  * stream, so storage never completes the object.
  */
-function inspector(upload: OpenUpload, accept: readonly MediaType[]) {
+function inspector(upload: OpenUpload, accept: readonly MediaType[], hasher: StreamHasher) {
   let size = 0;
+  let finished = false;
   let headLength = 0;
   const chunks: Uint8Array[] = [];
   let type: MediaType | null = null;
@@ -166,7 +202,7 @@ function inspector(upload: OpenUpload, accept: readonly MediaType[]) {
     type = found;
   };
   const stream = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
+    async transform(chunk, controller) {
       size += chunk.byteLength;
       if (size > upload.maxBytes) {
         fail(
@@ -185,16 +221,22 @@ function inspector(upload: OpenUpload, accept: readonly MediaType[]) {
         headLength += piece.byteLength;
       }
       if (type === null && headLength >= SIGNATURE_BYTES) check();
+      await hasher.write(chunk);
       controller.enqueue(chunk);
     },
     flush() {
       if (type === null) check();
+      finished = true;
     },
   });
   return {
     stream,
     get failure() {
       return failure;
+    },
+    /** True once the whole body passed. */
+    get finished() {
+      return finished;
     },
     result: () => ({ size, type: type as MediaType | null, head: head() }),
   };
@@ -271,12 +313,6 @@ async function receivePart(c: Context<AppEnv>, deps: AppDeps): Promise<Response>
   if (!body || length === 0) {
     return problem(errors.validation([{ path: 'body', message: 'Send the file.' }]), requestId);
   }
-  if (upload.part !== 'original' && (length === null || !Number.isSafeInteger(length))) {
-    return problem(
-      new AppError(411, 'length_required', 'Send a Content-Length header.', 'failed'),
-      requestId,
-    );
-  }
   // The original's type was declared; a derivative names its own, which its bytes must match.
   const declaredType = (c.req.header('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
   const partType: MediaType | null =
@@ -306,18 +342,32 @@ async function receivePart(c: Context<AppEnv>, deps: AppDeps): Promise<Response>
         received: length,
       });
     }
-    if (upload.part !== 'original' && length! > upload.maxBytes) {
-      throw uploadRejected('file_too_large', `At most ${upload.maxBytes} bytes.`, {
-        maxBytes: upload.maxBytes,
+    let source: ReadableStream<Uint8Array> = body;
+    let size: number;
+    if (upload.part === 'original') {
+      size = upload.declaredSize;
+    } else if (length !== null && Number.isSafeInteger(length)) {
+      if (length > upload.maxBytes) {
+        throw uploadRejected('file_too_large', `At most ${upload.maxBytes} bytes.`, {
+          maxBytes: upload.maxBytes,
+        });
+      }
+      size = length;
+    } else {
+      // Storage needs the length up front; a derivative without one is small enough to read first.
+      const bytes = await readAtMost(body, upload.maxBytes);
+      size = bytes.byteLength;
+      source = new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
       });
     }
-    const size = upload.part === 'original' ? upload.declaredSize : length!;
-    const inspect = inspector(upload, [partType]);
     const hasher = config.hasher();
-    const [toStore, toHash] = body.pipeThrough(inspect.stream).tee();
-    const hashing = toHash.pipeTo(hasher.writable);
-    const [put, hashed] = await Promise.allSettled([
-      config.store.put(key, toStore, {
+    const inspect = inspector(upload, [partType], hasher);
+    const put = await config.store
+      .put(key, source.pipeThrough(inspect.stream), {
         size,
         contentType: partType,
         ...(upload.part === 'original'
@@ -326,13 +376,15 @@ async function receivePart(c: Context<AppEnv>, deps: AppDeps): Promise<Response>
               contentDisposition: contentDisposition('attachment', upload.fileName),
             }
           : {}),
-      }),
-      hashing,
-    ]);
+      })
+      .then(
+        () => ({ ok: true as const }),
+        (reason: unknown) => ({ ok: false as const, reason }),
+      );
+    stored = put.ok;
     if (inspect.failure) throw inspect.failure;
-    if (put.status === 'fulfilled') stored = true;
-    if (hashed.status === 'rejected') throw hashed.reason;
-    const sha256 = hex(await hasher.digest);
+    // The body stopped early (a dropped connection) or storage failed while reading it.
+    if (!inspect.finished) throw put.ok ? new Error('The body ended early.') : put.reason;
     const seen = inspect.result();
     if (seen.size !== size) {
       throw uploadRejected('size_mismatch', 'The file size differs from the declared size.', {
@@ -340,6 +392,7 @@ async function receivePart(c: Context<AppEnv>, deps: AppDeps): Promise<Response>
         received: seen.size,
       });
     }
+    const sha256 = hex(await hasher.digest());
     if (upload.part === 'original' && sha256 !== upload.sha256) {
       throw uploadRejected(
         'checksum_mismatch',
@@ -350,7 +403,7 @@ async function receivePart(c: Context<AppEnv>, deps: AppDeps): Promise<Response>
         },
       );
     }
-    if (put.status === 'rejected') throw put.reason;
+    if (!put.ok) throw put.reason;
     const type = seen.type!;
     const pixels = upload.kind === 'image' ? imageSize(seen.head, type) : null;
     if (upload.maxSide !== null) {

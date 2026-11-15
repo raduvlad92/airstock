@@ -349,9 +349,13 @@ describe('F11: pictures and attachments through the API', () => {
 
   it('accepts a JPEG derivative where the browser cannot make WebP, and refuses other types', async () => {
     const { intent } = await uploadImageWithout('display');
-    expect((await put(urlOf(intent, 'display'), fakeJpeg(1600, 900), 'image/jpeg')).status).toBe(
-      200,
-    );
+    // Sent without a Content-Length, as some HTTP/2 clients do: a derivative is read first.
+    const noLength = await t.app.request(new URL(urlOf(intent, 'display')).pathname, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' },
+      body: fakeJpeg(1600, 900),
+    });
+    expect(noLength.status).toBe(200);
     const done = await json(await rest(`/media/uploads/${intent.intentId}/finalize`, {}));
     expect(done.media.display).toMatchObject({ contentType: 'image/jpeg', width: 1600 });
 
@@ -548,7 +552,7 @@ describe('A13: another shop’s media is unreachable', () => {
         sha256: sha256Hex(pdf2),
       }),
     );
-    await put(urlOf(theirsIntent, 'original'), pdf2, 'application/pdf', otherToken);
+    await put(urlOf(theirsIntent as Intent, 'original'), pdf2, 'application/pdf', otherToken);
     await theirs(`/media/uploads/${theirsIntent.intentId}/finalize`, {});
     const otherShops = await rest('/items', {
       name: 'Vase',

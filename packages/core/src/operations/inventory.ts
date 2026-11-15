@@ -15,6 +15,7 @@ interface VariantRow {
   quantity_scale: number;
   status: string;
   tracking_mode: string;
+  is_bundle: boolean;
 }
 
 async function loadStockableVariant(
@@ -23,12 +24,21 @@ async function loadStockableVariant(
   quantity: string,
 ): Promise<VariantRow> {
   const [variant] = await tx.query<VariantRow>(
-    'select quantity_scale, status, tracking_mode from variants where id = $1',
+    `select quantity_scale, status, tracking_mode,
+       exists (select 1 from bundles b where b.shop_id = v.shop_id and b.variant_id = v.id and b.active) as is_bundle
+     from variants v where id = $1`,
     [variantId],
   );
   if (!variant) throw errors.notFound('Variant');
   if (variant.status !== 'active')
     throw errors.conflict('variant_archived', 'The variant is archived.');
+  // A bundle holds no stock of its own (PRD 4.8); its availability comes from its components.
+  if (variant.is_bundle) {
+    throw errors.unprocessable(
+      'bundle_holds_no_stock',
+      'This variant is a bundle, which holds no stock of its own. Use its components.',
+    );
+  }
   if (variant.tracking_mode !== 'none') {
     throw errors.unprocessable(
       'tracking_not_supported_yet',
@@ -579,6 +589,31 @@ export const releaseReservation = defineOperation({
   },
 });
 
+/**
+ * Stock per position with what is reserved and available right now: expired claims stop counting
+ * before the sweeper releases them. Shared by stock reads and bundle availability. Parameters:
+ * $1 variant IDs, $2 an optional location (with its sub-locations), $3 the caller's location
+ * scope, $4 an optional warehouse.
+ */
+export const POSITION_STOCK_SQL = `
+  select p.id, p.variant_id, p.location_id, l.path, l.warehouse_id, p.condition, p.on_hand,
+    p.allocated - coalesce(x.expired, 0) as reserved,
+    case when p.condition = 'sellable' and l.status = 'active'
+      and location_fulfillment_eligible(l.shop_id, l.path_ids)
+      then p.on_hand - p.allocated + coalesce(x.expired, 0) else 0 end as available
+  from inventory_positions p
+  join locations l on l.shop_id = p.shop_id and l.id = p.location_id
+  left join lateral (
+    select sum(a.quantity - a.released - a.fulfilled) as expired
+    from reservation_allocations a
+    join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
+    where a.shop_id = p.shop_id and a.position_id = p.id and a.released + a.fulfilled < a.quantity
+      and r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()) x on true
+  where p.variant_id = any($1::uuid[])
+    and ($2::uuid is null or l.path_ids @> array[$2::uuid])
+    and ($3::uuid[] is null or l.path_ids && $3::uuid[])
+    and ($4::uuid is null or l.warehouse_id = $4::uuid)`;
+
 export const getAvailability = defineOperation({
   id: 'inventory.availability.get',
   summary: 'Get stock and availability for a variant',
@@ -645,22 +680,7 @@ export const getAvailability = defineOperation({
         available: string;
       }>;
     }>(
-      `with rows as (
-         select p.id, p.location_id, l.path, l.warehouse_id, p.condition, p.on_hand,
-           p.allocated - coalesce(x.expired, 0) as reserved,
-           case when p.condition = 'sellable' and l.status = 'active'
-             and location_fulfillment_eligible(l.shop_id, l.path_ids)
-             then p.on_hand - p.allocated + coalesce(x.expired, 0) else 0 end as available
-         from inventory_positions p
-         join locations l on l.shop_id = p.shop_id and l.id = p.location_id
-         left join lateral (
-           select sum(a.quantity - a.released - a.fulfilled) as expired
-           from reservation_allocations a
-           join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
-           where a.shop_id = p.shop_id and a.position_id = p.id and a.released + a.fulfilled < a.quantity
-             and r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()) x on true
-         where p.variant_id = $1 and ($2::uuid is null or p.location_id = $2)
-           and ($3::uuid[] is null or l.path_ids && $3::uuid[]))
+      `with rows as (${POSITION_STOCK_SQL})
        select
          (select json_build_object(
             'onHand', coalesce(sum(on_hand), 0)::text,
@@ -675,7 +695,7 @@ export const getAvailability = defineOperation({
             'warehouseId', warehouse_id, 'condition', condition, 'onHand', on_hand::text,
             'reserved', reserved::text, 'available', available::text) order by path, condition)
           from rows), '[]'::json) as positions`,
-      [input.variantId, input.locationId ?? null, ctx.locationScope],
+      [[input.variantId], input.locationId ?? null, ctx.locationScope, null],
     );
     if (!view) throw errors.internal();
     return {

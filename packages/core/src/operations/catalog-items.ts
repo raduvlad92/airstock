@@ -29,6 +29,7 @@ import {
 import { errors } from '../errors.ts';
 import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id, iso, normalizeSku } from '../schemas.ts';
+import { findDuplicates } from './catalog-query.ts';
 
 // Products and variants: create, read, field-level compare-and-set updates, archive and restore
 // (plan Sections 5.1 and 5.11, ADRs 0012 and 0013).
@@ -782,6 +783,12 @@ export const createItem = defineOperation({
       .optional()
       .describe('Such as "120 x 60 x 75 cm" or {length, width, height, unit}.'),
     fields: z.record(z.string(), z.unknown()).optional().describe('Custom field values by key.'),
+    acknowledgeSimilar: z
+      .boolean()
+      .default(false)
+      .describe(
+        'Products with similar names make the create fail with `similar_items_found` and the matches. Show them, and only after the person confirms it is a different product, retry with true.',
+      ),
   }),
   output: z.object({ productId: Id, variantId: Id, sku: z.string(), item: ItemDetail }),
   permission: 'catalog.write',
@@ -802,14 +809,21 @@ export const createItem = defineOperation({
     const weight = encodeBuiltin('weight', 'product', input.weight ?? null);
     const dimensions = encodeBuiltin('dimensions', 'product', input.dimensions ?? null);
     const skuNormalized = normalizeSku(input.sku);
-    const [existing] = await ctx.tx.query<{ id: string }>(
-      'select id from variants where sku_normalized = $1',
-      [skuNormalized],
-    );
-    if (existing) {
+    // One duplicate check on every create path (plan 5.7): taken SKUs are refused, similar names
+    // need an acknowledgment, and the matches shown are recorded with the outcome.
+    const duplicates = await findDuplicates(ctx.tx, { name: input.name, sku: input.sku });
+    if (duplicates.skuTaken) {
       throw errors.conflict('duplicate_sku', 'A variant with this SKU already exists.', {
-        existingVariantId: existing.id,
+        existingVariantId: duplicates.skuTaken.variantId,
+        existing: duplicates.skuTaken,
       });
+    }
+    if (duplicates.similarNames.length > 0 && !input.acknowledgeSimilar) {
+      throw errors.conflict(
+        'similar_items_found',
+        'Products with similar names already exist. Check them; if this is a different product, create it with acknowledgeSimilar.',
+        { similarNames: duplicates.similarNames },
+      );
     }
     let familyId: string | null = null;
     if (input.family) {
@@ -953,6 +967,7 @@ export const createItem = defineOperation({
           quantityScale: input.quantityScale,
           status: input.status,
           familyId,
+          acknowledgedSimilar: duplicates.similarNames.map((m) => m.productId),
           fields: Object.fromEntries(
             [...Object.entries(productAttributes), ...Object.entries(variantAttributes)].map(
               ([id, v]) => [defs.find((d) => d.id === id)?.key ?? id, v],

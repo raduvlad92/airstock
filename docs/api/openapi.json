@@ -2777,6 +2777,11 @@
                       "type": "string"
                     },
                     "additionalProperties": {}
+                  },
+                  "acknowledgeSimilar": {
+                    "default": false,
+                    "description": "Products with similar names make the create fail with `similar_items_found` and the matches. Show them, and only after the person confirms it is a different product, retry with true.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -3666,6 +3671,1294 @@
                   },
                   "required": [
                     "item"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/items/query": {
+      "post": {
+        "operationId": "catalog.items.query",
+        "summary": "Search, filter, and sort the catalog",
+        "description": "One page of products or variants. Combine `search`, a `filter` on any built-in or custom field (see describe_catalog for keys and options), and a `sort`; pass `nextCursor` back for the next page. Ask for custom field values with `fields`.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.items.queried",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "default": "variants",
+                    "description": "variants: one row per variant (SKU, price, stock). products: one row per product, variant values summarised.",
+                    "type": "string",
+                    "enum": [
+                      "variants",
+                      "products"
+                    ]
+                  },
+                  "search": {
+                    "description": "Matches SKUs exactly or by prefix, words in names and descriptions, and names with typos.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "filter": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "field": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                            },
+                            "op": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 30,
+                              "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                            },
+                            "value": {
+                              "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "op"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "any": {
+                              "minItems": 1,
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100,
+                                    "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                  },
+                                  "op": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 30,
+                                    "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                  },
+                                  "value": {
+                                    "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "op"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "any"
+                          ]
+                        }
+                      ]
+                    },
+                    "description": "All items must match; an {any: [...]} item matches when one of its conditions does."
+                  },
+                  "sort": {
+                    "description": "Defaults to name, or to relevance when searching.",
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "direction": {
+                        "default": "asc",
+                        "type": "string",
+                        "enum": [
+                          "asc",
+                          "desc"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "field"
+                    ]
+                  },
+                  "fields": {
+                    "description": "Custom field keys (and weight, available) to return with each row.",
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    }
+                  },
+                  "archived": {
+                    "default": "exclude",
+                    "type": "string",
+                    "enum": [
+                      "exclude",
+                      "include",
+                      "only"
+                    ]
+                  },
+                  "limit": {
+                    "default": 50,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 200
+                  },
+                  "cursor": {
+                    "description": "nextCursor from the previous page of the same query.",
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "variants",
+                        "products"
+                      ]
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "variantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null in products mode."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "sku": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "description": "Option values, such as \"Black / M\"."
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "productStatus": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "familyId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "variantCount": {
+                            "description": "Products mode: active variants.",
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "priceRange": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "min": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "max": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "min",
+                                  "max"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "skus": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Products mode: the first few SKUs."
+                          },
+                          "available": {
+                            "description": "When requested in fields: sellable stock available in your locations.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "values": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "value": {},
+                                "display": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "own",
+                                    "inherited",
+                                    "cleared",
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "value",
+                                "display",
+                                "source"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "productId",
+                          "variantId",
+                          "name",
+                          "sku",
+                          "title",
+                          "status",
+                          "productStatus",
+                          "price",
+                          "familyId",
+                          "tags",
+                          "variantCount",
+                          "priceRange",
+                          "skus",
+                          "available",
+                          "values"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total": {
+                      "description": "Matching rows, counted on the first page only.",
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "totalCapped": {
+                      "type": "boolean",
+                      "description": "True when there are more than 10,000 and total stops there."
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "rows",
+                    "nextCursor",
+                    "total",
+                    "totalCapped"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/items/duplicates": {
+      "post": {
+        "operationId": "catalog.duplicates.check",
+        "summary": "Check a name, SKU, or barcode for duplicates before creating",
+        "description": "Returns the record already using the SKU or barcode, and products with similar names. Creating with a taken SKU or barcode is refused; creating with a similar name needs acknowledgeSimilar.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.duplicates.checked",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "sku": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "barcode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "excludeProductId": {
+                    "description": "Leave this product out, when renaming it.",
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "skuTaken": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "variantId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "productId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sku": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "variantId",
+                            "productId",
+                            "sku",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "barcodeTaken": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "ownerType": {
+                              "type": "string"
+                            },
+                            "ownerId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ownerType",
+                            "ownerId",
+                            "code"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "similarNames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "similarity": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "productId",
+                          "name",
+                          "similarity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "skuTaken",
+                    "barcodeTaken",
+                    "similarNames"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/saved-views": {
+      "get": {
+        "operationId": "catalog.saved_views.list",
+        "summary": "List your saved views and the shop’s shared ones",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "catalog.saved_views.listed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "views": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "shared": {
+                            "type": "boolean"
+                          },
+                          "mine": {
+                            "type": "boolean"
+                          },
+                          "definition": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "enum": [
+                                  "variants",
+                                  "products"
+                                ]
+                              },
+                              "viewType": {
+                                "default": "grid",
+                                "type": "string",
+                                "enum": [
+                                  "grid",
+                                  "gallery"
+                                ]
+                              },
+                              "columns": {
+                                "default": [],
+                                "maxItems": 150,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100
+                                    },
+                                    "width": {
+                                      "type": "integer",
+                                      "minimum": 40,
+                                      "maximum": 1200
+                                    },
+                                    "hidden": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "key"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "sort": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "direction": {
+                                    "default": "asc",
+                                    "type": "string",
+                                    "enum": [
+                                      "asc",
+                                      "desc"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "direction"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "filter": {
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "field": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 100,
+                                          "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                        },
+                                        "op": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 30,
+                                          "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                        },
+                                        "value": {
+                                          "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                        }
+                                      },
+                                      "required": [
+                                        "field",
+                                        "op"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "any": {
+                                          "minItems": 1,
+                                          "maxItems": 20,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "field": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 100,
+                                                "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                              },
+                                              "op": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 30,
+                                                "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                              },
+                                              "value": {
+                                                "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                              }
+                                            },
+                                            "required": [
+                                              "field",
+                                              "op"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "any"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "description": "All items must match; an {any: [...]} item matches when one of its conditions does."
+                              },
+                              "search": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "density": {
+                                "default": "compact",
+                                "type": "string",
+                                "enum": [
+                                  "compact",
+                                  "comfortable"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "viewType",
+                              "columns",
+                              "density"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "shared",
+                          "mine",
+                          "definition",
+                          "version",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "views"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "catalog.saved_views.save",
+        "summary": "Create or change a saved view",
+        "description": "Without viewId, creates a view. A shared view is visible to the whole shop; sharing or changing a shared view needs catalog.write.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "catalog.saved_view.saved",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "viewId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "shared": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "variants",
+                          "products"
+                        ]
+                      },
+                      "viewType": {
+                        "default": "grid",
+                        "type": "string",
+                        "enum": [
+                          "grid",
+                          "gallery"
+                        ]
+                      },
+                      "columns": {
+                        "default": [],
+                        "maxItems": 150,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100
+                            },
+                            "width": {
+                              "type": "integer",
+                              "minimum": 40,
+                              "maximum": 1200
+                            },
+                            "hidden": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "key"
+                          ]
+                        }
+                      },
+                      "sort": {
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "direction": {
+                            "default": "asc",
+                            "type": "string",
+                            "enum": [
+                              "asc",
+                              "desc"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "field"
+                        ]
+                      },
+                      "filter": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                },
+                                "op": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 30,
+                                  "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                },
+                                "value": {
+                                  "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                }
+                              },
+                              "required": [
+                                "field",
+                                "op"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "any": {
+                                  "minItems": 1,
+                                  "maxItems": 20,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "field": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 100,
+                                        "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                      },
+                                      "op": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 30,
+                                        "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                      },
+                                      "value": {
+                                        "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                      }
+                                    },
+                                    "required": [
+                                      "field",
+                                      "op"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "any"
+                              ]
+                            }
+                          ]
+                        },
+                        "description": "All items must match; an {any: [...]} item matches when one of its conditions does."
+                      },
+                      "search": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "density": {
+                        "default": "compact",
+                        "type": "string",
+                        "enum": [
+                          "compact",
+                          "comfortable"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "definition"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "view": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "shared": {
+                          "type": "boolean"
+                        },
+                        "mine": {
+                          "type": "boolean"
+                        },
+                        "definition": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "variants",
+                                "products"
+                              ]
+                            },
+                            "viewType": {
+                              "default": "grid",
+                              "type": "string",
+                              "enum": [
+                                "grid",
+                                "gallery"
+                              ]
+                            },
+                            "columns": {
+                              "default": [],
+                              "maxItems": 150,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "width": {
+                                    "type": "integer",
+                                    "minimum": 40,
+                                    "maximum": 1200
+                                  },
+                                  "hidden": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "key"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "sort": {
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                },
+                                "direction": {
+                                  "default": "asc",
+                                  "type": "string",
+                                  "enum": [
+                                    "asc",
+                                    "desc"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "field",
+                                "direction"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "filter": {
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "field": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 100,
+                                        "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                      },
+                                      "op": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 30,
+                                        "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                      },
+                                      "value": {
+                                        "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                      }
+                                    },
+                                    "required": [
+                                      "field",
+                                      "op"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "any": {
+                                        "minItems": 1,
+                                        "maxItems": 20,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "field": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 100,
+                                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                            },
+                                            "op": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 30,
+                                              "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                            },
+                                            "value": {
+                                              "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                            }
+                                          },
+                                          "required": [
+                                            "field",
+                                            "op"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "any"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "description": "All items must match; an {any: [...]} item matches when one of its conditions does."
+                            },
+                            "search": {
+                              "type": "string",
+                              "maxLength": 200
+                            },
+                            "density": {
+                              "default": "compact",
+                              "type": "string",
+                              "enum": [
+                                "compact",
+                                "comfortable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "viewType",
+                            "columns",
+                            "density"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "shared",
+                        "mine",
+                        "definition",
+                        "version",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "view"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/saved-views/{viewId}/delete": {
+      "post": {
+        "operationId": "catalog.saved_views.delete",
+        "summary": "Delete a saved view",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "catalog.saved_view.deleted",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "viewId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
                   ],
                   "additionalProperties": false
                 }

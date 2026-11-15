@@ -348,6 +348,7 @@ export async function applyChanges(
   ctx: HandlerContext,
   productId: string,
   changes: Change[],
+  opts: { expectCurrent?: boolean } = {},
 ): Promise<{ result: ApplyResult; loaded: Loaded; defs: StoredField[] }> {
   const loaded = await loadItem(ctx.tx, productId, true);
   const { product, variants } = loaded;
@@ -425,7 +426,8 @@ export async function applyChanges(
       const encoded = encodeValue(def, expected, { currency, current });
       if (encoded.ok) expected = encoded.value;
     }
-    if (cmp(expected) !== cmp(current)) {
+    // A bulk preview takes the current values as expected; its commit then checks them (D4).
+    if (!opts.expectCurrent && cmp(expected) !== cmp(current)) {
       conflicts.push({
         recordType,
         recordId,

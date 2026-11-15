@@ -15,11 +15,14 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { UnitsSetting } from './catalog-settings.tsx';
 
 type Members = Out<typeof ops.listMembers>;
 
 const SETTINGS_TABS = [
   ['/shops/$shopId/settings/shop', 'Shop'],
+  ['/shops/$shopId/settings/fields', 'Fields'],
+  ['/shops/$shopId/settings/families', 'Families'],
   ['/shops/$shopId/settings/members', 'Members'],
 ] as const;
 
@@ -53,6 +56,9 @@ export function ShopSettingsPage() {
   const { shop, role, permissions, allLocations, rateLimits } = context.data;
   return (
     <>
+      {can(context.data, 'shop.manage') ? (
+        <UnitsSetting shopId={shopId} current={shop.displayUnits} />
+      ) : null}
       <Card title="Shop">
         <dl className="facts">
           <dt>Name</dt>

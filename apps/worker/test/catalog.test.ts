@@ -273,6 +273,40 @@ describe('A43 and search through REST and MCP (N2)', () => {
   });
 });
 
+describe('bulk edits through MCP (D4)', () => {
+  it('previews a multi-record change, then commits it', async () => {
+    const { call } = await mcp(['shop:read', 'catalog:read', 'catalog:write']);
+    const a = await call('edit_catalog', {
+      action: 'create_product',
+      name: 'Bulk mug one',
+      sku: 'BM-1',
+      price: '4',
+    });
+    const b = await call('edit_catalog', {
+      action: 'create_product',
+      name: 'Bulk plate two',
+      sku: 'BM-2',
+      price: '6',
+    });
+    const preview = await call('edit_catalog', {
+      action: 'bulk_preview',
+      edits: [
+        { productId: a.body.productId, variantId: a.body.variantId, field: 'price', value: '4.5' },
+        { productId: b.body.productId, variantId: b.body.variantId, field: 'price', value: '6.5' },
+      ],
+    });
+    expect(preview.body.records).toBe(2);
+    expect(preview.body.previewId).toBeTruthy();
+    const commit = await call('edit_catalog', {
+      action: 'bulk_commit',
+      previewId: preview.body.previewId,
+    });
+    expect(commit.error).toBe(false);
+    const found = await call('search_catalog', { action: 'query', search: 'BM-2' });
+    expect(found.body.rows[0].price).toBe('6.500000');
+  });
+});
+
 describe('cross-shop isolation for the new routes (A13)', () => {
   it('answers another shop’s catalog IDs with 404', async () => {
     const other = await seedShop(t.db, t.sink, 'Other catalog REST shop');

@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
 import { RootLayout, ShopLayout } from './components/layout.tsx';
 import { ActivityPage } from './pages/activity.tsx';
+import { FamiliesSettingsPage, FieldsSettingsPage } from './pages/catalog-settings.tsx';
 import {
   AiConnectionsPage,
   ApiCredentialsPage,
@@ -45,6 +46,10 @@ const productsRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/products',
   component: ProductsPage,
+  validateSearch: (search: Record<string, unknown>): { item?: string } =>
+    typeof search.item === 'string' && /^[0-9a-f-]{36}$/.test(search.item)
+      ? { item: search.item }
+      : {},
 });
 const inventoryRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -114,6 +119,16 @@ const membersRoute = createRoute({
   path: '/members',
   component: MembersPage,
 });
+const fieldsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/fields',
+  component: FieldsSettingsPage,
+});
+const familiesRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/families',
+  component: FamiliesSettingsPage,
+});
 
 export const routeTree = rootRoute.addChildren([
   homeRoute,
@@ -124,7 +139,13 @@ export const routeTree = rootRoute.addChildren([
     warehousesRoute,
     activityRoute,
     integrationsRoute.addChildren([integrationsIndexRoute, shopifyRoute, aiRoute, apiRoute]),
-    settingsRoute.addChildren([settingsIndexRoute, shopSettingsRoute, membersRoute]),
+    settingsRoute.addChildren([
+      settingsIndexRoute,
+      shopSettingsRoute,
+      fieldsRoute,
+      familiesRoute,
+      membersRoute,
+    ]),
   ]),
 ]);
 

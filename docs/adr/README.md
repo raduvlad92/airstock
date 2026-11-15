@@ -18,3 +18,4 @@ Short records of decisions made while building, with the reason and what would m
 | [0012](0012-custom-fields.md) | Typed JSONB attributes keyed by field ID, one shared encoder, inheritance by key presence, stable option IDs; Markdown rich text | Accepted |
 | [0013](0013-edit-concurrency.md) | Field-level compare-and-set on the value the caller read; conflicts name who changed the field | Accepted |
 | [0014](0014-catalog-query.md) | Typed filter compiler with keyset paging, two row modes, full-text and trigram search, one duplicate check, saved views | Accepted |
+| [0017](0017-grid-and-bulk-edits.md) | Variants and products rows over one query, virtualized grid with compare-and-set cells; bulk edits previewed, then committed all or nothing | Accepted |

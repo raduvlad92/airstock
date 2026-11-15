@@ -1,13 +1,7 @@
 import type { Tx } from '@airstock/db';
 import { z } from 'zod';
 import type { AuditEvent } from '../audit.ts';
-import {
-  comparable,
-  displayValue,
-  encodeValue,
-  FIELD_LIMITS,
-  type FieldDefinition,
-} from '../catalog/fields.ts';
+import { comparable, encodeValue, FIELD_LIMITS, type FieldDefinition } from '../catalog/fields.ts';
 import {
   attributesSize,
   BUILTIN_FIELDS,
@@ -24,7 +18,6 @@ import {
   VARIANT_COLUMNS,
   type VariantRow,
   variantTitle,
-  variantValue,
 } from '../catalog/records.ts';
 import {
   findField,
@@ -587,10 +580,9 @@ async function checkRequired(
   const status =
     (productWrite?.columns.get('status') as string | undefined) ?? loaded.product.status;
   if (status !== 'active') return;
-  const familyId =
-    productWrite && productWrite.columns.has('family_id')
-      ? (productWrite.columns.get('family_id') as string | null)
-      : loaded.product.family_id;
+  const familyId = productWrite?.columns.has('family_id')
+    ? (productWrite.columns.get('family_id') as string | null)
+    : loaded.product.family_id;
   if (!familyId) return;
   const full =
     (productWrite?.columns.has('status') && loaded.product.status !== 'active') ||

@@ -8,7 +8,10 @@
     "./catalog/fields": "./src/catalog/fields.ts",
     "./catalog/units": "./src/catalog/units.ts",
     "./catalog/decimal": "./src/catalog/decimal.ts",
-    "./media": "./src/media/files.ts"
+    "./media": "./src/media/files.ts",
+    "./barcodes": "./src/catalog/barcodes.ts",
+    "./labels": "./src/labels/layouts.ts",
+    "./packs": "./src/catalog/packs.ts"
   },
   "dependencies": {
     "@airstock/db": "workspace:*",

@@ -10,6 +10,7 @@ import {
 import { getOperationOutcome, listActivity, recordClientEvents } from './activity.ts';
 import { searchVariants } from './catalog.ts';
 import { commitBulkEdit, previewBulkEdit } from './catalog-bulk.ts';
+import { getBundleAvailability, setBundle } from './catalog-bundles.ts';
 import {
   archiveProduct,
   archiveVariant,
@@ -20,12 +21,21 @@ import {
   updateItem,
 } from './catalog-items.ts';
 import {
+  generateBarcode,
+  getPackaging,
+  lookupBarcode,
+  setBarcodes,
+  setPacks,
+  setShippingPackages,
+} from './catalog-packaging.ts';
+import {
   checkDuplicates,
   deleteView,
   listSavedViews,
   queryItems,
   saveView,
 } from './catalog-query.ts';
+
 import {
   addTemplate,
   convertField,
@@ -51,6 +61,12 @@ import {
   recordImportUpload,
 } from './imports.ts';
 import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
+import {
+  listLabelTemplates,
+  renderItemLabels,
+  renderLocationLabels,
+  saveLabelTemplate,
+} from './labels.ts';
 import {
   createUpload,
   downloadOriginal,
@@ -87,6 +103,15 @@ import {
   updateLocation,
   updateWarehouse,
 } from './storage.ts';
+import {
+  createSupplier,
+  getSupplier,
+  listSupplierItems,
+  listSuppliers,
+  removeSupplierItem,
+  saveSupplierItem,
+  updateSupplier,
+} from './suppliers.ts';
 
 /** The operation registry: the single source for REST, OpenAPI, MCP tools, and audit names. */
 export const operations: readonly AnyOperation[] = [
@@ -142,6 +167,26 @@ export const operations: readonly AnyOperation[] = [
   updateMediaLink,
   reorderMedia,
   unlinkMedia,
+  // Packs, barcodes, shipping packages, bundles, labels, suppliers (N5, ADR 0019).
+  getPackaging,
+  setPacks,
+  setShippingPackages,
+  setBarcodes,
+  generateBarcode,
+  lookupBarcode,
+  setBundle,
+  getBundleAvailability,
+  renderItemLabels,
+  renderLocationLabels,
+  listLabelTemplates,
+  saveLabelTemplate,
+  listSuppliers,
+  getSupplier,
+  createSupplier,
+  updateSupplier,
+  listSupplierItems,
+  saveSupplierItem,
+  removeSupplierItem,
   createWarehouse,
   updateWarehouse,
   archiveWarehouse,
@@ -207,6 +252,7 @@ export {
   createItem,
   createLocation,
   createShop,
+  createSupplier,
   createUpload,
   createWarehouse,
   deleteView,
@@ -215,14 +261,18 @@ export {
   downloadOriginal,
   finalizeUpload,
   findMedia,
+  generateBarcode,
   generateVariants,
   getAvailability,
+  getBundleAvailability,
   getExport,
   getImport,
   getItem,
   getOperationOutcome,
+  getPackaging,
   getPrimaryPictures,
   getShopContext,
+  getSupplier,
   getWarehouse,
   inviteMember,
   linkMedia,
@@ -232,13 +282,17 @@ export {
   listExports,
   listImportRows,
   listImports,
+  listLabelTemplates,
   listLocations,
   listMembers,
   listProductMedia,
   listSavedViews,
   listShopifyConnections,
   listShops,
+  listSupplierItems,
+  listSuppliers,
   listWarehouses,
+  lookupBarcode,
   markShopifyUninstalled,
   moveLocation,
   previewBulkEdit,
@@ -249,6 +303,9 @@ export {
   recordImportUpload,
   recordShopifyWebhook,
   releaseReservation,
+  removeSupplierItem,
+  renderItemLabels,
+  renderLocationLabels,
   reorderMedia,
   reserveStock,
   restoreLocation,
@@ -257,10 +314,16 @@ export {
   restoreWarehouse,
   revokeApiCredential,
   revokeConnection,
+  saveLabelTemplate,
+  saveSupplierItem,
   saveView,
   searchVariants,
+  setBarcodes,
+  setBundle,
   setLocationScope,
+  setPacks,
   setProductOptions,
+  setShippingPackages,
   setShopifyMappings,
   unlinkMedia,
   updateFamily,
@@ -271,5 +334,6 @@ export {
   updateMediaLink,
   updateShopifyConnectionDetails,
   updateShopSettings,
+  updateSupplier,
   updateWarehouse,
 };

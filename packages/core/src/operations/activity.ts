@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { callerKey } from '../caller.ts';
+import { callerKey, type Membership } from '../caller.ts';
 import { errors } from '../errors.ts';
 import { uuidv7Time } from '../ids.ts';
 import { effectivePermissions, type Permission } from '../permissions.ts';
@@ -47,6 +47,18 @@ function redactChanges(
     }
   }
   return out;
+}
+
+/**
+ * Some changes carry values only members with a permission may read, such as supplier costs
+ * (`changes.restricted`, ADR 0019). Others see that something restricted changed, not the values.
+ */
+function redactRestricted(changes: unknown, membership: Membership | null): unknown {
+  if (!changes || typeof changes !== 'object' || !('restricted' in changes)) return changes;
+  const permission = (changes as { restricted?: { permission?: string } }).restricted?.permission;
+  if (!permission) return changes;
+  if (membership && effectivePermissions(membership).has(permission as Permission)) return changes;
+  return { ...changes, restricted: { permission, hidden: true } };
 }
 
 export const listActivity = defineOperation({
@@ -141,7 +153,10 @@ export const listActivity = defineOperation({
           attemptId: r.attempt_id,
           externalRef: r.external_ref,
           reason: r.reason,
-          changes: redactChanges(r.target_type, r.changes, allowed),
+          changes: redactRestricted(
+            redactChanges(r.target_type, r.changes, allowed),
+            ctx.membership,
+          ),
           error: r.error,
         })),
         nextCursor:

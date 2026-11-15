@@ -63,6 +63,7 @@ describe('MCP endpoint (plan Section 7)', () => {
       'manage_catalog_schema',
       'manage_media',
       'manage_storage',
+      'manage_suppliers',
       'receive_stock',
       'reserve_stock',
       'search_activity',

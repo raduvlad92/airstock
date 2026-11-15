@@ -23,6 +23,7 @@ import { PgDatabase, poolSource } from '@airstock/db';
 import { bootstrap, migrate } from '@airstock/db/migrate';
 import pg from 'pg';
 import { createApp } from '../../worker/src/app.ts';
+import { memoryMediaStore, nodeHasher } from '../../worker/src/media-memory.ts';
 import {
   cookie,
   nowSeconds,
@@ -124,6 +125,13 @@ const app = createApp({
     workos,
     authkitOrigin: ORIGIN,
     grantClaim: 'urn:airstock:grant',
+  },
+  // R2 and DigestStream exist only in Workers; uploads go to memory here (ADR 0015).
+  media: {
+    store: memoryMediaStore(),
+    hasher: nodeHasher,
+    signingKey: 'e2e-media-signing-key-0123456789',
+    publicUrl: ORIGIN,
   },
   logger: { error: (message, data) => console.error(message, data), info: () => {} },
 });

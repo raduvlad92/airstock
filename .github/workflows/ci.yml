@@ -95,9 +95,27 @@ jobs:
         if: steps.changes.outputs.code == 'true'
         run: pnpm test
 
-      - name: Build Worker bundle
+      - name: Build dashboard and Worker bundle
         if: steps.changes.outputs.code == 'true'
         run: pnpm build
+
+      # One Chromium smoke test against the built dashboard (plan N0, ADR 0010). The browser is
+      # cached by Playwright version; its system libraries come from apt on every run.
+      - name: Cache Playwright browser
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Chromium
+        if: steps.changes.outputs.code == 'true'
+        run: pnpm --filter @airstock/web exec playwright install --with-deps chromium
+
+      - name: End-to-end smoke test (Chromium)
+        if: steps.changes.outputs.code == 'true'
+        run: pnpm e2e
 
       # Deploys the bundle verified above. Skipped until the staging resources and the
       # CLOUDFLARE_API_TOKEN environment secret exist (plan M1). The token is exposed only

@@ -51,6 +51,10 @@ export interface HandlerResult<O> {
   result: O;
   audit: AuditDetails;
   outbox?: Array<{ topic: string; payload: unknown }>;
+  /**
+   * Extra events. Commands write them in the transaction with the success event; reads send
+   * them with the access event, in the same queue message.
+   */
   events?: AuditEvent[];
 }
 
@@ -78,6 +82,11 @@ export interface Operation<I extends z.ZodObject = z.ZodObject, O extends z.ZodT
 
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry of typed operations
 export type AnyOperation = Operation<any, any>;
+
+/** The parsed output type of an operation, for typed clients such as the dashboard. */
+export type OperationOutput<O extends AnyOperation> = z.infer<O['output']>;
+/** The input type of an operation before defaults are applied. */
+export type OperationInput<O extends AnyOperation> = z.input<O['input']>;
 
 export function defineOperation<I extends z.ZodObject, O extends z.ZodType>(
   op: Operation<I, O>,

@@ -14,6 +14,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { Hono } from 'hono';
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from 'jose';
 import { type AppDeps, type AppEnv, problem } from './app.ts';
+import type { RequestLimits } from './rate-limit.ts';
 
 /**
  * OAuth settings for /mcp. Which claim carries the connection grant depends on the WorkOS
@@ -156,7 +157,7 @@ function buildServer(
   return server;
 }
 
-export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
+export function mountMcp(app: Hono<AppEnv>, deps: AppDeps, limits: RequestLimits): void {
   app.get('/.well-known/oauth-protected-resource', (c) => {
     if (!deps.mcp) return problem(errors.notFound('Route'), c.get('requestId'));
     // Public metadata (RFC 9728): contains no shop data.
@@ -200,6 +201,8 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps): void {
         },
       });
     }
+    const refused = await limits.check(c, caller, 'connection', caller.grantId ?? caller.id);
+    if (refused) return refused;
     const handler = createMcpHandler(
       () =>
         buildServer(deps, c.get('audit'), c.get('db'), caller, c.get('requestId'), () =>

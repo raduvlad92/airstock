@@ -326,6 +326,30 @@
                           }
                         }
                       ]
+                    },
+                    "rateLimits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "perSecond": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "label",
+                          "perSecond"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Requests allowed per second; more are refused with 429 and Retry-After."
                     }
                   },
                   "required": [
@@ -334,7 +358,8 @@
                     "permissions",
                     "allLocations",
                     "locationScopeIds",
-                    "connectionScopes"
+                    "connectionScopes",
+                    "rateLimits"
                   ],
                   "additionalProperties": false
                 }
@@ -1672,6 +1697,162 @@
                   "required": [
                     "events",
                     "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/activity/client-events": {
+      "post": {
+        "operationId": "activity.client_events.record",
+        "summary": "Record interface events reported by the dashboard",
+        "description": "Batches of up to 100 events. They are stored as client-reported (action `client.<type>`, `context.clientReported`), and an event ID already recorded is dropped.",
+        "x-permission": "shop.read",
+        "x-connection-scope": "session",
+        "x-audit-action": "activity.client_events.received",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "eventId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "description": "A UUIDv7 made by the client. Its time is the event time; a resent event with the same ID is recorded once."
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483647,
+                          "description": "Client sequence number in the page."
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "page.viewed",
+                            "grid.column_visibility_changed",
+                            "grid.column_order_changed",
+                            "grid.column_resized",
+                            "grid.page_sorted_locally",
+                            "view.type_switched",
+                            "detail_panel.opened",
+                            "detail_panel.closed"
+                          ]
+                        },
+                        "targetType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 50
+                        },
+                        "targetId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "details": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "maxLength": 50
+                          },
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "maxItems": 50,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 100
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "eventId",
+                        "seq",
+                        "type"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "events"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "duplicates": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "rejected": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Events whose time was too far in the past or future."
+                    }
+                  },
+                  "required": [
+                    "accepted",
+                    "duplicates",
+                    "rejected"
                   ],
                   "additionalProperties": false
                 }

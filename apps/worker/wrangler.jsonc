@@ -53,8 +53,25 @@
   // Sweeps for anything the immediate publish missed. Every 30 minutes, not every minute, so the
   // Neon compute can scale to zero between them (it suspends after 5 idle minutes).
   "triggers": { "crons": ["*/30 * * * *", "0 3 * * *"] },
-  // Static files for the dashboard shell; everything else runs the Worker.
+  // Static files: the server-rendered pages' assets and the React dashboard built by apps/web into
+  // public/app (ADR 0010). A path that matches no file runs the Worker.
   "assets": { "directory": "./public" },
+  // Request rate limits (ADR 0011), mirroring RATE_LIMITS in packages/core/src/limits.ts as
+  // requests per 10-second window; a test keeps them equal. Namespace IDs are account-unique.
+  "ratelimits": [
+    {
+      "name": "RATE_LIMIT_SESSION",
+      "namespace_id": "1001",
+      "simple": { "limit": 200, "period": 10 }
+    },
+    { "name": "RATE_LIMIT_API", "namespace_id": "1002", "simple": { "limit": 100, "period": 10 } },
+    { "name": "RATE_LIMIT_MCP", "namespace_id": "1003", "simple": { "limit": 50, "period": 10 } },
+    {
+      "name": "RATE_LIMIT_CLIENT_EVENTS",
+      "namespace_id": "1004",
+      "simple": { "limit": 10, "period": 10 }
+    }
+  ],
   // Public settings. Secrets (WORKOS_API_KEY, SESSION_SECRET, SHOPIFY_API_SECRET, SHOPIFY_TOKEN_KEY,
   // RESEND_API_KEY, SMOKE_SECRET)
   // are set with `wrangler secret put`.

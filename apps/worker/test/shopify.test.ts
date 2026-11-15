@@ -227,7 +227,9 @@ describe('Shopify install', () => {
     stores.set(domain, new FakeStore(domain));
     const res = await install(m, domain);
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toMatch(/^\/app\?shopify=/);
+    expect(res.headers.get('location')).toMatch(
+      /^\/app\/shops\/[0-9a-f-]{36}\/integrations\/shopify\?connected=/,
+    );
     const row = await connectionOf(m.shopId);
     expect(row.status).toBe('active');
     expect(row.access_token_ciphertext).not.toContain('shpat_');

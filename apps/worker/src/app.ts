@@ -12,6 +12,7 @@ import type { Database, DatabaseHooks } from '@airstock/db';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
+import { limitKindFor, type RateLimiter, RequestLimits } from './rate-limit.ts';
 import { mountRestRoutes } from './rest.ts';
 import { type FileStore, mountScanTest } from './scan.ts';
 import { type JobMessage, mountShopify, type ShopifyAppConfig } from './shopify.ts';
@@ -37,6 +38,8 @@ export interface AppDeps {
   dispatch?: (db: Database) => Promise<number>;
   /** File storage (R2): scan-test results. */
   files?: FileStore;
+  /** Request rate limits per caller (ADR 0011); none when absent. */
+  rateLimiter?: RateLimiter;
   logger: Logger;
 }
 
@@ -63,8 +66,11 @@ export function problem(error: AppError, requestId: string): Response {
   });
 }
 
+const CLIENT_EVENTS_PATH = /^\/api\/v1\/shops\/[^/]+\/activity\/client-events$/;
+
 export function createApp(deps: AppDeps) {
   const app = new Hono<AppEnv>();
+  const limits = new RequestLimits(deps.rateLimiter, deps.logger);
 
   app.use('*', async (c, next) => {
     const started = performance.now();
@@ -162,12 +168,19 @@ export function createApp(deps: AppDeps) {
       if (session) caller = sessionCaller(session.uid);
     }
     if (!caller) return problem(errors.unauthenticated(), c.get('requestId'));
+    const kind = limitKindFor(caller);
+    const refused =
+      (kind ? await limits.check(c, caller, kind, caller.id) : null) ??
+      (c.req.method === 'POST' && CLIENT_EVENTS_PATH.test(c.req.path)
+        ? await limits.check(c, caller, 'client_events', caller.userId ?? caller.id)
+        : null);
+    if (refused) return refused;
     c.set('caller', caller);
     await next();
   });
 
   mountRestRoutes(app, deps);
-  mountMcp(app, deps);
+  mountMcp(app, deps, limits);
   mountWeb(app, deps);
   mountShopify(app, deps);
   mountScanTest(app, deps);

@@ -1,9 +1,12 @@
 import type { AuditEvent, OutboxMessage } from '@airstock/core';
 import type { JobMessage } from './shopify.ts';
 
+/** One queue message: a single event (Phase 0) or every event of one send (ADR 0011). */
+export type AuditMessage = AuditEvent | { events: AuditEvent[] };
+
 export interface Env {
   HYPERDRIVE: Hyperdrive;
-  AUDIT_QUEUE: Queue<AuditEvent>;
+  AUDIT_QUEUE: Queue<AuditMessage>;
   JOBS_QUEUE: Queue<OutboxMessage | JobMessage>;
   FILES: R2Bucket;
   /** MCP OAuth settings; /mcp answers 503 until they are set (plan M5). */
@@ -36,4 +39,9 @@ export interface Env {
   SELF?: Fetcher;
   /** Authenticates the jobs consumer's calls to /internal/jobs. */
   INTERNAL_SECRET?: string;
+  /** Workers Rate Limiting bindings (ADR 0011); limits are in wrangler.jsonc. */
+  RATE_LIMIT_SESSION?: RateLimit;
+  RATE_LIMIT_API?: RateLimit;
+  RATE_LIMIT_MCP?: RateLimit;
+  RATE_LIMIT_CLIENT_EVENTS?: RateLimit;
 }

@@ -76,6 +76,7 @@ export interface TestOptions {
   dispatch?: AppDeps['dispatch'];
   files?: AppDeps['files'];
   runJobNow?: AppDeps['runJobNow'];
+  rateLimiter?: AppDeps['rateLimiter'];
 }
 
 export interface TestApp {
@@ -154,6 +155,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     dispatch: options.dispatch,
     files: options.files,
     runJobNow: options.runJobNow,
+    rateLimiter: options.rateLimiter,
     logger: { error: () => {} },
   });
   return {

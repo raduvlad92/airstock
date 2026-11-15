@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { callerKey } from '../caller.ts';
 import { errors } from '../errors.ts';
+import { uuidv7Time } from '../ids.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
 
@@ -168,6 +169,114 @@ export const getOperationOutcome = defineOperation({
         targetType: 'idempotency_key',
         targetId: `${input.operation}:${input.idempotencyKey}`,
       },
+    };
+  },
+});
+
+/**
+ * Interface actions the dashboard reports itself (PRD 7.1, plan Section 5.14). Saved-view changes,
+ * queries, and edits are server operations and are recorded as such, not here.
+ */
+export const CLIENT_EVENT_TYPES = [
+  'page.viewed',
+  'grid.column_visibility_changed',
+  'grid.column_order_changed',
+  'grid.column_resized',
+  'grid.page_sorted_locally',
+  'view.type_switched',
+  'detail_panel.opened',
+  'detail_panel.closed',
+] as const;
+
+/** How far a client clock may be off, and how late a batch may arrive (a tab asleep overnight). */
+const CLIENT_EVENT_FUTURE_MS = 5 * 60 * 1000;
+const CLIENT_EVENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const DetailValue = z.union([
+  z.string().max(200),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+  z.array(z.string().max(100)).max(50),
+]);
+
+const ClientEvent = z.object({
+  eventId: Id.refine((id) => id[14] === '7', 'Must be a UUIDv7.').describe(
+    'A UUIDv7 made by the client. Its time is the event time; a resent event with the same ID is recorded once.',
+  ),
+  seq: z.number().int().min(0).max(2_147_483_647).describe('Client sequence number in the page.'),
+  type: z.enum(CLIENT_EVENT_TYPES),
+  targetType: z.string().trim().min(1).max(50).optional(),
+  targetId: z.string().trim().min(1).max(100).optional(),
+  details: z
+    .record(z.string().max(50), DetailValue)
+    .refine((d) => Object.keys(d).length <= 20, 'At most 20 details.')
+    .optional(),
+});
+
+export const recordClientEvents = defineOperation({
+  id: 'activity.client_events.record',
+  summary: 'Record interface events reported by the dashboard',
+  description:
+    'Batches of up to 100 events. They are stored as client-reported (action `client.<type>`, `context.clientReported`), and an event ID already recorded is dropped.',
+  // Recorded through the audit queue like any access event: no business data changes.
+  kind: 'read',
+  scope: 'shop',
+  input: z.object({ events: z.array(ClientEvent).min(1).max(100) }),
+  output: z.object({
+    accepted: z.number().int(),
+    duplicates: z.number().int(),
+    rejected: z.number().int().describe('Events whose time was too far in the past or future.'),
+  }),
+  permission: 'shop.read',
+  connectionScope: 'session',
+  audit: { action: 'activity.client_events.received' },
+  idempotency: 'none',
+  http: { method: 'POST', path: '/shops/{shopId}/activity/client-events', status: 200 },
+  mcp: { exception: 'Interface telemetry, reported by the dashboard only.' },
+  async handler(ctx, input) {
+    const now = Date.now();
+    const seen = new Set<string>();
+    let duplicates = 0;
+    let rejected = 0;
+    const events = [];
+    for (const e of input.events) {
+      if (seen.has(e.eventId)) {
+        duplicates++;
+        continue;
+      }
+      seen.add(e.eventId);
+      const at = uuidv7Time(e.eventId);
+      if (at > now + CLIENT_EVENT_FUTURE_MS || at < now - CLIENT_EVENT_MAX_AGE_MS) {
+        rejected++;
+        continue;
+      }
+      events.push(
+        ctx.event({
+          // The event's identity and time come from the client, so a resent batch lands on the
+          // same audit key and is ignored.
+          event_id: e.eventId,
+          occurred_at: new Date(at).toISOString(),
+          action: `client.${e.type}`,
+          outcome: 'succeeded',
+          target_type: e.targetType ?? null,
+          target_id: e.targetId ?? null,
+          context: {
+            clientReported: true,
+            clientSeq: e.seq,
+            ...(e.details ? { details: e.details } : {}),
+          },
+        }),
+      );
+    }
+    return {
+      result: { accepted: events.length, duplicates, rejected },
+      audit: {
+        targetType: 'client_events',
+        targetId: 'batch',
+        context: { accepted: events.length, duplicates, rejected },
+      },
+      events,
     };
   },
 });

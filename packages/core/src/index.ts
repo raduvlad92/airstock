@@ -28,8 +28,10 @@ export {
 } from './credentials.ts';
 export { AppError, errors, type ProblemDetails } from './errors.ts';
 export { uuidv7, uuidv7Time } from './ids.ts';
+export { RATE_LIMIT_PERIOD_SECONDS, RATE_LIMITS, type RateLimitKind } from './limits.ts';
 export { buildMcpTools, type McpToolDef, resolveToolCall } from './mcp-tools.ts';
 export { formatApiToken, parseApiToken } from './operations/access.ts';
+export { CLIENT_EVENT_TYPES } from './operations/activity.ts';
 export * as ops from './operations/index.ts';
 export { integrationCallbacks, operations, operationsById } from './operations/index.ts';
 export {
@@ -55,5 +57,11 @@ export {
   type Logger,
   type PipelineDeps,
 } from './pipeline.ts';
-export { type AnyOperation, isMcpExposure, type Operation } from './registry.ts';
+export {
+  type AnyOperation,
+  isMcpExposure,
+  type Operation,
+  type OperationInput,
+  type OperationOutput,
+} from './registry.ts';
 export { normalizeSku } from './schemas.ts';

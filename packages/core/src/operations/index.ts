@@ -7,7 +7,7 @@ import {
   revokeApiCredential,
   revokeConnection,
 } from './access.ts';
-import { getOperationOutcome, listActivity } from './activity.ts';
+import { getOperationOutcome, listActivity, recordClientEvents } from './activity.ts';
 import { createItem, searchVariants } from './catalog.ts';
 import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
 import { inviteMember, listMembers } from './members.ts';
@@ -37,6 +37,7 @@ export const operations: readonly AnyOperation[] = [
   releaseReservation,
   getAvailability,
   listActivity,
+  recordClientEvents,
   getOperationOutcome,
   createApiCredential,
   listApiCredentials,
@@ -86,6 +87,7 @@ export {
   listShops,
   markShopifyUninstalled,
   receiveStock,
+  recordClientEvents,
   recordShopifyWebhook,
   releaseReservation,
   reserveStock,

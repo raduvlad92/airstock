@@ -147,7 +147,8 @@ describe('signed media links', () => {
       { mediaId: uuidv7() },
       { part: 'original' },
       { exp: String(Number(exp) + 300) },
-      { sig: `${sig.slice(0, -1)}${sig.endsWith('A') ? 'B' : 'A'}` },
+      // The first character: the last one carries padding bits a decoder may ignore.
+      { sig: `${sig.startsWith('A') ? 'B' : 'A'}${sig.slice(1)}` },
       { sig: 'not-base64' },
       { exp: '1e12' },
     ]) {

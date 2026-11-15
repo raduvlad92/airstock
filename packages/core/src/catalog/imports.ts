@@ -1,6 +1,13 @@
 import type { Tx } from '@airstock/db';
 import { type Delimiter, detectDelimiter, parseCsv } from '../csv.ts';
 import { normalizeSku } from '../schemas.ts';
+import {
+  checkBarcode,
+  findBarcodeOwners,
+  inferSymbology,
+  normalizeBarcode,
+  type Symbology,
+} from './barcodes.ts';
 import { decimalScale, isDecimal, normalize } from './decimal.ts';
 import { encodeValue, type FieldDefinition } from './fields.ts';
 import { builtin, encodeDimensions, encodePrice, encodeTags } from './records.ts';
@@ -23,6 +30,7 @@ export const BUILTIN_TARGETS = [
   'family',
   'tags',
   'sku',
+  'barcode',
   'price',
   'weight',
   'dimensions',
@@ -41,6 +49,8 @@ export interface RowData {
   };
   variant: {
     sku: string;
+    /** The variant's own barcode, added when the variant does not have it yet (ADR 0019). */
+    barcode?: { code: string; normalized: string; symbology: Symbology };
     price?: string | null;
     weight?: unknown;
     dimensions?: unknown;
@@ -71,6 +81,8 @@ export interface PreviewContext {
   locations: Map<string, { path: string }>;
 }
 
+const BARCODE_HEADERS = ['ean', 'ean13', 'ean-13', 'upc', 'gtin', 'barcode number'];
+
 /** Suggested mapping: headers that name a built-in, a field key or label, or option:/stock: columns. */
 export function suggestMapping(header: string[], fields: FieldDefinition[]): Mapping {
   const out: Mapping = {};
@@ -78,7 +90,10 @@ export function suggestMapping(header: string[], fields: FieldDefinition[]): Map
     const t = h.trim();
     const lower = t.toLowerCase();
     const byBuiltin = (BUILTIN_TARGETS as readonly string[]).find(
-      (b) => b === lower || (b === 'product' && lower === 'product_id'),
+      (b) =>
+        b === lower ||
+        (b === 'product' && lower === 'product_id') ||
+        (b === 'barcode' && BARCODE_HEADERS.includes(lower)),
     );
     const field = fields.find((f) => f.key === lower || f.label.toLowerCase() === lower);
     if (byBuiltin) out[t] = byBuiltin;
@@ -142,6 +157,7 @@ export async function previewRows(
     ).map((r) => [r.sku_normalized, r]),
   );
   const seen = new Map<string, number>();
+  const seenBarcodes = new Map<string, number>();
   const out: PreviewRow[] = [];
   for (const [i, cells] of rows.entries()) {
     const rowNumber = i + 2; // the header is line 1
@@ -188,6 +204,19 @@ export async function previewRows(
         const r = encodeTags(value);
         if (r.ok) data.product.tags = r.value as string[];
         else fail(r.message);
+      } else if (t === 'barcode') {
+        const checked = checkBarcode(value, inferSymbology(value));
+        if (!checked.ok) fail(checked.message);
+        else if (seenBarcodes.has(checked.normalized))
+          fail(`The barcode repeats row ${seenBarcodes.get(checked.normalized)}.`);
+        else {
+          seenBarcodes.set(checked.normalized, rowNumber);
+          data.variant.barcode = {
+            code: checked.code,
+            normalized: checked.normalized,
+            symbology: inferSymbology(value),
+          };
+        }
       } else if (t === 'price') {
         const r = encodePrice(value);
         if (r.ok) data.variant.price = r.value as string | null;
@@ -245,8 +274,40 @@ export async function previewRows(
       variantId: match?.id ?? null,
     });
   }
+  await checkBarcodeOwners(ctx, out);
   await checkGroups(ctx, out);
   return out;
+}
+
+/**
+ * A barcode another variant or pack holds is an error, as on every create path; one the row's own
+ * variant already has needs no change.
+ */
+async function checkBarcodeOwners(ctx: PreviewContext, rows: PreviewRow[]) {
+  const coded = rows.filter((r) => r.data?.variant.barcode);
+  if (coded.length === 0) return;
+  const owners = new Map(
+    (
+      await findBarcodeOwners(
+        ctx.tx,
+        coded.map((r) => r.data!.variant.barcode!.normalized),
+      )
+    ).map((o) => [normalizeBarcode(o.code), o]),
+  );
+  for (const r of coded) {
+    const barcode = r.data!.variant.barcode!;
+    const owner = owners.get(barcode.normalized);
+    if (!owner) continue;
+    if (owner.variantId === r.variantId && owner.packId === null) {
+      delete r.data!.variant.barcode;
+      continue;
+    }
+    r.errors.push(
+      `barcode: ${barcode.code} already belongs to ${owner.sku}${owner.packName ? ` (${owner.packName})` : ''}.`,
+    );
+    r.action = 'error';
+    r.data = null;
+  }
 }
 
 /** Rules across the rows of one new product: a name, distinct option combinations, required fields. */

@@ -1,5 +1,6 @@
 import type { Tx } from '@airstock/db';
 import { z } from 'zod';
+import { findBarcodeOwner, normalizeBarcode } from '../catalog/barcodes.ts';
 import { displayValue } from '../catalog/fields.ts';
 import {
   type Cursor,
@@ -40,7 +41,7 @@ const ConditionInput = z.object({
     .min(1)
     .max(100)
     .describe(
-      'A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at.',
+      'A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU).',
     ),
   op: z
     .string()
@@ -457,13 +458,14 @@ export const DuplicateMatches = z.object({
 });
 export type DuplicateMatchesType = z.infer<typeof DuplicateMatches>;
 
-/** Hook for barcode ownership (milestone N5 registers the lookup). */
-export const duplicateHooks: {
-  barcodeOwner?: (
-    tx: Tx,
-    code: string,
-  ) => Promise<{ ownerType: string; ownerId: string; code: string } | null>;
-} = {};
+/** The variant or pack already holding a code, matched as a scanner would (ADR 0019). */
+async function barcodeTakenBy(tx: Tx, code: string) {
+  const owner = await findBarcodeOwner(tx, normalizeBarcode(code));
+  if (!owner) return null;
+  return owner.packId
+    ? { ownerType: 'pack', ownerId: owner.packId, code: owner.code }
+    : { ownerType: 'variant', ownerId: owner.variantId, code: owner.code };
+}
 
 /**
  * The one duplicate check every create path runs (plan Section 5.7): the same normalized SKU or
@@ -489,10 +491,7 @@ export async function findDuplicates(
     if (row)
       skuTaken = { variantId: row.id, productId: row.product_id, sku: row.sku, name: row.name };
   }
-  const barcodeTaken =
-    input.barcode && duplicateHooks.barcodeOwner
-      ? await duplicateHooks.barcodeOwner(tx, input.barcode)
-      : null;
+  const barcodeTaken = input.barcode ? await barcodeTakenBy(tx, input.barcode) : null;
   let similarNames: DuplicateMatchesType['similarNames'] = [];
   if (input.name?.trim()) {
     const rows = await tx.query<{ id: string; name: string; similarity: number }>(

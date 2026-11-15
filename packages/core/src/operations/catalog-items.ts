@@ -1,6 +1,7 @@
 import type { Tx } from '@airstock/db';
 import { z } from 'zod';
 import type { AuditEvent } from '../audit.ts';
+import { checkBarcode, inferSymbology, type Symbology } from '../catalog/barcodes.ts';
 import { comparable, encodeValue, FIELD_LIMITS, type FieldDefinition } from '../catalog/fields.ts';
 import {
   attributesSize,
@@ -786,6 +787,15 @@ export const createItem = defineOperation({
       .optional()
       .describe('Such as "120 x 60 x 75 cm" or {length, width, height, unit}.'),
     fields: z.record(z.string(), z.unknown()).optional().describe('Custom field values by key.'),
+    barcode: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'The barcode printed on the item, such as its EAN-13. The type is detected from the code; a code another item or pack already has is refused.',
+      ),
     acknowledgeSimilar: z
       .boolean()
       .default(false)
@@ -814,11 +824,27 @@ export const createItem = defineOperation({
     const skuNormalized = normalizeSku(input.sku);
     // One duplicate check on every create path (plan 5.7): taken SKUs are refused, similar names
     // need an acknowledgment, and the matches shown are recorded with the outcome.
-    const duplicates = await findDuplicates(ctx.tx, { name: input.name, sku: input.sku });
+    let barcode: { code: string; normalized: string; symbology: Symbology } | null = null;
+    if (input.barcode) {
+      const symbology = inferSymbology(input.barcode);
+      const checked = checkBarcode(input.barcode, symbology);
+      if (!checked.ok) throw errors.validation([{ path: 'barcode', message: checked.message }]);
+      barcode = { code: checked.code, normalized: checked.normalized, symbology };
+    }
+    const duplicates = await findDuplicates(ctx.tx, {
+      name: input.name,
+      sku: input.sku,
+      barcode: barcode?.code,
+    });
     if (duplicates.skuTaken) {
       throw errors.conflict('duplicate_sku', 'A variant with this SKU already exists.', {
         existingVariantId: duplicates.skuTaken.variantId,
         existing: duplicates.skuTaken,
+      });
+    }
+    if (duplicates.barcodeTaken) {
+      throw errors.conflict('duplicate_barcode', 'Another item already has this barcode.', {
+        existing: duplicates.barcodeTaken,
       });
     }
     if (duplicates.similarNames.length > 0 && !input.acknowledgeSimilar) {
@@ -933,6 +959,13 @@ export const createItem = defineOperation({
         JSON.stringify(variantAttributes),
       ],
     );
+    if (barcode) {
+      await ctx.tx.query(
+        `insert into barcodes (shop_id, id, variant_id, symbology, code, code_normalized, position)
+         values (app_shop_id(), $1, $2, $3, $4, $5, 0)`,
+        [ctx.newId(), variantId, barcode.symbology, barcode.code, barcode.normalized],
+      );
+    }
     for (const r of relations) {
       const table = r.def.config.targetType === 'variant' ? 'variants' : 'products';
       const [count] = await ctx.tx.query<{ n: number }>(
@@ -970,6 +1003,7 @@ export const createItem = defineOperation({
           quantityScale: input.quantityScale,
           status: input.status,
           familyId,
+          ...(barcode ? { barcode: { code: barcode.code, symbology: barcode.symbology } } : {}),
           acknowledgedSimilar: duplicates.similarNames.map((m) => m.productId),
           fields: Object.fromEntries(
             [...Object.entries(productAttributes), ...Object.entries(variantAttributes)].map(

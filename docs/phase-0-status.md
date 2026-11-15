@@ -38,7 +38,7 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 
 1. **Phone scan matrix (E8):** iPhone Safari and Android Chrome, in a tab and installed ([report, Section 8](phase-0-report.md#8-owner-actions-to-close-phase-0)).
 2. **Sign-ins (E3):** the invitation is accepted (Section 7). Still needed: as vlad@deletecookies.net, create a shop and sign in once with an emailed code; then sign in once with Microsoft.
-3. **Email domain (E9):** upgrade Resend to Pro or free one of its three domain slots, so `mail.airstock.deletecookies.dev` can be added.
+3. **Email domain (E9):** decided by the owner on 14 November: keep sending from `mail.tracker.deletecookies.dev` for testing. `mail.airstock.deletecookies.dev` waits for Resend Pro or a freed domain slot, before any real merchant receives email.
 
 ## 4. Acceptance scenarios covered by tests
 
@@ -114,7 +114,7 @@ Checked in the staging database and the activity history. Times are UTC.
 | 21:24:30 | vlad@deletecookies.net signed in with Google in Chrome on Windows. This sign-in created the platform user. |
 | 21:24:33 | The invitation was accepted (`member.invitation.accepted`), and the user became an active viewer in "Bibica". The user then opened the shop's members, locations, Shopify, and AI connections pages. |
 
-This is the first invitation accepted on staging. It used Google, not an emailed code, so the emailed code and Microsoft sign-ins are still untested on staging. The invited user owns no shop yet, so staging does not yet have one user in two shops with different owners (CI covers it).
+This is the first invitation accepted on staging. It used Google, not an emailed code. WorkOS's event log for the evening agrees: two Google sign-ins (21:18 and 21:24) and no emailed-code or Microsoft attempt, successful or failed. The emailed code and Microsoft sign-ins are therefore still untested on staging. The invited user owns no shop yet, so staging does not yet have one user in two shops with different owners (CI covers it). Checked at 22:20 UTC; nothing happened on staging after 21:24:58.
 
 ### Other changes
 

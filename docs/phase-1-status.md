@@ -14,7 +14,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | N2 Query, search, duplicates | Done (PR #24) | Filter compiler, keyset paging, search, duplicate check, saved views ([ADR 0014](adr/0014-catalog-query.md)). |
 | N3 Grid and detail panel | Done (PR #26) | Grid, bulk edits, detail panel, gallery, settings ([ADR 0017](adr/0017-grid-and-bulk-edits.md)). |
 | N4 Media | Done (PR #28) | Uploads to R2 with checks, browser-made derivatives, signed links, access events; Pictures tab and gallery pictures ([ADR 0015](adr/0015-media.md)). `MEDIA_SIGNING_KEY` is set on staging. |
-| N5 Packs, barcodes, labels, bundles, suppliers | Data and API done (PR #29); dashboard in review | Packs, barcodes, label data, bundles, suppliers ([ADR 0019](adr/0019-packaging-labels-bundles.md)). The labels page with the in-browser PDF, the suppliers page, the packaging editors, and the decode test (F8) are in the N5 dashboard PR. |
+| N5 Packs, barcodes, labels, bundles, suppliers | Done (PRs #29, #32) | Packs, barcodes, bundles, suppliers, and labels ([ADR 0019](adr/0019-packaging-labels-bundles.md)). The dashboard adds a labels page with the PDF made in the browser, a suppliers page, Packaging and Suppliers tabs in the detail panel, and the decode test (F8). |
 | N6 Warehouses and locations | Done (PR #25) | Warehouse records and contracts, location hierarchy rules, location scopes ([ADR 0016](adr/0016-warehouse-records.md)). |
 | N7 Import and export | Done (PR #27) | CSV preview, chunked commit with resume, opening stock as receipts, logged exports ([ADR 0018](adr/0018-imports-and-exports.md)). |
 | Across milestones | Done (PRs #30, #31) | Barcodes on create, duplicates, search, and CSV; completeness fields; supplier columns in exports; outbox drain (a bug found on staging). |
@@ -26,8 +26,7 @@ See the [Phase 1 report](phase-1-report.md), Section 1, for the evidence per cri
 
 | ID | State |
 | --- | --- |
-| F1–F7, F9–F12, F14 | Done |
-| F8 | In review (N5 dashboard PR: PDF rendering and the zxing-wasm decode test) |
+| F1–F12, F14 | Done |
 | F13 | Owner: ChatGPT run (Section 5) |
 
 ## 3. Decisions

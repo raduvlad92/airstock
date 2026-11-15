@@ -27,7 +27,7 @@ One exit criterion needs the owner: the recorded ChatGPT run (F13). Its prompts 
 | F5 | Every new table and endpoint refuses another shop's IDs | Done | Cross-shop tests for fields and families, saved views, media, packs, barcodes, bundles, suppliers, imports and exports, and warehouses and locations, at the core and API layers (Section 2). |
 | F6 | Parity, OpenAPI, 16 tools or fewer | Done | `pnpm parity`: 99 operations, 14 MCP tools. |
 | F7 | Packs convert exactly; barcodes unique per shop | Done | A28 property test in `packages/core/test/packaging.test.ts`. Uniqueness on the normalized code across variants and packs, and across UPC-A and EAN-13 forms. |
-| F8 | Labels render as PDF and every barcode decodes back to its record | In review | The label data operations are on staging. The in-browser PDF and the zxing-wasm decode test (A33) are in the N5 dashboard PR. |
+| F8 | Labels render as PDF and every barcode decodes back to its record | Done | A33: `apps/web/test/labels.test.ts` builds PDFs in all four layouts and decodes every embedded image with zxing-wasm. `apps/web/e2e/labels.spec.ts` prints from the grid in Chromium, then checks that every code in the downloaded PDF resolves through `lookup_barcode` to its variant, pack, or location (PR #32). |
 | F9 | Every create path blocks duplicate SKUs and barcodes and flags similar names; MCP without acknowledgment returns matches | Done | A43 on API and MCP. Barcodes on create, import, and `check_duplicates` are covered in `packages/core/test/catalog-codes.test.ts` and `imports.test.ts`. On staging, a duplicate barcode returned `duplicate_barcode` and a similar name returned `similar_items_found`. |
 | F10 | 10,000-row import previewed, chunked, resumable, with per-row outcomes and opening stock as receipts; export respects permissions, and its download is logged | Done | A19 in `packages/core/test/imports.test.ts`. On staging, 10,000 rows committed in 22 s (Section 4.2), and a 300-row import with stock ran through the queue in 1.8–5.1 s. Export downloads are logged (`catalog.export.downloaded`). |
 | F11 | Media uploads, derivatives, roles, order, variant links; failed uploads leave nothing; cross-shop unreachable; access logged per D5 | Done | `packages/core/test/media.test.ts` and `apps/worker/test/media.test.ts` (checksum, type, size, expiry, signature, cross-shop). On staging, a picture uploaded through the detail panel showed its signed 320 px thumbnail after 2.2 s. |
@@ -44,12 +44,12 @@ One exit criterion needs the owner: the recorded ChatGPT run (F13). Its prompts 
 | N2 Query and search | #24 | Typed filter compiler, keyset paging, full-text and trigram search, one duplicate check, and saved views (ADR 0014). |
 | N3 Grid | #26 | Virtualized grid with keyboard, paste, fill down, and conflict choices; bulk preview and commit; detail panel; gallery; settings (ADR 0017). |
 | N4 Media | #28 | Streamed and checked uploads to R2, derivatives made in the browser, signed links, and one access event per request (ADR 0015). |
-| N5 Packs to suppliers | #29 and the dashboard PR | Exact nested packs with versions, barcodes unique on the normalized code, label data, versioned bundles with availability computed on read, and suppliers with costs behind `costs.read` (ADR 0019). |
+| N5 Packs to suppliers | #29, #32 | Exact nested packs with versions, barcodes unique on the normalized code, label data, versioned bundles with availability computed on read, and suppliers with costs behind `costs.read` (ADR 0019). |
 | N6 Warehouses | #25 | Warehouse records with restricted contract terms, location paths, cascading archive and exact restore, downward fulfillment eligibility, and location scopes (ADR 0016). |
 | N7 Import and export | #27 | CSV preview of every row, set-based chunks with checkpoints, opening stock as receipts, and logged exports (ADR 0018). |
 | Across milestones | #30, #31 | Barcodes on create, duplicates, search, and CSV; completeness fields (`has_picture`, `has_shipping_package`, `has_barcode`, `supplier_sku`); supplier columns in exports; outbox drain. |
 
-At the end of Phase 1: 99 operations, 14 MCP tools, 283 unit and API tests against PostgreSQL 17, component tests, and 8 Chromium tests. All of them run in CI on every PR.
+At the end of Phase 1: 99 operations, 14 MCP tools, 315 unit, API, and component tests (against PostgreSQL 17), and 9 Chromium tests. All of them run in CI on every PR.
 
 ## 3. Staging run
 
@@ -186,14 +186,18 @@ Media is the largest new item and grows with the catalog, not with use. A shop w
 ## 8. Owner actions to close Phase 1
 
 1. **ChatGPT run (F13), about 20 minutes.** On staging, with the ChatGPT connection from Phase 0, ask the seven prompts in plan Section 7.3 in a shop that has the four starter templates. Step-by-step instructions are in the status doc (Section 5).
-2. **Print a label sheet (optional, F8 spot check), about 5 minutes,** once the N5 dashboard PR is on staging. Print an A4 sheet from the labels page and scan two codes with a phone.
+2. **Print a label sheet (optional, F8 spot check), about 5 minutes.** Print an A4 sheet from the labels page and scan two codes with a phone.
 3. **Phase 0 leftovers.** E3 (an emailed-code sign-in and a Microsoft sign-in) and E8 (the phone scan matrix) are as described in the [Phase 0 report](phase-0-report.md), Section 8.
 
 ## 9. Not done, and handoff to Phase 2
 
 **Not done:**
 - Pack and supplier-SKU columns in CSV imports (barcodes are in).
-- Location labels from the warehouse page. The data operation exists; the dashboard part is in the N5 dashboard PR.
+- **Label gaps:**
+  - Labels use the standard PDF fonts, so letters outside Western European print without accents ("ș" as "s") and other scripts print as "?".
+  - "Print labels" is in the variants grid only.
+  - Location labels use one copy count for all selected locations.
+- Bundle availability in the dashboard shows the whole shop, with no warehouse or location filter. The API takes both.
 - The 1-million-event audit seed (risk R7).
 
 **Ready for Phase 2:**

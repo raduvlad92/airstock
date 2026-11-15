@@ -62,7 +62,7 @@ const Address = z
     country: z
       .string()
       .trim()
-      .regex(/^[A-Za-z]{2}$/, 'ISO 3166-1 alpha-2 code such as DE.')
+      .regex(/^([A-Za-z]{2})?$/, 'ISO 3166-1 alpha-2 code such as DE.')
       .optional(),
   })
   .nullable();

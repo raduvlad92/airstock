@@ -13,7 +13,7 @@ import type { Database } from '@airstock/db';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { Hono } from 'hono';
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from 'jose';
-import { type AppDeps, type AppEnv, problem } from './app.ts';
+import { type AppDeps, type AppEnv, fileAccess, problem } from './app.ts';
 import type { RequestLimits } from './rate-limit.ts';
 
 /**
@@ -124,15 +124,19 @@ function buildServer(
       async (args: Record<string, unknown>) => {
         try {
           const call = resolveToolCall(tool, args);
-          const res = await execute({ db, audit, logger: deps.logger }, call.operation, {
-            caller,
-            shopId: caller.boundShopId,
-            input: call.input,
-            idempotencyKey:
-              call.idempotencyKey ??
-              (call.operation.idempotency === 'required' ? crypto.randomUUID() : null),
-            requestId,
-          });
+          const res = await execute(
+            { db, audit, logger: deps.logger, ...fileAccess(deps) },
+            call.operation,
+            {
+              caller,
+              shopId: caller.boundShopId,
+              input: call.input,
+              idempotencyKey:
+                call.idempotencyKey ??
+                (call.operation.idempotency === 'required' ? crypto.randomUUID() : null),
+              requestId,
+            },
+          );
           if (res.outbox > 0) onOutbox();
           const structured = {
             ...(res.result as object),

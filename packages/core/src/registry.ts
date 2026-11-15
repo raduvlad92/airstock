@@ -18,8 +18,17 @@ export interface McpException {
   exception: string;
 }
 
+/** File storage (R2) for operations that read or write files: imports and exports. */
+export interface FileAccess {
+  get(key: string): Promise<string | null>;
+  put(key: string, body: string, contentType: string): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
 export interface HandlerContext {
   tx: Tx;
+  /** Present when the caller's runtime has file storage. */
+  files?: FileAccess;
   /** Empty for account-level reads, which span the caller's shops. */
   shopId: string;
   caller: Caller;

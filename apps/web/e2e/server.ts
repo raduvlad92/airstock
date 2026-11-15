@@ -10,7 +10,15 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type AuditEvent, ensureUser, ingestAuditEvents, uuidv7 } from '@airstock/core';
+import {
+  type AuditEvent,
+  dispatchOutbox,
+  ensureUser,
+  ingestAuditEvents,
+  runExportJob,
+  runImportJob,
+  uuidv7,
+} from '@airstock/core';
 import { PgDatabase, poolSource } from '@airstock/db';
 import { bootstrap, migrate } from '@airstock/db/migrate';
 import pg from 'pg';
@@ -81,9 +89,34 @@ const audit = {
     await ingestAuditEvents(db, events);
   },
 };
+// R2 and the jobs queue, in memory: imports and exports run right after the request commits.
+const stored = new Map<string, string>();
+const files = {
+  put: async (key: string, body: string) => {
+    stored.set(key, body);
+  },
+  list: async (prefix: string) => [...stored.keys()].filter((k) => k.startsWith(prefix)),
+  get: async (key: string) => stored.get(key) ?? null,
+  delete: async (key: string) => {
+    stored.delete(key);
+  },
+};
+const jobDeps = { db, audit, files: { get: files.get, put: files.put, delete: files.delete } };
 const app = createApp({
   database: () => ({ transaction: (ctx, fn) => db.transaction(ctx, fn), close: async () => {} }),
   audit,
+  files,
+  dispatch: (handle) =>
+    dispatchOutbox(handle, async (messages) => {
+      for (const m of messages) {
+        const payload = m.payload as { importId?: string; exportId?: string };
+        if (m.topic === 'catalog.import.run' && payload.importId) {
+          while ((await runImportJob(jobDeps, m.shopId, payload.importId)) === 'more') {}
+        }
+        if (m.topic === 'catalog.export.run' && payload.exportId)
+          await runExportJob(jobDeps, m.shopId, payload.exportId);
+      }
+    }),
   mcp: null,
   web: {
     publicUrl: ORIGIN,

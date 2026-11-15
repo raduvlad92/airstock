@@ -1,6 +1,6 @@
 import type { ops } from '@airstock/core';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
 import { BulkDialog } from '../catalog/bulk.tsx';
@@ -19,6 +19,7 @@ import { type CellValue, type Row, requestedFields } from '../catalog/values.ts'
 import { ErrorNotice, Field, Notice } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
 import { telemetry } from '../telemetry.ts';
+import { ExportButton } from './imports.tsx';
 
 type QueryResult = Out<typeof ops.queryItems>;
 type SavedViews = Out<typeof ops.listSavedViews>;
@@ -273,6 +274,23 @@ export function ProductsPage() {
               ? ''
               : `${first?.totalCapped ? '10,000+' : total.toLocaleString()} ${mode}`}
           </span>
+          {can(context.data, 'exports.run') ? (
+            <ExportButton
+              key={bodyKey}
+              shopId={shopId}
+              query={{
+                mode,
+                ...(searchText ? { search: searchText } : {}),
+                filter,
+                ...(sort ? { sort } : {}),
+              }}
+            />
+          ) : null}
+          {can(context.data, 'imports.run') ? (
+            <Link to="/shops/$shopId/imports" params={{ shopId }} className="button-link small">
+              Import
+            </Link>
+          ) : null}
           {canWrite ? (
             <button
               type="button"

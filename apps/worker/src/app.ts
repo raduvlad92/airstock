@@ -4,6 +4,7 @@ import {
   authenticateApiToken,
   type Caller,
   errors,
+  type FileAccess,
   type Logger,
   sessionCaller,
   uuidv7,
@@ -11,6 +12,7 @@ import {
 import type { Database, DatabaseHooks } from '@airstock/db';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { mountFileRoutes } from './files.ts';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
 import { limitKindFor, type RateLimiter, RequestLimits } from './rate-limit.ts';
 import { mountRestRoutes } from './rest.ts';
@@ -43,6 +45,21 @@ export interface AppDeps {
   logger: Logger;
 }
 
+/** The app's file store as operations see it (imports and exports read and write files). */
+export function fileAccess(deps: Pick<AppDeps, 'files'>): { files?: FileAccess } {
+  const files = deps.files;
+  if (!files) return {};
+  return {
+    files: {
+      get: (key) => files.get(key),
+      put: (key, body, contentType) => files.put(key, body, contentType),
+      delete: async (key) => {
+        await files.delete?.(key);
+      },
+    },
+  };
+}
+
 export type AppEnv = {
   Variables: {
     requestId: string;
@@ -66,6 +83,7 @@ export function problem(error: AppError, requestId: string): Response {
   });
 }
 
+const UPLOAD_PATH = /^\/api\/v1\/shops\/[^/]+\/imports\/[^/]+\/file$/;
 const CLIENT_EVENTS_PATH = /^\/api\/v1\/shops\/[^/]+\/activity\/client-events$/;
 
 export function createApp(deps: AppDeps) {
@@ -144,13 +162,14 @@ export function createApp(deps: AppDeps) {
     }
   });
 
-  app.use(
-    '*',
-    bodyLimit({
-      maxSize: 1024 * 1024,
-      onError: () =>
-        problem(errors.validation([{ path: 'body', message: 'At most 1 MB.' }]), uuidv7()),
-    }),
+  // 1 MB for every request, except file uploads, which their routes limit themselves.
+  const smallBodies = bodyLimit({
+    maxSize: 1024 * 1024,
+    onError: () =>
+      problem(errors.validation([{ path: 'body', message: 'At most 1 MB.' }]), uuidv7()),
+  });
+  app.use('*', (c, next) =>
+    UPLOAD_PATH.test(c.req.path) && c.req.method === 'PUT' ? next() : smallBodies(c, next),
   );
 
   // Only authenticated callers are served (plan P3). A request without a valid credential is
@@ -179,6 +198,7 @@ export function createApp(deps: AppDeps) {
     await next();
   });
 
+  mountFileRoutes(app, deps);
   mountRestRoutes(app, deps);
   mountMcp(app, deps, limits);
   mountWeb(app, deps);

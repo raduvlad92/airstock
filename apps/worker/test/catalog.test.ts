@@ -199,6 +199,80 @@ describe('A01 and A02 through MCP', () => {
   });
 });
 
+describe('A43 and search through REST and MCP (N2)', () => {
+  it('REST: blocks a duplicate SKU, returns similar names until acknowledged, and queries', async () => {
+    expect((await rest('/items', { name: 'Brass floor lamp', sku: 'A43-LAMP-1' })).status).toBe(
+      201,
+    );
+    const dup = await rest('/items', { name: 'Other', sku: 'a43-lamp-1' });
+    expect(dup.status).toBe(409);
+    expect((await json(dup)).code).toBe('duplicate_sku');
+    const similar = await rest('/items', { name: 'Brass Floor Lamps', sku: 'A43-LAMP-2' });
+    expect(similar.status).toBe(409);
+    expect((await json(similar)).similarNames[0].name).toBe('Brass floor lamp');
+    expect(
+      (
+        await rest('/items', {
+          name: 'Brass Floor Lamps',
+          sku: 'A43-LAMP-2',
+          acknowledgeSimilar: true,
+        })
+      ).status,
+    ).toBe(201);
+    const query = await json(
+      await rest('/items/query', {
+        search: 'brass lamp',
+        filter: [{ field: 'sku', op: 'starts_with', value: 'A43' }],
+        sort: { field: 'sku', direction: 'desc' },
+      }),
+    );
+    expect(query.rows.map((r: { sku: string }) => r.sku)).toEqual(['A43-LAMP-2', 'A43-LAMP-1']);
+    expect(query.total).toBe(2);
+  });
+
+  it('MCP: a create without acknowledgment returns the matches instead of creating', async () => {
+    const { call } = await mcp(['shop:read', 'catalog:read', 'catalog:write']);
+    await call('edit_catalog', {
+      action: 'create_product',
+      name: 'Velvet armchair',
+      sku: 'A43-CHAIR-1',
+    });
+    const check = await call('search_catalog', {
+      action: 'check_duplicates',
+      name: 'velvet arm chair',
+    });
+    expect(check.body.similarNames[0].name).toBe('Velvet armchair');
+    const attempt = await call('edit_catalog', {
+      action: 'create_product',
+      name: 'Velvet Armchairs',
+      sku: 'A43-CHAIR-2',
+    });
+    expect(attempt.error).toBe(true);
+    expect(attempt.body).toMatchObject({
+      code: 'similar_items_found',
+      similarNames: [{ name: 'Velvet armchair' }],
+    });
+    const found = await call('search_catalog', { action: 'query', search: 'A43-CHAIR-2' });
+    expect(found.body.rows).toHaveLength(0);
+    const created = await call('edit_catalog', {
+      action: 'create_product',
+      name: 'Velvet Armchairs',
+      sku: 'A43-CHAIR-2',
+      acknowledgeSimilar: true,
+    });
+    expect(created.error).toBe(false);
+    const query = await call('search_catalog', {
+      action: 'query',
+      filter: [{ field: 'name', op: 'contains', value: 'velvet' }],
+      sort: { field: 'name', direction: 'asc' },
+    });
+    expect(query.body.rows.map((r: { sku: string }) => r.sku)).toEqual([
+      'A43-CHAIR-1',
+      'A43-CHAIR-2',
+    ]);
+  });
+});
+
 describe('cross-shop isolation for the new routes (A13)', () => {
   it('answers another shop’s catalog IDs with 404', async () => {
     const other = await seedShop(t.db, t.sink, 'Other catalog REST shop');

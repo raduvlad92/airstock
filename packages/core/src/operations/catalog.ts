@@ -42,7 +42,9 @@ export const searchVariants = defineOperation({
   audit: { action: 'catalog.variants.searched' },
   idempotency: 'none',
   http: { method: 'GET', path: '/shops/{shopId}/variants' },
-  mcp: { tool: 'search_catalog', action: 'find', readOnly: true, destructive: false },
+  mcp: {
+    exception: 'Superseded over MCP by search_catalog (query); kept as a simple REST lookup.',
+  },
   async handler(ctx, input) {
     const rows = await ctx.tx.query<{
       id: string;

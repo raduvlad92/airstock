@@ -77,6 +77,9 @@ export async function execute(
           phase: 'outcome',
           outcome: appError.outcome,
           error: { code: appError.code, status: appError.status },
+          // What the caller was told (field errors, conflicts, similar items), so the warning
+          // shown is in the history along with the choice made next (plan 5.7).
+          context: Object.keys(appError.extra).length > 0 ? { problem: appError.extra } : null,
         }),
       ]);
     } catch (sendError) {

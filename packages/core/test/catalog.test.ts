@@ -184,6 +184,7 @@ describe('A01: four kinds of product in one shop, each with its family and field
       name: 'Oil filter v2',
       sku: 'FILT-200',
       family: 'Spare parts',
+      acknowledgeSimilar: true,
       fields: { condition: 'New', replaces: [filter.variantId] },
     });
     expect(replacement.item.variants[0].fields.replaces.value).toEqual([filter.variantId]);
@@ -542,7 +543,12 @@ describe('schema rules', () => {
     // The record keeps it, and an edit of another field leaves it alone.
     expect((await h.run(ops.getItem, { sku: 'BULB-1' })).item.product.fields.tone.value).toBe(warm);
     const fresh = await rejects(
-      h.run(ops.createItem, { name: 'Bulb 2', sku: 'BULB-2', fields: { tone: 'Warm' } }),
+      h.run(ops.createItem, {
+        name: 'Bulb 2',
+        sku: 'BULB-2',
+        fields: { tone: 'Warm' },
+        acknowledgeSimilar: true,
+      }),
     );
     expect(fresh.status).toBe(400);
     await h.run(ops.updateItem, {

@@ -160,6 +160,14 @@ describe('CSV import (plan 5.12)', () => {
       [shop.shopId],
     );
     expect(receipts).toEqual([{ reason: 'opening stock', n: 4 }]);
+    // One availability event for the chunk, naming every position it stocked, so a large import
+    // does not flood the outbox ahead of other shops' events.
+    const announced = await ownerQuery<{ positions: number }>(
+      `select jsonb_array_length(payload->'positionIds') as positions from outbox_events
+       where shop_id = $1 and topic = 'inventory.availability_changed'`,
+      [shop.shopId],
+    );
+    expect(announced).toEqual([{ positions: 4 }]);
     // Every created record has its own event, linked to the import.
     const events = await ownerQuery<{ action: string; n: number }>(
       `select action, count(*)::int as n from audit_events where shop_id = $1 and changes->>'importId' = $2 group by action order by action`,

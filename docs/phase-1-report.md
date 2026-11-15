@@ -78,6 +78,11 @@ At the end of Phase 1: 99 operations, 14 MCP tools, 315 unit, API, and component
   - The export of those rows includes barcode and supplier columns, and its download was logged.
   - The warehouse contract was saved, and adding a location with a taken code was refused.
 - **Activity:** `client.*` events sit next to server events: page views, view switches, and detail panel open and close.
+- **Labels (after PR #32 deployed):**
+  - The labels page, opened with a variant as the grid's "Print labels" opens it, drew its preview.
+  - The PDF built in the browser was one page and 1.4 KB, and its barcode decoded with zxing-wasm to `AS00000001`, the variant's generated Code 128.
+  - The suppliers page listed the supplier.
+  - No CSP violations.
 
 **Bug found and fixed (PR #31):**
 - The 300-row import wrote one availability event per variant (258).

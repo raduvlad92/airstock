@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { callerKey } from '../caller.ts';
 import { errors } from '../errors.ts';
 import { uuidv7Time } from '../ids.ts';
+import { effectivePermissions, type Permission } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
 
@@ -24,6 +25,29 @@ const ActivityEvent = z.object({
   changes: z.unknown(),
   error: z.unknown(),
 });
+
+/**
+ * Values in event `changes` that only some members may read, such as warehouse contract terms
+ * (PRD 2.3). The event keeps them; activity reads replace them with "hidden" for everyone else.
+ */
+const RESTRICTED_CHANGES: Array<{ targetType: string; key: string; permission: Permission }> = [
+  { targetType: 'warehouse', key: 'contract', permission: 'storage.commercial.read' },
+];
+
+function redactChanges(
+  targetType: string | null,
+  changes: unknown,
+  allowed: ReadonlySet<Permission>,
+): unknown {
+  if (!changes || typeof changes !== 'object') return changes;
+  let out = changes as Record<string, unknown>;
+  for (const rule of RESTRICTED_CHANGES) {
+    if (rule.targetType === targetType && rule.key in out && !allowed.has(rule.permission)) {
+      out = { ...out, [rule.key]: 'hidden' };
+    }
+  }
+  return out;
+}
 
 export const listActivity = defineOperation({
   id: 'activity.list',
@@ -98,6 +122,7 @@ export const listActivity = defineOperation({
     );
     const page = rows.slice(0, input.limit);
     const last = page.at(-1);
+    const allowed = ctx.membership ? effectivePermissions(ctx.membership) : new Set<Permission>();
     return {
       result: {
         events: page.map((r) => ({
@@ -116,7 +141,7 @@ export const listActivity = defineOperation({
           attemptId: r.attempt_id,
           externalRef: r.external_ref,
           reason: r.reason,
-          changes: r.changes,
+          changes: redactChanges(r.target_type, r.changes, allowed),
           error: r.error,
         })),
         nextCursor:

@@ -51,7 +51,7 @@ import {
   recordImportUpload,
 } from './imports.ts';
 import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
-import { inviteMember, listMembers } from './members.ts';
+import { inviteMember, listMembers, setLocationScope } from './members.ts';
 import {
   connectShopifyStore,
   listShopifyConnections,
@@ -61,7 +61,20 @@ import {
   updateShopifyConnectionDetails,
 } from './shopify.ts';
 import { createShop, getShopContext, listShops, updateShopSettings } from './shops.ts';
-import { createLocation, createWarehouse, listLocations } from './storage.ts';
+import {
+  archiveLocation,
+  archiveWarehouse,
+  createLocation,
+  createWarehouse,
+  getWarehouse,
+  listLocations,
+  listWarehouses,
+  moveLocation,
+  restoreLocation,
+  restoreWarehouse,
+  updateLocation,
+  updateWarehouse,
+} from './storage.ts';
 
 /** The operation registry: the single source for REST, OpenAPI, MCP tools, and audit names. */
 export const operations: readonly AnyOperation[] = [
@@ -105,9 +118,18 @@ export const operations: readonly AnyOperation[] = [
   getExport,
   listExports,
   downloadExport,
+  listWarehouses,
+  getWarehouse,
   createWarehouse,
-  createLocation,
+  updateWarehouse,
+  archiveWarehouse,
+  restoreWarehouse,
   listLocations,
+  createLocation,
+  updateLocation,
+  moveLocation,
+  archiveLocation,
+  restoreLocation,
   receiveStock,
   reserveStock,
   releaseReservation,
@@ -125,6 +147,7 @@ export const operations: readonly AnyOperation[] = [
   setShopifyMappings,
   inviteMember,
   listMembers,
+  setLocationScope,
 ];
 
 export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
@@ -144,8 +167,10 @@ export const integrationCallbacks: readonly AnyOperation[] = [
 
 export {
   addTemplate,
+  archiveLocation,
   archiveProduct,
   archiveVariant,
+  archiveWarehouse,
   checkDuplicates,
   commitBulkEdit,
   commitImport,
@@ -171,6 +196,7 @@ export {
   getItem,
   getOperationOutcome,
   getShopContext,
+  getWarehouse,
   inviteMember,
   listActivity,
   listApiCredentials,
@@ -183,7 +209,9 @@ export {
   listSavedViews,
   listShopifyConnections,
   listShops,
+  listWarehouses,
   markShopifyUninstalled,
+  moveLocation,
   previewBulkEdit,
   previewImport,
   queryItems,
@@ -193,18 +221,23 @@ export {
   recordShopifyWebhook,
   releaseReservation,
   reserveStock,
+  restoreLocation,
   restoreProduct,
   restoreVariant,
+  restoreWarehouse,
   revokeApiCredential,
   revokeConnection,
   saveView,
   searchVariants,
+  setLocationScope,
   setProductOptions,
   setShopifyMappings,
   updateFamily,
   updateField,
   updateFieldOptions,
   updateItem,
+  updateLocation,
   updateShopifyConnectionDetails,
   updateShopSettings,
+  updateWarehouse,
 };

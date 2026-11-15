@@ -79,7 +79,6 @@ const pct = (xs: number[], p: number) =>
   [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))]!;
 for (const [label, input] of scenarios) {
   const times: number[] = [];
-  let statements = 0;
   let rows = 0;
   for (let i = 0; i < Number(args.n); i++) {
     const shop = seed.shops[i % seed.shops.length]!;
@@ -92,7 +91,6 @@ for (const [label, input] of scenarios) {
     });
     times.push(performance.now() - t);
     rows = (res.result as { rows: unknown[] }).rows.length;
-    statements++;
   }
   console.log(
     `${label.padEnd(42)} p50 ${pct(times, 50).toFixed(1).padStart(7)} ms   p95 ${pct(times, 95).toFixed(1).padStart(7)} ms   rows ${rows}`,

@@ -130,9 +130,11 @@ export function encodePrice(input: unknown): Encoded {
   const t =
     typeof input === 'number' ? String(input) : typeof input === 'string' ? input.trim() : '';
   if (!isDecimal(t) || t.startsWith('-')) return fail('Use a price such as 19.90.');
-  if (decimalScale(t) > 4) return fail('At most 4 decimal places.');
-  if (t.replace('.', '').replace(/^0+/, '').length > 18) return fail('Too large.');
-  return ok(normalize(t));
+  // Stored prices read back with trailing zeros ("5.000000"); only significant places count.
+  const n = normalize(t);
+  if (decimalScale(n) > 4) return fail('At most 4 decimal places.');
+  if (n.replace('.', '').replace(/^0+/, '').length > 18) return fail('Too large.');
+  return ok(n);
 }
 
 export const BUILTIN_FIELDS: BuiltinField[] = [

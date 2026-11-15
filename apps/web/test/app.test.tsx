@@ -8,9 +8,24 @@ import { routeTree } from '../src/router.tsx';
 
 const SHOP = '0196f3a0-0000-7000-8000-000000000001';
 
+const EMPTY_SCHEMA = {
+  fields: [],
+  families: [],
+  templates: [],
+  units: { display: 'metric', kinds: {} },
+  limits: { activeFieldsPerShop: 300 },
+  currency: 'EUR',
+};
+
 function context(permissions: string[]) {
   return {
-    shop: { id: SHOP, name: 'Bibica', currency: 'EUR', timezone: 'Europe/Bucharest' },
+    shop: {
+      id: SHOP,
+      name: 'Bibica',
+      currency: 'EUR',
+      timezone: 'Europe/Bucharest',
+      displayUnits: 'metric',
+    },
     role: 'viewer',
     permissions,
     allLocations: true,
@@ -81,7 +96,15 @@ describe('dashboard shell', () => {
           },
         ],
       },
-      [`/shops/${SHOP}/variants`]: { variants: [], nextCursor: null },
+      [`/shops/${SHOP}/catalog/schema`]: EMPTY_SCHEMA,
+      [`/shops/${SHOP}/items/query`]: {
+        mode: 'variants',
+        rows: [],
+        nextCursor: null,
+        total: 0,
+        totalCapped: false,
+      },
+      [`/shops/${SHOP}/saved-views`]: { views: [] },
     });
     renderAt(`/app/shops/${SHOP}/products`);
     const nav = await screen.findByRole('navigation', { name: 'Shop' });
@@ -89,7 +112,7 @@ describe('dashboard shell', () => {
     expect(nav.textContent).toContain('Activity');
     expect(nav.textContent).not.toContain('Inventory');
     expect(nav.textContent).not.toContain('Warehouses');
-    expect(await screen.findByText('No products yet.')).toBeTruthy();
+    expect(await screen.findByText('No products yet. Add one to start.')).toBeTruthy();
   });
 
   it('calls the API with the custom header that cross-site pages cannot send', async () => {
@@ -107,7 +130,15 @@ describe('dashboard shell', () => {
     mockApi({
       [`/shops/${SHOP}`]: context(['shop.read', 'catalog.read']),
       '/shops': { shops: [] },
-      [`/shops/${SHOP}/variants`]: { variants: [], nextCursor: null },
+      [`/shops/${SHOP}/catalog/schema`]: EMPTY_SCHEMA,
+      [`/shops/${SHOP}/items/query`]: {
+        mode: 'variants',
+        rows: [],
+        nextCursor: null,
+        total: 0,
+        totalCapped: false,
+      },
+      [`/shops/${SHOP}/saved-views`]: { views: [] },
     });
     const router = renderAt(`/app/shops/${SHOP}`);
     await waitFor(() =>

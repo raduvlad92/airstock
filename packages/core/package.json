@@ -4,7 +4,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./permissions": "./src/permissions.ts"
+    "./permissions": "./src/permissions.ts",
+    "./catalog/fields": "./src/catalog/fields.ts",
+    "./catalog/units": "./src/catalog/units.ts",
+    "./catalog/decimal": "./src/catalog/decimal.ts"
   },
   "dependencies": {
     "@airstock/db": "workspace:*",

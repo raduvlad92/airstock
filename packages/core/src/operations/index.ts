@@ -9,6 +9,7 @@ import {
 } from './access.ts';
 import { getOperationOutcome, listActivity, recordClientEvents } from './activity.ts';
 import { searchVariants } from './catalog.ts';
+import { commitBulkEdit, previewBulkEdit } from './catalog-bulk.ts';
 import {
   archiveProduct,
   archiveVariant,
@@ -71,6 +72,8 @@ export const operations: readonly AnyOperation[] = [
   saveView,
   deleteView,
   updateItem,
+  previewBulkEdit,
+  commitBulkEdit,
   setProductOptions,
   generateVariants,
   archiveProduct,
@@ -120,6 +123,7 @@ export {
   archiveProduct,
   archiveVariant,
   checkDuplicates,
+  commitBulkEdit,
   connectShopifyStore,
   convertField,
   createApiCredential,
@@ -147,6 +151,7 @@ export {
   listShopifyConnections,
   listShops,
   markShopifyUninstalled,
+  previewBulkEdit,
   queryItems,
   receiveStock,
   recordClientEvents,

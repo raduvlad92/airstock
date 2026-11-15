@@ -4,7 +4,7 @@
 
 ## Decision
 
-- `apps/web` is a React 19 single-page app built with Vite 8, routed with TanStack Router (code-based routes, base path `/app`), and fed by TanStack Query. TanStack Table and Virtual arrive with the grid (N3). The product grid uses Table **v8** (8.21.3), not v9: v9 changed the API and is weeks old; v8 is stable and enough for column sizing, ordering, and pinning.
+- `apps/web` is a React 19 single-page app built with Vite 8, routed with TanStack Router (code-based routes, base path `/app`), and fed by TanStack Query. TanStack Virtual arrived with the grid (N3); TanStack Table, planned for it, turned out unnecessary and was removed ([ADR 0017](0017-grid-and-bulk-edits.md)).
 - **Build:** one entry (`src/main.tsx`), no HTML, written to `apps/worker/public/app/assets/app.js` and `app.css` with fixed names. The output is not committed; `pnpm build` builds the web app, then the Worker bundle, and CI deploys both.
 - **Serving:** Workers static assets serve the built files before the Worker runs. The Worker answers every other path under `/app` with a small shell page (`appShellPage`): a session check, the site's CSP, the user's email and MCP URL as data attributes, and the two tags. A missing file under `/app/assets/` is a 404, never the shell. Every other path still reaches the Worker. Sign-in, consent, invitation, and scan-test pages stay server-rendered.
 - **CSP unchanged:** no inline scripts or style elements. React sets styles through the CSSOM, which `style-src 'self'` allows. The Playwright smoke test fails on any CSP report.

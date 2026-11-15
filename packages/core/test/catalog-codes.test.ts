@@ -5,6 +5,7 @@ import {
   type Harness,
   harness,
   MemoryAuditSink,
+  ownerQuery,
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
@@ -111,5 +112,98 @@ describe('search by code', () => {
       item.productId,
     );
     expect(await variantsFor(ho, '4006381333931')).toEqual([]);
+  });
+});
+
+describe('completeness fields', () => {
+  it('filters on picture, shipping package, barcode, and supplier SKU', async () => {
+    const tag = uuidv7().slice(-6).toUpperCase();
+    const bare = await create(h, { sku: `BARE-${tag}` });
+    const full = await create(h, { sku: `FULL-${tag}`, barcode: `FULL-${tag}` });
+    await h.run(ops.setShippingPackages, {
+      variantId: full.variantId,
+      shippingPackagesVersion: 0,
+      shippingPackages: [{ dimensions: '30 x 20 x 10 cm', weight: '1.2 kg' }],
+    });
+    const supplier = (await h.run(ops.createSupplier, { name: `Full ${tag}` })).supplier;
+    await h.run(ops.saveSupplierItem, {
+      supplierId: supplier.id,
+      variantId: full.variantId,
+      supplierSku: `SUP-${tag}`,
+      preferred: true,
+    });
+    const mediaId = uuidv7();
+    // A finalized picture, written directly: the upload path has its own tests (N4).
+    await ownerQuery(
+      `insert into media_upload_intents (shop_id, id, media_id, kind, file_name, content_type, size_bytes, sha256, status, created_by, expires_at)
+       values ($1, $2, $3, 'image', 'full.png', 'image/png', 10, $4, 'finalized', 'test', now() + interval '1 hour')`,
+      [shop.shopId, uuidv7(), mediaId, 'a'.repeat(64)],
+    );
+    await ownerQuery(
+      `insert into media_assets (shop_id, id, kind, file_name, content_type, size_bytes, sha256, created_by)
+       values ($1, $2, 'image', 'full.png', 'image/png', 10, $3, 'test')`,
+      [shop.shopId, mediaId, 'a'.repeat(64)],
+    );
+    await ownerQuery(
+      `insert into media_links (shop_id, id, media_id, product_id, role, position, is_primary)
+       values ($1, $2, $3, $4, 'primary', 0, true)`,
+      [shop.shopId, uuidv7(), mediaId, full.productId],
+    );
+
+    const skus = async (filter: unknown[], mode = 'variants') =>
+      (
+        (await h.run(ops.queryItems, {
+          mode,
+          filter: [{ field: 'sku', op: 'contains', value: tag }, ...filter],
+          fields: ['supplier_sku'],
+        })) as { rows: Array<{ sku: string | null; productId: string }> }
+      ).rows;
+    for (const field of ['has_picture', 'has_shipping_package', 'has_barcode']) {
+      expect((await skus([{ field, op: 'is', value: true }])).map((r) => r.sku)).toEqual([
+        `FULL-${tag}`,
+      ]);
+      expect((await skus([{ field, op: 'is', value: false }])).map((r) => r.sku)).toEqual([
+        `BARE-${tag}`,
+      ]);
+    }
+    expect(
+      (await skus([{ field: 'has_picture', op: 'is', value: false }], 'products')).map(
+        (r) => r.productId,
+      ),
+    ).toEqual([bare.productId]);
+    expect(
+      (await skus([{ field: 'supplier_sku', op: 'equals', value: `SUP-${tag}` }])).map(
+        (r) => r.sku,
+      ),
+    ).toEqual([`FULL-${tag}`]);
+  });
+});
+
+describe('available in the catalog query', () => {
+  it('follows fulfillment eligibility from the warehouse down (ADR 0016)', async () => {
+    const shopB = await seedShop(db, sink, 'Eligibility shop');
+    const hb = harness(db, sink, shopB);
+    const item = await create(hb, {});
+    await hb.run(ops.receiveStock, {
+      variantId: item.variantId,
+      locationId: shopB.locationId,
+      quantity: '7',
+    });
+    const available = async () =>
+      (
+        (await hb.run(ops.queryItems, {
+          filter: [{ field: 'sku', op: 'equals', value: item.sku }],
+          fields: ['available'],
+        })) as { rows: Array<{ available: string | null }> }
+      ).rows[0]?.available;
+    expect(Number(await available())).toBe(7);
+    await ownerQuery('update warehouses set fulfillment_eligible = false where id = $1', [
+      shopB.warehouseId,
+    ]);
+    expect(Number(await available())).toBe(0);
+    await ownerQuery('update warehouses set fulfillment_eligible = true where id = $1', [
+      shopB.warehouseId,
+    ]);
+    expect(Number(await available())).toBe(7);
   });
 });

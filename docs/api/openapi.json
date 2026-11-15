@@ -3742,7 +3742,7 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 100,
-                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                             },
                             "op": {
                               "type": "string",
@@ -3773,7 +3773,7 @@
                                     "type": "string",
                                     "minLength": 1,
                                     "maxLength": 100,
-                                    "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                    "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                   },
                                   "op": {
                                     "type": "string",
@@ -4366,7 +4366,7 @@
                                           "type": "string",
                                           "minLength": 1,
                                           "maxLength": 100,
-                                          "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                          "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                         },
                                         "op": {
                                           "type": "string",
@@ -4398,7 +4398,7 @@
                                                 "type": "string",
                                                 "minLength": 1,
                                                 "maxLength": 100,
-                                                "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                                "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                               },
                                               "op": {
                                                 "type": "string",
@@ -4611,7 +4611,7 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 100,
-                                  "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                  "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                 },
                                 "op": {
                                   "type": "string",
@@ -4642,7 +4642,7 @@
                                         "type": "string",
                                         "minLength": 1,
                                         "maxLength": 100,
-                                        "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                        "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                       },
                                       "op": {
                                         "type": "string",
@@ -4799,7 +4799,7 @@
                                         "type": "string",
                                         "minLength": 1,
                                         "maxLength": 100,
-                                        "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                        "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                       },
                                       "op": {
                                         "type": "string",
@@ -4831,7 +4831,7 @@
                                               "type": "string",
                                               "minLength": 1,
                                               "maxLength": 100,
-                                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                             },
                                             "op": {
                                               "type": "string",
@@ -8398,7 +8398,7 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 100,
-                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                              "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                             },
                             "op": {
                               "type": "string",
@@ -8429,7 +8429,7 @@
                                     "type": "string",
                                     "minLength": 1,
                                     "maxLength": 100,
-                                    "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at."
+                                    "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
                                   },
                                   "op": {
                                     "type": "string",

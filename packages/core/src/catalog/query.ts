@@ -169,6 +169,16 @@ function customField(def: FieldDefinition): QueryField {
   };
 }
 
+/**
+ * Warehouses and locations that keep everything inside them out of fulfillment (ADR 0016, as
+ * location_fulfillment_eligible()). `path_ids` holds the warehouse, every location above, and the
+ * location itself, so one overlap test per position applies the rule. As an uncorrelated scalar the
+ * planner computes the list once per query; it is almost always empty.
+ */
+const INELIGIBLE_IDS = `(select coalesce(array_agg(x.id), '{}'::uuid[]) from (
+  select id from locations where not fulfillment_eligible
+  union all select id from warehouses where not fulfillment_eligible) x)`;
+
 /** Sellable stock available at fulfillment-eligible locations in the caller's scope. */
 function availableExpr(params: Params, scope: string[] | null): string {
   const s = params.add(scope);
@@ -180,7 +190,7 @@ function availableExpr(params: Params, scope: string[] | null): string {
      from inventory_positions ip
      join locations l on l.shop_id = ip.shop_id and l.id = ip.location_id
      where ip.shop_id = v.shop_id and ip.variant_id = v.id and ip.condition = 'sellable'
-       and l.status = 'active' and l.fulfillment_eligible
+       and l.status = 'active' and not (l.path_ids && ${INELIGIBLE_IDS})
        and (${s}::uuid[] is null or l.path_ids && ${s}::uuid[]))`;
 }
 
@@ -233,6 +243,48 @@ function builtinFields(scope: string[] | null): QueryField[] {
     ),
     f('available', 'Available', 'number', 'variant', 'numeric', (params) =>
       availableExpr(params, scope),
+    ),
+    // Completeness checks such as "which items have no primary picture" (plan 7.3). A variant
+    // counts its product's primary picture, as the gallery shows it.
+    {
+      key: 'has_picture',
+      label: 'Has a primary picture',
+      kind: 'boolean',
+      level: 'product',
+      sqlType: 'boolean',
+      sortable: true,
+      expr: (_params, mode) =>
+        `exists (select 1 from media_links ml join media_assets ma on ma.shop_id = ml.shop_id and ma.id = ml.media_id
+           where ml.shop_id = p.shop_id and ml.product_id = p.id and ml.is_primary and ma.status = 'active'
+             and (ml.variant_id is null${mode === 'variants' ? ' or ml.variant_id = v.id' : ''}))`,
+    },
+    f(
+      'has_shipping_package',
+      'Has a shipping package',
+      'boolean',
+      'variant',
+      'boolean',
+      () =>
+        'exists (select 1 from shipping_packages sp where sp.shop_id = v.shop_id and sp.variant_id = v.id)',
+    ),
+    f(
+      'has_barcode',
+      'Has a barcode',
+      'boolean',
+      'variant',
+      'boolean',
+      () =>
+        'exists (select 1 from barcodes b where b.shop_id = v.shop_id and b.variant_id = v.id and b.pack_id is null)',
+    ),
+    f(
+      'supplier_sku',
+      'Supplier SKU',
+      'text',
+      'variant',
+      'text',
+      () =>
+        `(select si.supplier_sku from supplier_items si where si.shop_id = v.shop_id and si.variant_id = v.id
+           and si.status = 'active' and si.supplier_sku is not null order by si.preferred desc, si.id limit 1)`,
     ),
   ];
 }

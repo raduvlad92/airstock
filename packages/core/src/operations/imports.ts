@@ -1447,7 +1447,18 @@ export async function runExportJob(
                   [result.rows.map((r) => r.variantId)],
                 )
               : [];
-          return { result, wanted, options, families, variantOptions, barcodes };
+          // The preferred supplier and its SKU, without costs (they need costs.read, ADR 0019).
+          const suppliers =
+            mode === 'variants'
+              ? await tx.query<{ variant_id: string; name: string; supplier_sku: string | null }>(
+                  `select distinct on (si.variant_id) si.variant_id, s.name, si.supplier_sku
+                   from supplier_items si join suppliers s on s.shop_id = si.shop_id and s.id = si.supplier_id
+                   where si.variant_id = any($1::uuid[]) and si.status = 'active'
+                   order by si.variant_id, si.preferred desc, si.id`,
+                  [result.rows.map((r) => r.variantId)],
+                )
+              : [];
+          return { result, wanted, options, families, variantOptions, barcodes, suppliers };
         },
       );
       if (!columns) {
@@ -1468,6 +1479,8 @@ export async function runExportJob(
             r.name,
             r.sku ?? '',
             page.barcodes.find((b) => b.variant_id === r.variantId)?.code ?? '',
+            page.suppliers.find((x) => x.variant_id === r.variantId)?.name ?? '',
+            page.suppliers.find((x) => x.variant_id === r.variantId)?.supplier_sku ?? '',
             r.price ?? r.priceRange?.min ?? '',
             r.productStatus,
             page.families.find((f) => f.id === r.familyId)?.name ?? '',
@@ -1492,6 +1505,8 @@ export async function runExportJob(
       'name',
       'sku',
       'barcode',
+      'supplier',
+      'supplier_sku',
       'price',
       'status',
       'family',

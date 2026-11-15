@@ -41,7 +41,7 @@ const ConditionInput = z.object({
     .min(1)
     .max(100)
     .describe(
-      'A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at.',
+      'A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU).',
     ),
   op: z
     .string()

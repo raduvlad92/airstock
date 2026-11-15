@@ -77,8 +77,52 @@ test('a phone-sized screen has no horizontal scroll', async ({ page }) => {
   await page.getByLabel('Shop name').fill('Phone shop');
   await page.getByRole('button', { name: 'Create shop' }).click();
   await expect(page.getByRole('grid', { name: 'Products' })).toBeVisible();
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - window.innerWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(0);
+  const overflow = () =>
+    page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(await overflow()).toBeLessThanOrEqual(0);
+  // The warehouse card, its edit form, and the location tree fit as well.
+  await page.getByRole('link', { name: 'Warehouses' }).click();
+  await expect(page.getByRole('heading', { name: 'Main stock' })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit' }).first().click();
+  await expect(page.getByRole('group', { name: 'Contract' })).toBeVisible();
+  expect(await overflow()).toBeLessThanOrEqual(0);
+});
+
+test('warehouse records, contract terms, and the location tree', async ({ page }) => {
+  await page.goto('/__e2e/login?email=e2e-storage@example.test');
+  await page.getByLabel('Shop name').fill('Storage shop');
+  await page.getByRole('button', { name: 'Create shop' }).click();
+  await page.getByRole('link', { name: 'Warehouses' }).click();
+  const card = page.locator('section.panel', {
+    has: page.getByRole('heading', { name: 'Main stock' }),
+  });
+  await card.getByRole('button', { name: 'Edit' }).first().click();
+  await card.getByLabel('Ownership').selectOption('rented');
+  await card.getByLabel(/^Operator/).fill('Hall Logistics');
+  await card.getByLabel('City').fill('Leipzig');
+  await card.getByRole('button', { name: 'Add a rate' }).click();
+  await card.getByLabel('Rate for').fill('Storage per pallet');
+  await card.getByLabel('Amount').fill('12.50');
+  await card.getByLabel('Per', { exact: true }).fill('pallet per week');
+  await card.getByRole('button', { name: 'Save' }).click();
+  await expect(card.getByText('Hall Logistics')).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Contract' })).toBeVisible();
+  await expect(card.getByText('12.50 EUR')).toBeVisible();
+
+  const add = page.locator('section.panel', {
+    has: page.getByRole('heading', { name: 'Add a location' }),
+  });
+  await add.getByLabel('Inside').selectOption({ label: 'Main stock' });
+  await add.getByLabel('Name').fill('Shelf A');
+  await add.getByRole('button', { name: 'Add location' }).click();
+  const shelf = card.locator('li', { hasText: 'Shelf A' });
+  await expect(shelf).toBeVisible();
+  await shelf.getByRole('button', { name: 'Edit' }).click();
+  await shelf.getByLabel('Code').fill('A-01');
+  await shelf.getByRole('button', { name: 'Save' }).click();
+  await expect(card.getByText('A-01 · Shelf A')).toBeVisible();
+  await shelf.getByRole('button', { name: 'Archive' }).click();
+  await expect(shelf.getByText('archived')).toBeVisible();
+  await shelf.getByRole('button', { name: 'Restore' }).click();
+  await expect(shelf.getByRole('button', { name: 'Move' })).toBeVisible();
 });

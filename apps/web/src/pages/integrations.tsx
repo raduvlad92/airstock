@@ -27,7 +27,7 @@ export const SCOPE_LABELS: Record<(typeof CONNECTION_SCOPES)[number], string> = 
   'catalog:read': 'Read items and variants',
   'catalog:write': 'Create and change items',
   'storage:read': 'Read warehouses and locations',
-  'storage:write': 'Create warehouses and locations',
+  'storage:write': 'Change warehouses and locations',
   'inventory:read': 'Read stock and availability',
   'inventory:write': 'Receive and reserve stock',
   'activity:read': 'Read the activity history',

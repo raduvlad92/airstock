@@ -14,6 +14,7 @@ export {
 } from './audit.ts';
 export {
   dispatchOutbox,
+  drainOutbox,
   ensureAuditPartitions,
   ingestAuditEvents,
   type OutboxMessage,

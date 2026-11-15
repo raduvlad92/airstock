@@ -1153,19 +1153,15 @@ async function receiveOpeningStock(
       },
     });
   });
-  const variants = new Map<string, Set<string>>();
-  for (const m of made) {
-    const r = byKey.get(m.key)!;
-    variants.set(r.variant_id, (variants.get(r.variant_id) ?? new Set()).add(r.location_id));
-  }
+  // One availability event for the chunk, naming its positions: the Shopify push resolves the
+  // mapped ones in one query. An event per variant made a 10,000-row import 10,000 outbox rows
+  // that held up every other shop's events behind them.
+  const positionIds = [...new Set(made.map((m) => m.position_id))];
   return {
     // Rows whose receipts were made now or before; a row with an unusable location keeps stocked false.
     rows: [...new Set(input.map((r) => r.row_number))],
     events,
-    outbox: [...variants].map(([variantId, locs]) => ({
-      id: uuidv7(),
-      payload: { variantId, locationIds: [...locs] },
-    })),
+    outbox: positionIds.length > 0 ? [{ id: uuidv7(), payload: { positionIds } }] : [],
   };
 }
 

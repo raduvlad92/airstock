@@ -56,6 +56,26 @@ export async function dispatchOutbox(
 }
 
 /**
+ * Dispatches in batches until the outbox is empty or the time budget is spent, so a burst (an
+ * import's events, a backlog after an outage) does not hold later events until the next sweep.
+ * It stops on an empty batch, not a short one: delivering a job (an import chunk) can write new
+ * events, and the next round picks them up.
+ */
+export async function drainOutbox(
+  db: Database,
+  publish: (messages: OutboxMessage[]) => Promise<void>,
+  { budgetMs = 20_000, batch = 100, now = () => Date.now() } = {},
+): Promise<number> {
+  const started = now();
+  let total = 0;
+  for (;;) {
+    const sent = await dispatchOutbox(db, publish, batch);
+    total += sent;
+    if (sent === 0 || now() - started >= budgetMs) return total;
+  }
+}
+
+/**
  * Releases expired reservations shop by shop. Commands already ignore expired claims, so
  * this sweeper only tidies state; running late never keeps stock unavailable (PRD 6.3).
  */

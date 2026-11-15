@@ -2,7 +2,7 @@ import {
   type AuditEvent,
   type AuditSink,
   auditEvent,
-  dispatchOutbox,
+  drainOutbox,
   ensureAuditPartitions,
   ingestAuditEvents,
   type JobDeps,
@@ -124,7 +124,7 @@ function database(env: Env, hooks?: DatabaseHooks) {
  * fetch handler runs next to the database; the cron sweep uses publishOutbox instead.
  */
 function deliverOutbox(env: Env, db: Database): Promise<number> {
-  return dispatchOutbox(db, async (messages) => {
+  return drainOutbox(db, async (messages) => {
     const outcomes = await runJobsBatch(
       env,
       db,
@@ -141,7 +141,7 @@ function deliverOutbox(env: Env, db: Database): Promise<number> {
 }
 
 function publishOutbox(env: Env, db: Database): Promise<number> {
-  return dispatchOutbox(db, async (messages) => {
+  return drainOutbox(db, async (messages) => {
     await env.JOBS_QUEUE.sendBatch(
       messages.map((body) => ({ body, contentType: 'json' as const })),
     );
@@ -415,7 +415,13 @@ async function internalJobs(request: Request, env: Env): Promise<Response> {
   const items = (await request.json()) as JobsItem[];
   const db = database(env);
   try {
-    return Response.json({ outcomes: await runJobsBatch(env, db, items) });
+    const outcomes = await runJobsBatch(env, db, items);
+    // Jobs such as an import chunk write outbox events of their own; deliver them now rather
+    // than at the next sweep.
+    await deliverOutbox(env, db).catch((error) =>
+      logger.error('outbox_dispatch_failed', { error: String(error) }),
+    );
+    return Response.json({ outcomes });
   } finally {
     await db.close();
   }

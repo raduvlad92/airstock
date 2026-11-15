@@ -3,6 +3,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api.ts';
+import { registerMediaExtensions } from './components/media/catalog.tsx';
 import { AppInfoProvider } from './context.tsx';
 import { createAppRouter } from './router.tsx';
 import { telemetry } from './telemetry.ts';
@@ -22,6 +23,7 @@ const queryClient = new QueryClient({
   },
 });
 
+registerMediaExtensions();
 const router = createAppRouter();
 telemetry.start();
 

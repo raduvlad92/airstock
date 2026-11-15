@@ -65,12 +65,29 @@ test('a picture uploads with browser-made derivatives and shows as a signed thum
   await page.goto('/__e2e/login?email=e2e-media@example.test');
   await page.getByLabel('Shop name').fill('Media shop');
   await page.getByRole('button', { name: 'Create shop' }).click();
-  await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();
-  await page.getByLabel('Name', { exact: true }).fill('Oak chair');
-  await page.getByLabel('SKU').fill('CHAIR-E2E-1');
-  await page.getByRole('button', { name: 'Add product' }).click();
-  await page.getByRole('link', { name: 'Oak chair' }).click();
-  await expect(page.getByRole('heading', { name: 'Oak chair' })).toBeVisible();
+  await expect(page.getByRole('grid', { name: 'Products' })).toBeVisible();
+  const shopId = new URL(page.url()).pathname.split('/')[3];
+  await page.evaluate(
+    async ([shop]) => {
+      const res = await fetch(`/api/v1/shops/${shop}/items`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-airstock-request': '1',
+          'idempotency-key': crypto.randomUUID(),
+        },
+        body: JSON.stringify({ name: 'Oak chair', sku: 'CHAIR-E2E-1' }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    [shopId],
+  );
+  await page.reload();
+  await page.getByRole('gridcell').filter({ hasText: 'Oak chair' }).first().click();
+  await page.getByRole('grid', { name: 'Products' }).press('Shift+Enter');
+  const panel = page.getByRole('complementary', { name: 'Product details' });
+  await expect(panel.getByRole('heading', { name: 'Oak chair' })).toBeVisible();
+  await panel.getByRole('tab', { name: 'Pictures' }).click();
   await expect(page.getByText('No pictures or attachments yet.')).toBeVisible();
 
   const original = png(2000, 1500);
@@ -91,7 +108,13 @@ test('a picture uploads with browser-made derivatives and shows as a signed thum
   await page.getByLabel('Alt text').press('Enter');
   await expect(page.locator('.media-thumb img[alt="Oak chair, front"]')).toBeVisible();
 
-  const shopId = new URL(page.url()).pathname.split('/')[3];
+  // The gallery card shows the primary picture, fetched in one batched read.
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await page.getByRole('button', { name: 'Gallery' }).click();
+  const card = page.locator('.gallery-image img[alt="Oak chair, front"]');
+  await expect(card).toBeVisible();
+  await expect.poll(() => card.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
+
   const [asset] = await query<{
     id: string;
     size_bytes: string;
@@ -129,6 +152,7 @@ test('a picture uploads with browser-made derivatives and shows as a signed thum
       'catalog.media.part_uploaded',
       'catalog.media.finalized',
       'catalog.media.link_updated',
+      'catalog.media.primary_viewed',
     ]),
   );
   expect(violations).toEqual([]);

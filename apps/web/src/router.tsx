@@ -10,7 +10,6 @@ import {
   ShopifyPage,
 } from './pages/integrations.tsx';
 import { InventoryPage } from './pages/inventory.tsx';
-import { ProductMediaPage } from './pages/product-media.tsx';
 import { ProductsPage } from './pages/products.tsx';
 import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.tsx';
 import { ShopsPage } from './pages/shops.tsx';
@@ -57,11 +56,6 @@ const importsRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/imports',
   component: ImportsPage,
-});
-const productMediaRoute = createRoute({
-  getParentRoute: () => shopRoute,
-  path: '/products/$productId/media',
-  component: ProductMediaPage,
 });
 const inventoryRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -148,7 +142,6 @@ export const routeTree = rootRoute.addChildren([
     shopIndexRoute,
     productsRoute,
     importsRoute,
-    productMediaRoute,
     inventoryRoute,
     warehousesRoute,
     activityRoute,

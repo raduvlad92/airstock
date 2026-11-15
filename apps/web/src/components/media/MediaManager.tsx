@@ -70,7 +70,8 @@ export function MediaManager({ shopId, productId }: { shopId: string; productId:
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey });
+  // The shop-wide prefix also refreshes primary pictures on gallery cards.
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['shop', shopId, 'media'] });
   const change = useMutation({
     mutationFn: (run: () => Promise<unknown>) => run(),
     onSettled: refresh,

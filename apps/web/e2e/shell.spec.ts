@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import pg from 'pg';
 
 const admin =
   process.env.TEST_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54329/postgres';
 const ownerUrl = new URL(admin);
-ownerUrl.pathname = '/airstock_e2e';
+ownerUrl.pathname = `/${process.env.E2E_DB_NAME ?? `airstock_e2e_${createHash('sha256').update(process.cwd()).digest('hex').slice(0, 8)}`}`;
 
 async function query<R>(sql: string, params: unknown[] = []): Promise<R[]> {
   const client = new pg.Client({ connectionString: ownerUrl.toString() });

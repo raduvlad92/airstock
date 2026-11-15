@@ -4,6 +4,7 @@ import { type Caller, callerKey, type Membership } from './caller.ts';
 import { AppError, errors } from './errors.ts';
 import { canonicalJson, sha256Hex } from './hash.ts';
 import { UUID_PATTERN, uuidv7 } from './ids.ts';
+import type { MediaDelivery } from './media/signing.ts';
 import { effectivePermissions, isRole } from './permissions.ts';
 import type { AnyOperation, FileAccess, HandlerContext, HandlerResult } from './registry.ts';
 
@@ -18,6 +19,8 @@ export interface PipelineDeps {
   audit: AuditSink;
   logger?: Logger;
   files?: FileAccess;
+  /** Signs media links in results; without it they are null and uploads are refused. */
+  media?: MediaDelivery;
 }
 
 export interface ExecuteRequest {
@@ -180,6 +183,7 @@ export async function execute(
           attemptId,
           locationScope,
           newId: () => uuidv7(),
+          ...(deps.media ? { media: deps.media } : {}),
           event: (fields) => auditEvent(base(), { phase: 'outcome', ...fields }),
         };
         const handled = await op.handler(ctx, input);
@@ -247,8 +251,26 @@ function shopNotFound(): AppError {
   return new AppError(404, 'not_found', 'Shop was not found.', 'denied');
 }
 
+/**
+ * Resolves and authorizes a caller for a shop outside an operation: the media upload stream,
+ * which runs before any transaction (ADR 0015). Same answers as the pipeline.
+ */
+export async function authorizeShopCaller(
+  db: Database,
+  caller: Caller,
+  shopId: string,
+  need: Pick<AnyOperation, 'permission' | 'connectionScope'>,
+): Promise<Membership> {
+  if (!UUID_PATTERN.test(shopId)) throw shopNotFound();
+  const membership = await resolveMembership(db, caller, shopId);
+  if (!membership) throw shopNotFound();
+  const denied = authorize(need, caller, membership);
+  if (denied) throw denied;
+  return membership;
+}
+
 function authorize(
-  op: AnyOperation,
+  op: Pick<AnyOperation, 'permission' | 'connectionScope'>,
   caller: Caller,
   membership: Membership | null,
 ): AppError | null {

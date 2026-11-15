@@ -31,6 +31,39 @@ export { AppError, errors, type ProblemDetails } from './errors.ts';
 export { uuidv7, uuidv7Time } from './ids.ts';
 export { RATE_LIMIT_PERIOD_SECONDS, RATE_LIMITS, type RateLimitKind } from './limits.ts';
 export { buildMcpTools, type McpToolDef, resolveToolCall } from './mcp-tools.ts';
+export * as mediaFiles from './media/files.ts';
+export {
+  fileFieldIssue,
+  ImageLinkOut,
+  LinkOut as MediaLinkOut,
+  type MediaItem,
+  type MediaLink,
+  MediaOut,
+  type PrimaryPicture,
+  PrimaryPictureOut,
+  type ProductMedia,
+  ProductMediaOut,
+  primaryPictures,
+  productMedia,
+} from './media/library.ts';
+export {
+  hmacMediaDelivery,
+  type MediaDelivery,
+  mediaPath,
+  verifyMediaLink,
+} from './media/signing.ts';
+export {
+  failUpload,
+  markUploadsCleaned,
+  type OpenUpload,
+  objectKey,
+  objectKeys,
+  openUpload,
+  recordUploadPart,
+  sweepMediaUploads,
+  type UploadedPart,
+  uploadRejected,
+} from './media/uploads.ts';
 export { formatApiToken, parseApiToken } from './operations/access.ts';
 export { CLIENT_EVENT_TYPES } from './operations/activity.ts';
 export {
@@ -60,6 +93,7 @@ export {
   ROLE_PERMISSIONS,
 } from './permissions.ts';
 export {
+  authorizeShopCaller,
   type ExecuteRequest,
   type ExecuteResult,
   execute,

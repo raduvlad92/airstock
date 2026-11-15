@@ -4,6 +4,7 @@ import { RATE_LIMITS } from '../limits.ts';
 import { effectivePermissions, PERMISSIONS, ROLES } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, isTimeZone } from '../schemas.ts';
+import { createSystemFields } from './catalog-schema.ts';
 
 export const createShop = defineOperation({
   id: 'shops.create',
@@ -55,6 +56,7 @@ export const createShop = defineOperation({
         locationId,
       ],
     );
+    await createSystemFields(ctx);
     return {
       result: {
         shopId: ctx.shopId,
@@ -80,7 +82,13 @@ export const getShopContext = defineOperation({
   scope: 'shop',
   input: z.object({}),
   output: z.object({
-    shop: z.object({ id: Id, name: z.string(), currency: z.string(), timezone: z.string() }),
+    shop: z.object({
+      id: Id,
+      name: z.string(),
+      currency: z.string(),
+      timezone: z.string(),
+      displayUnits: z.enum(['metric', 'imperial']),
+    }),
     role: z.string(),
     permissions: z.array(z.enum(PERMISSIONS)),
     allLocations: z.boolean(),
@@ -102,7 +110,11 @@ export const getShopContext = defineOperation({
       name: string;
       currency: string;
       timezone: string;
-    }>('select id, name, currency, timezone from shops where id = $1', [ctx.shopId]);
+      displayUnits: 'metric' | 'imperial';
+    }>(
+      'select id, name, currency, timezone, display_units as "displayUnits" from shops where id = $1',
+      [ctx.shopId],
+    );
     if (!shop || !ctx.membership) throw errors.notFound('Shop');
     return {
       result: {
@@ -163,5 +175,68 @@ export const listShops = defineOperation({
       [ctx.caller.userId],
     );
     return { result: { shops }, audit: { targetType: 'shop', targetId: 'list' } };
+  },
+});
+
+export const updateShopSettings = defineOperation({
+  id: 'shops.settings.update',
+  summary: 'Change the shop name, time zone, or display units',
+  description:
+    'Display units choose metric or imperial in the dashboard (PRD 3.1). Stored values keep the unit they were entered in. The currency cannot change once set.',
+  kind: 'command',
+  scope: 'shop',
+  input: z.object({
+    name: z.string().trim().min(1).max(200).optional(),
+    timezone: z.string().min(1).max(64).refine(isTimeZone, 'Unknown IANA time zone.').optional(),
+    displayUnits: z.enum(['metric', 'imperial']).optional(),
+  }),
+  output: z.object({
+    name: z.string(),
+    timezone: z.string(),
+    displayUnits: z.string(),
+    version: z.number(),
+  }),
+  permission: 'shop.manage',
+  connectionScope: 'session',
+  audit: { action: 'shop.settings.updated' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/settings' },
+  mcp: { exception: 'Shop settings are changed in the dashboard.' },
+  async handler(ctx, input) {
+    const [before] = await ctx.tx.query<{ name: string; timezone: string; display_units: string }>(
+      'select name, timezone, display_units from shops where id = $1 for update',
+      [ctx.shopId],
+    );
+    if (!before) throw errors.notFound('Shop');
+    const [after] = await ctx.tx.query<{
+      name: string;
+      timezone: string;
+      display_units: string;
+      version: number;
+    }>(
+      `update shops set name = coalesce($2, name), timezone = coalesce($3, timezone),
+         display_units = coalesce($4, display_units), version = version + 1
+       where id = $1 returning name, timezone, display_units, version`,
+      [ctx.shopId, input.name ?? null, input.timezone ?? null, input.displayUnits ?? null],
+    );
+    return {
+      result: {
+        name: after!.name,
+        timezone: after!.timezone,
+        displayUnits: after!.display_units,
+        version: after!.version,
+      },
+      audit: {
+        targetType: 'shop',
+        targetId: ctx.shopId,
+        changes: {
+          fields: Object.fromEntries(
+            (['name', 'timezone', 'display_units'] as const)
+              .filter((k) => before[k] !== after![k])
+              .map((k) => [k, { from: before[k], to: after![k] }]),
+          ),
+        },
+      },
+    };
   },
 });

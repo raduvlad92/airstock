@@ -54,15 +54,17 @@ describe('MCP endpoint (plan Section 7)', () => {
     );
     const { tools } = await client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      'create_item',
-      'find_items',
+      'describe_catalog',
+      'edit_catalog',
       'get_availability',
       'get_operation_outcome',
       'get_shop_context',
+      'manage_catalog_schema',
       'manage_locations',
       'receive_stock',
       'reserve_stock',
       'search_activity',
+      'search_catalog',
     ]);
     const context = parse(await client.callTool({ name: 'get_shop_context', arguments: {} }));
     expect(context.shop.id).toBe(shop.shopId);

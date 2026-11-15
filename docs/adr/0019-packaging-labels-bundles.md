@@ -37,7 +37,7 @@
 
 - `labels.items.render` and `labels.locations.render` are read operations. They resolve exactly what goes on each label and log one access event naming the records:
   - item labels: name, SKU, option values, price, barcode, and pack;
-  - location labels: path, code, and a barcode of the location code, or of its ID when it has no code.
+  - location labels: path, code, warehouse, and a QR code of `LOC:` and the location's ID, which stays valid when the location is renamed or recoded.
 - The browser draws the PDF:
   - `bwip-js` encodes each symbol into a bitmap through a small drawing context, with no canvas, so the same code runs in Node tests.
   - `pdf-lib` places the bitmaps and text on the page.
@@ -45,6 +45,34 @@
 - Layouts are shared constants (`@airstock/core/labels`): A4 sheets of 3 × 8 (70 × 37 mm) and 4 × 10 (52.5 × 29.7 mm), and thermal labels of 50 × 25 mm and 100 × 50 mm. Templates save a layout with chosen fields per shop.
 - Labels are an MCP exception, because the output is a PDF made in the browser. The data operations are still in the registry and on REST.
 - **F8:** CI decodes every barcode the label renderer draws with the vendored `zxing-wasm` and checks that it resolves to its record.
+
+### Rendering and decoding
+
+- **Bitmaps.** `apps/web/src/labels/barcode.ts` runs the bwip-js encoders (EAN-13, EAN-8, UPC-A, Code 128, QR) through a drawing context that fills a grey bitmap instead of a canvas:
+  - 4 pixels per module;
+  - quiet zones of 11 modules for linear symbols and 4 for QR;
+  - a linear symbol is a band two pixels high, which the PDF stretches to the bar height.
+
+  A code stored as "other" prints as Code 128 when it is printable ASCII of up to 40 characters, and as QR otherwise. A test checks the bars and the QR modules against bwip-js's own encoding.
+- **PDF.** `apps/web/src/labels/pdf.ts` draws each distinct code once, as an 8-bit DeviceGray, Flate-compressed image XObject with `Interpolate false`, and places that image on every copy.
+- **Placement.** One pure planner places everything, and both the PDF and the on-screen preview of the first label use it:
+  - a linear barcode spans the bottom of the label, with modules of at most 0.5 mm and bars of at most 22 mm;
+  - a QR code sits on the right, at most 45% of the width, with modules of at most 1 mm;
+  - the code is printed in plain text under the symbol when it fits.
+- **Text.**
+  - The title (a name or a path) gets up to two lines. A path is cut from its start, so the most specific part stays.
+  - Long text shrinks down to 5 pt, is then cut with an ellipsis, and finally loses its last lines. Nothing leaves the label's padding.
+  - Text uses the standard Helvetica fonts, so no font is embedded. A character outside their WinAnsi set prints without its accent ("ș" as "s") or as "?".
+- **Density.** The page warns when a barcode would print with modules under 0.19 mm (linear) or 0.25 mm (QR), the point where scanning becomes unreliable. A4 layouts can start at a later position on a partly used sheet. Thermal layouts put one label on each page, sized to the label.
+- **Loading.** bwip-js and pdf-lib load only on the labels page, through a dynamic `import()`. That chunk is 624 kB (244 kB gzipped). The new pages and editors stay in the main bundle, which grows from 518 kB to 575 kB (157 kB to 171 kB gzipped). Loading them lazily made rolldown split shared modules out of the entry, which costs an extra round trip at startup.
+- **CSP.** Unchanged. The PDF is saved through a `blob:` URL on a download link, as CSV exports already are. The preview is drawn on a canvas, and the lazy chunk is `script-src 'self'`.
+- **F8 decoding.** zxing-wasm 3.1.6 decodes in the test process, using the same vendored `zxing-reader.js` and `zxing_reader.wasm` that `/scan-test` serves; the wasm is read from disk instead of fetched. Decoding in the dashboard page would need `'wasm-unsafe-eval'` in its CSP for the sake of a test. The tests decode the images read back out of the PDF file, not the bitmaps before they are embedded, so they prove what the file holds.
+  - A unit test builds PDFs in all four layouts with every symbology and then checks each image read back from the file:
+    - its pixels match the rasterizer's bitmap;
+    - it sits inside its label's padding, with modules of at least 0.19 mm;
+    - it decodes to its code.
+  - The Chromium end-to-end test creates EAN-13 and UPC-A codes, generated Code 128 and QR codes, a generated code on a case, and a location. It prints them from rows selected in the grid and downloads the PDF. Every decoded code must resolve through `lookup_barcode` to the variant or pack it was printed for, the location QR must name the location, and the page must log no CSP violations.
+  - Rasterizing the PDF pages (pdf.js) was not added. Reading the images and their placements back covers everything a page raster would, except a viewer's own scaling.
 
 ### Bundles
 

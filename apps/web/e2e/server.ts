@@ -5,6 +5,7 @@
  *
  * Audit events are ingested right away, as the queue consumer would, so a test can read them.
  */
+import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { extname, join, normalize } from 'node:path';
@@ -30,17 +31,26 @@ const SESSION_SECRET = 'e2e-session-secret-0123456789abcdef';
 
 const admin =
   process.env.TEST_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54329/postgres';
+export const E2E_DB = e2eDatabaseName();
 const ownerUrl = new URL(admin);
-ownerUrl.pathname = '/airstock_e2e';
+ownerUrl.pathname = `/${E2E_DB}`;
 const appUrl = new URL(ownerUrl);
 appUrl.username = 'airstock_app';
 appUrl.password = 'airstock_app';
 
+/** One database per checkout, so end-to-end runs in several worktrees do not collide. */
+export function e2eDatabaseName(): string {
+  return (
+    process.env.E2E_DB_NAME ??
+    `airstock_e2e_${createHash('sha256').update(process.cwd()).digest('hex').slice(0, 8)}`
+  );
+}
+
 async function prepareDatabase() {
   const client = new pg.Client({ connectionString: admin });
   await client.connect();
-  await client.query('drop database if exists airstock_e2e with (force)');
-  await client.query('create database airstock_e2e');
+  await client.query(`drop database if exists ${E2E_DB} with (force)`);
+  await client.query(`create database ${E2E_DB}`);
   await client.end();
   await bootstrap(ownerUrl.toString());
   await migrate(ownerUrl.toString());

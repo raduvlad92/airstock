@@ -8,7 +8,27 @@ import {
   revokeConnection,
 } from './access.ts';
 import { getOperationOutcome, listActivity, recordClientEvents } from './activity.ts';
-import { createItem, searchVariants } from './catalog.ts';
+import { searchVariants } from './catalog.ts';
+import {
+  archiveProduct,
+  archiveVariant,
+  createItem,
+  getItem,
+  restoreProduct,
+  restoreVariant,
+  updateItem,
+} from './catalog-items.ts';
+import {
+  addTemplate,
+  convertField,
+  createFamily,
+  createField,
+  describeCatalog,
+  updateFamily,
+  updateField,
+  updateFieldOptions,
+} from './catalog-schema.ts';
+import { generateVariants, setProductOptions } from './catalog-variants.ts';
 import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
 import { inviteMember, listMembers } from './members.ts';
 import {
@@ -19,7 +39,7 @@ import {
   setShopifyMappings,
   updateShopifyConnectionDetails,
 } from './shopify.ts';
-import { createShop, getShopContext, listShops } from './shops.ts';
+import { createShop, getShopContext, listShops, updateShopSettings } from './shops.ts';
 import { createLocation, createWarehouse, listLocations } from './storage.ts';
 
 /** The operation registry: the single source for REST, OpenAPI, MCP tools, and audit names. */
@@ -27,7 +47,24 @@ export const operations: readonly AnyOperation[] = [
   createShop,
   listShops,
   getShopContext,
+  updateShopSettings,
+  describeCatalog,
+  createField,
+  updateField,
+  updateFieldOptions,
+  convertField,
+  createFamily,
+  updateFamily,
+  addTemplate,
   createItem,
+  getItem,
+  updateItem,
+  setProductOptions,
+  generateVariants,
+  archiveProduct,
+  restoreProduct,
+  archiveVariant,
+  restoreVariant,
   searchVariants,
   createWarehouse,
   createLocation,
@@ -67,14 +104,23 @@ export const integrationCallbacks: readonly AnyOperation[] = [
 ];
 
 export {
+  addTemplate,
+  archiveProduct,
+  archiveVariant,
   connectShopifyStore,
+  convertField,
   createApiCredential,
   createConnection,
+  createFamily,
+  createField,
   createItem,
   createLocation,
   createShop,
   createWarehouse,
+  describeCatalog,
+  generateVariants,
   getAvailability,
+  getItem,
   getOperationOutcome,
   getShopContext,
   inviteMember,
@@ -91,9 +137,17 @@ export {
   recordShopifyWebhook,
   releaseReservation,
   reserveStock,
+  restoreProduct,
+  restoreVariant,
   revokeApiCredential,
   revokeConnection,
   searchVariants,
+  setProductOptions,
   setShopifyMappings,
+  updateFamily,
+  updateField,
+  updateFieldOptions,
+  updateItem,
   updateShopifyConnectionDetails,
+  updateShopSettings,
 };

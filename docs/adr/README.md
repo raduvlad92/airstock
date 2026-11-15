@@ -15,3 +15,5 @@ Short records of decisions made while building, with the reason and what would m
 | [0009](0009-transactional-email.md) | Resend for invitations, links without secrets, idempotent sends; account data in the US until revisited | Accepted for Phase 0 |
 | [0010](0010-web-app.md) | React, Vite, and TanStack app at `/app`, built into the Worker's static assets under the same CSP | Accepted |
 | [0011](0011-rate-limits-and-client-events.md) | Workers Rate Limiting per user, credential, and connection with per-minute refusal summaries; client events batched into one queue message | Accepted |
+| [0012](0012-custom-fields.md) | Typed JSONB attributes keyed by field ID, one shared encoder, inheritance by key presence, stable option IDs; Markdown rich text | Accepted |
+| [0013](0013-edit-concurrency.md) | Field-level compare-and-set on the value the caller read; conflicts name who changed the field | Accepted |

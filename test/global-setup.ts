@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { bootstrap, migrate } from '@airstock/db/migrate';
 import pg from 'pg';
 import type { TestProject } from 'vitest/node';
@@ -6,13 +7,17 @@ import type { TestProject } from 'vitest/node';
  * Creates a fresh test database, applies the roles and migrations, and installs a test-only
  * trigger used to make an audit insert fail on demand (A12).
  *
- * TEST_DATABASE_URL must point at a server where the user can create databases. Locally:
+ * TEST_DATABASE_URL must point at a server where the user can create databases. The database is
+ * named per checkout (or TEST_DB_NAME). Locally:
  * `pnpm db:up` starts one on port 54329. CI uses a postgres:17 service container.
  */
 export default async function setup(project: TestProject) {
   const admin =
     process.env.TEST_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54329/postgres';
-  const dbName = 'airstock_test';
+  // One database per checkout, so tests in several worktrees can run at once.
+  const dbName =
+    process.env.TEST_DB_NAME ??
+    `airstock_test_${createHash('sha256').update(process.cwd()).digest('hex').slice(0, 8)}`;
   const client = new pg.Client({ connectionString: admin });
   await client.connect();
   await client.query(`drop database if exists ${dbName} with (force)`);

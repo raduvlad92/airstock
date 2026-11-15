@@ -319,12 +319,13 @@ describe('connect consent and shop binding (plan Section 7.2, option A)', () => 
 
     // 2. Nothing in the arguments can reach shop B, and another client or user cannot use the grant.
     const search = await (
-      await mcpCall(await t.sign(claims), 'find_items', { query: 'Secret' })
+      await mcpCall(await t.sign(claims), 'search_catalog', { action: 'find', query: 'Secret' })
     ).text();
     expect(search).toContain('variants');
     expect(search).not.toContain('isError');
     expect(search).not.toContain('Secret B item');
-    const crossShop = await mcpCall(await t.sign(claims), 'find_items', {
+    const crossShop = await mcpCall(await t.sign(claims), 'search_catalog', {
+      action: 'find',
       query: 'Secret',
       shopId: shopB,
     });

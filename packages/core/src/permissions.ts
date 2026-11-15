@@ -7,8 +7,14 @@ export const PERMISSIONS = [
   'shop.manage',
   'catalog.read',
   'catalog.write',
+  /** Create, change, and archive fields, options, and families; see restricted fields. */
+  'catalog.schema.manage',
+  /** See supplier costs and other cost values. */
+  'costs.read',
   'storage.read',
   'storage.manage',
+  /** See and change warehouse contracts, fees, and rates. */
+  'storage.commercial.read',
   'inventory.read',
   'inventory.receive',
   'inventory.reserve',
@@ -18,6 +24,8 @@ export const PERMISSIONS = [
   'members.manage',
   /** Records what a connected sales channel reports, such as a Shopify order. */
   'integrations.sync',
+  'imports.run',
+  'exports.run',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -40,8 +48,9 @@ const READ: Permission[] = [
 
 export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   owner: new Set(PERMISSIONS),
+  // Managers hold every new Phase 1 permission too (schema, costs, commercial terms, imports).
   manager: new Set(PERMISSIONS.filter((p) => p !== 'shop.manage')),
-  catalog_editor: new Set([...READ, 'catalog.write']),
+  catalog_editor: new Set([...READ, 'catalog.write', 'imports.run', 'exports.run']),
   inventory_operator: new Set([...READ, 'inventory.receive', 'inventory.reserve']),
   viewer: new Set(READ),
 };

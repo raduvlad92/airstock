@@ -12,6 +12,10 @@
 - `pnpm parity` (in CI) and `registry.test.ts` check that every operation has a route, permission, audit action, and MCP tool or exception (A23).
 - Errors use RFC 9457 problem details with a stable `code`, in REST and inside MCP tool errors.
 
+## Update, 15 November 2026 (Phase 1, D12)
+
+The tool budget after Phase 1 is 16 or fewer, leaving room for Phase 2 under the 25 above. Phase 1 replaces `create_item` with `edit_catalog`, `find_items` with `search_catalog`, and adds `describe_catalog` and `manage_catalog_schema` (N1), then `manage_media`, `manage_suppliers`, `manage_storage` (replacing `manage_locations`), and `import_export`. After N1 there are 11 tools. Tools that share an argument name use the same schema for it across their actions, because the MCP schema is flat. New Phase 1 exceptions: shop settings (dashboard only), client events (dashboard telemetry), file upload, label rendering, saved views, and starting an import.
+
 ## Revisit when
 
 The tool count approaches 25, or a client needs per-action schemas instead of a flat object.

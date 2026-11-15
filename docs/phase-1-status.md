@@ -68,7 +68,7 @@ See the [Phase 1 report](phase-1-report.md), Section 1, for the evidence per cri
 - **Spare parts:** three parts, each with a preferred supplier ("Bosch Parts Europe") and a supplier SKU.
 
 **Connect ChatGPT to that shop with full access:**
-1. In the dashboard, open Integrations → AI connections and revoke the Phase 0 ChatGPT connection.
+1. In the dashboard, open Integrations → AI assistants and revoke the Phase 0 ChatGPT connection.
 2. In ChatGPT, reconnect the Airstock connector, or remove it and add it again: https://airstock.deletecookies.dev/mcp. This also loads the Phase 1 tools.
 3. On the consent page, choose "ChatGPT run" and tick every box.
 

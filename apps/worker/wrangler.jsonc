@@ -73,7 +73,7 @@
     }
   ],
   // Public settings. Secrets (WORKOS_API_KEY, SESSION_SECRET, SHOPIFY_API_SECRET, SHOPIFY_TOKEN_KEY,
-  // RESEND_API_KEY, SMOKE_SECRET)
+  // RESEND_API_KEY, SMOKE_SECRET, MEDIA_SIGNING_KEY)
   // are set with `wrangler secret put`.
   "vars": {
     "PUBLIC_URL": "https://airstock.deletecookies.dev",

@@ -14,6 +14,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { Hono } from 'hono';
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from 'jose';
 import { type AppDeps, type AppEnv, fileAccess, problem } from './app.ts';
+import { mediaDelivery } from './media.ts';
 import type { RequestLimits } from './rate-limit.ts';
 
 /**
@@ -125,7 +126,7 @@ function buildServer(
         try {
           const call = resolveToolCall(tool, args);
           const res = await execute(
-            { db, audit, logger: deps.logger, ...fileAccess(deps) },
+            { db, audit, logger: deps.logger, ...fileAccess(deps), media: mediaDelivery(deps) },
             call.operation,
             {
               caller,

@@ -2,6 +2,7 @@ import type { Tx } from '@airstock/db';
 import type { z } from 'zod';
 import type { AuditEvent, AuditOutcome } from './audit.ts';
 import type { Caller, Membership } from './caller.ts';
+import type { MediaDelivery } from './media/signing.ts';
 import type { Permission, RequiredScope } from './permissions.ts';
 
 /** How an operation appears to MCP clients: as part of a task-shaped tool (PRD 9.3). */
@@ -39,6 +40,8 @@ export interface HandlerContext {
   /** Null means every location; otherwise the warehouse/location IDs the caller may use. */
   locationScope: string[] | null;
   newId(): string;
+  /** Signs media links (ADR 0015); absent where media delivery is not configured. */
+  media?: MediaDelivery;
   /** An extra event produced inside the transaction, such as a reservation expired lazily. */
   event(fields: Pick<AuditEvent, 'action' | 'outcome'> & Partial<AuditEvent>): AuditEvent;
 }

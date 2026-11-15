@@ -13,6 +13,7 @@ import {
   sendInvitationEmail,
   sweepExpiredReservations,
   sweepExportFiles,
+  sweepMediaUploads,
   sweepUnboundConnectionGrants,
   systemCaller,
   uuidv7,
@@ -33,6 +34,7 @@ import { packAuditEvents, unpackAuditMessages } from './audit-queue.ts';
 import { resendSender } from './email.ts';
 import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
+import { digestStreamHasher, r2MediaStore } from './media.ts';
 import { bindingLimiter } from './rate-limit.ts';
 import { requestScopedSource } from './request-db.ts';
 import type { FileStore } from './scan.ts';
@@ -217,6 +219,12 @@ export default {
         client_events: env.RATE_LIMIT_CLIENT_EVENTS,
       }),
       files: filesFor(env),
+      media: {
+        store: r2MediaStore(env.FILES),
+        hasher: digestStreamHasher,
+        signingKey: env.MEDIA_SIGNING_KEY ?? null,
+        publicUrl: env.PUBLIC_URL ?? '',
+      },
       logger,
     });
     return app.fetch(request, env, ctx);
@@ -284,6 +292,8 @@ export default {
       }
       await sweepExpiredReservations(db);
       await sweepUnboundConnectionGrants(db);
+      // Uploads never finalized: expire them and delete their objects (ADR 0015).
+      await sweepMediaUploads(db, (keys) => r2MediaStore(env.FILES).delete(keys), { logger });
       // Imports whose job stopped (a lost message, a crash) resume from their checkpoint.
       const stuck = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
         tx.query<{ shop_id: string; id: string }>(

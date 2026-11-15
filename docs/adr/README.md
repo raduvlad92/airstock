@@ -18,6 +18,7 @@ Short records of decisions made while building, with the reason and what would m
 | [0012](0012-custom-fields.md) | Typed JSONB attributes keyed by field ID, one shared encoder, inheritance by key presence, stable option IDs; Markdown rich text | Accepted |
 | [0013](0013-edit-concurrency.md) | Field-level compare-and-set on the value the caller read; conflicts name who changed the field | Accepted |
 | [0014](0014-catalog-query.md) | Typed filter compiler with keyset paging, two row modes, full-text and trigram search, one duplicate check, saved views | Accepted |
+| [0015](0015-media.md) | Media uploads stream through the Worker to R2 with checks; the browser makes derivatives; signed links; one access event per request | Accepted |
 | [0016](0016-warehouse-records.md) | Warehouse records with contract terms visible only with `storage.commercial.read`; location paths, cascading archive and exact restore, eligibility that applies downwards | Accepted |
 | [0017](0017-grid-and-bulk-edits.md) | Variants and products rows over one query, virtualized grid with compare-and-set cells; bulk edits previewed, then committed all or nothing | Accepted |
 | [0018](0018-imports-and-exports.md) | CSV in R2; preview stores validated rows; set-based chunks of 200 with checkpoints, opening-stock receipts in the same transaction; exports from the catalog query | Accepted |

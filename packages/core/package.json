@@ -7,7 +7,8 @@
     "./permissions": "./src/permissions.ts",
     "./catalog/fields": "./src/catalog/fields.ts",
     "./catalog/units": "./src/catalog/units.ts",
-    "./catalog/decimal": "./src/catalog/decimal.ts"
+    "./catalog/decimal": "./src/catalog/decimal.ts",
+    "./media": "./src/media/files.ts"
   },
   "dependencies": {
     "@airstock/db": "workspace:*",

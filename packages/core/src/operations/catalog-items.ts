@@ -27,6 +27,7 @@ import {
   visible,
 } from '../catalog/store.ts';
 import { errors } from '../errors.ts';
+import { fileFieldIssue } from '../media/library.ts';
 import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id, iso, normalizeSku } from '../schemas.ts';
 import { findDuplicates } from './catalog-query.ts';
@@ -467,11 +468,11 @@ export async function applyChanges(
       continue;
     }
     if (def!.type === 'file' && encoded.value !== null) {
-      issues.push({
-        path: `${path}.value`,
-        message: 'File fields take values once media upload is available.',
-      });
-      continue;
+      const issue = await fileFieldIssue(ctx.tx, def!, encoded.value as string[]);
+      if (issue) {
+        issues.push({ path: `${path}.value`, message: issue });
+        continue;
+      }
     }
     if (encoded.value === null) touchedRequired.add(def!.id);
     if (def!.type === 'relationship')
@@ -857,11 +858,11 @@ export const createItem = defineOperation({
       }
       if (encoded.value === null) continue;
       if (def.type === 'file') {
-        issues.push({
-          path: `fields.${key}`,
-          message: 'File fields take values once media upload is available.',
-        });
-        continue;
+        const issue = await fileFieldIssue(ctx.tx, def, encoded.value as string[]);
+        if (issue) {
+          issues.push({ path: `fields.${key}`, message: issue });
+          continue;
+        }
       }
       const record: RecordType = def.level === 'variant' ? 'variant' : 'product';
       if (def.type === 'relationship')

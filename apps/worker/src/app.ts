@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { mountFileRoutes } from './files.ts';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
+import { isUploadRequest, type MediaConfig, mountMedia } from './media.ts';
 import { limitKindFor, type RateLimiter, RequestLimits } from './rate-limit.ts';
 import { mountRestRoutes } from './rest.ts';
 import { type FileStore, mountScanTest } from './scan.ts';
@@ -40,6 +41,8 @@ export interface AppDeps {
   dispatch?: (db: Database) => Promise<number>;
   /** File storage (R2): scan-test results. */
   files?: FileStore;
+  /** Media storage, hashing, and link signing (ADR 0015); media is off when absent. */
+  media?: MediaConfig;
   /** Request rate limits per caller (ADR 0011); none when absent. */
   rateLimiter?: RateLimiter;
   logger: Logger;
@@ -168,8 +171,13 @@ export function createApp(deps: AppDeps) {
     onError: () =>
       problem(errors.validation([{ path: 'body', message: 'At most 1 MB.' }]), uuidv7()),
   });
+  // Import uploads and media uploads stream to storage under their own limits
+  // (20 MB CSV; 20 MB images, 50 MB attachments).
   app.use('*', (c, next) =>
-    UPLOAD_PATH.test(c.req.path) && c.req.method === 'PUT' ? next() : smallBodies(c, next),
+    (UPLOAD_PATH.test(c.req.path) && c.req.method === 'PUT') ||
+    isUploadRequest(c.req.method, c.req.path)
+      ? next()
+      : smallBodies(c, next),
   );
 
   // Only authenticated callers are served (plan P3). A request without a valid credential is
@@ -200,6 +208,7 @@ export function createApp(deps: AppDeps) {
 
   mountFileRoutes(app, deps);
   mountRestRoutes(app, deps);
+  mountMedia(app, deps);
   mountMcp(app, deps, limits);
   mountWeb(app, deps);
   mountShopify(app, deps);

@@ -39,6 +39,8 @@ export interface Env {
   SELF?: Fetcher;
   /** Authenticates the jobs consumer's calls to /internal/jobs. */
   INTERNAL_SECRET?: string;
+  /** Signs short-lived media links (ADR 0015); media uploads and links are off until it is set. */
+  MEDIA_SIGNING_KEY?: string;
   /** Workers Rate Limiting bindings (ADR 0011); limits are in wrangler.jsonc. */
   RATE_LIMIT_SESSION?: RateLimit;
   RATE_LIMIT_API?: RateLimit;

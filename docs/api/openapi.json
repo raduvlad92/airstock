@@ -10569,6 +10569,2191 @@
         }
       }
     },
+    "/api/v1/shops/{shopId}/media/uploads": {
+      "post": {
+        "operationId": "catalog.media.uploads.create",
+        "summary": "Start uploading a picture or attachment",
+        "description": "Declare the file name, type, size in bytes, and SHA-256 (hex). The answer has upload URLs valid for 15 minutes: PUT the original to the first; for images also PUT a thumbnail (WebP or JPEG, longest side up to 320 px) and a display image (up to 1,600 px). Then finalize. A wrong checksum, a file that is not what it says, or an oversize file is refused and the upload fails.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.media.upload_started",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fileName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "enum": [
+                      "image/jpeg",
+                      "image/png",
+                      "image/webp",
+                      "image/avif",
+                      "image/gif",
+                      "application/pdf"
+                    ]
+                  },
+                  "size": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Bytes."
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{64}$"
+                  },
+                  "productId": {
+                    "description": "Checked against the per-product limit before uploading.",
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                },
+                "required": [
+                  "fileName",
+                  "contentType",
+                  "size",
+                  "sha256"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intentId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "mediaId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "image",
+                        "document"
+                      ]
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "uploads": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "part": {
+                            "type": "string",
+                            "enum": [
+                              "original",
+                              "thumbnail",
+                              "display"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "PUT the file body here, with the same authentication."
+                          },
+                          "method": {
+                            "type": "string",
+                            "const": "PUT"
+                          },
+                          "contentTypes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "maxBytes": {
+                            "type": "number"
+                          },
+                          "maxSide": {
+                            "description": "Longest side in pixels, for derivatives.",
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "part",
+                          "url",
+                          "method",
+                          "contentTypes",
+                          "maxBytes",
+                          "maxSide"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "intentId",
+                    "mediaId",
+                    "kind",
+                    "expiresAt",
+                    "uploads"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media/uploads/{intentId}/finalize": {
+      "post": {
+        "operationId": "catalog.media.uploads.finalize",
+        "summary": "Finish an upload and attach the file",
+        "description": "After every part is uploaded, creates the media item and, when productId is given, links it in one step. An upload that is never finalized expires after 15 minutes and its files are deleted.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.media.finalized",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "description": "The product."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "product",
+                      "variants",
+                      "both"
+                    ],
+                    "description": "product: the product itself, shown for every variant. variants: only the listed variants. both: the product and the listed variants."
+                  },
+                  "variantIds": {
+                    "anyOf": [
+                      {
+                        "maxItems": 2048,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 80000
+                      }
+                    ],
+                    "description": "IDs as an array, or comma-separated."
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "description": "Any role, such as primary, lifestyle, detail, packaging, dimension_diagram, or swatch."
+                  },
+                  "altText": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Text describing the picture for people who cannot see it; null clears it."
+                  },
+                  "primary": {
+                    "type": "boolean",
+                    "description": "Make this the primary picture of its scope (images only)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "media": {
+                      "type": "object",
+                      "properties": {
+                        "mediaId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "document"
+                          ]
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "number",
+                          "description": "Bytes of the original file."
+                        },
+                        "sha256": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "description": "Pixels, for images whose header could be read.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "height": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "thumbnail": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "type": "number",
+                                  "description": "Bytes."
+                                },
+                                "width": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "height": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "contentType",
+                                "size",
+                                "width",
+                                "height"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Up to 320 px. Images only."
+                        },
+                        "display": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "type": "number",
+                                  "description": "Bytes."
+                                },
+                                "width": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "height": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "contentType",
+                                "size",
+                                "width",
+                                "height"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Up to 1,600 px. Images only."
+                        }
+                      },
+                      "required": [
+                        "mediaId",
+                        "kind",
+                        "fileName",
+                        "contentType",
+                        "size",
+                        "sha256",
+                        "width",
+                        "height",
+                        "createdAt",
+                        "thumbnail",
+                        "display"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "linkId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "mediaId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "variantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null for the product itself."
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "roleLabel": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "number"
+                          },
+                          "primary": {
+                            "type": "boolean"
+                          },
+                          "altText": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "linkId",
+                          "mediaId",
+                          "productId",
+                          "variantId",
+                          "role",
+                          "roleLabel",
+                          "position",
+                          "primary",
+                          "altText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "media",
+                    "links"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/products/{productId}/media": {
+      "get": {
+        "operationId": "catalog.media.list",
+        "summary": "List the pictures and attachments of a product and its variants",
+        "description": "Gives each link’s role, order, primary flag, and alt text, and each file once with signed thumbnail and display links valid for at least 15 minutes. A variant shows its own pictures first, then the product’s; without its own primary picture it shows the product’s.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.media.listed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "productId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "product": {
+                      "type": "object",
+                      "properties": {
+                        "primaryMediaId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "links": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "linkId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "mediaId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "productId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "variantId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Null for the product itself."
+                              },
+                              "role": {
+                                "type": "string"
+                              },
+                              "roleLabel": {
+                                "type": "string"
+                              },
+                              "position": {
+                                "type": "number"
+                              },
+                              "primary": {
+                                "type": "boolean"
+                              },
+                              "altText": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "linkId",
+                              "mediaId",
+                              "productId",
+                              "variantId",
+                              "role",
+                              "roleLabel",
+                              "position",
+                              "primary",
+                              "altText"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "In display order. Every variant inherits these."
+                        }
+                      },
+                      "required": [
+                        "primaryMediaId",
+                        "links"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "variants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "sku": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "primaryMediaId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The variant’s own primary picture, else the product’s."
+                          },
+                          "primaryInherited": {
+                            "type": "boolean"
+                          },
+                          "links": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "linkId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "mediaId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "productId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "variantId": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "Null for the product itself."
+                                },
+                                "role": {
+                                  "type": "string"
+                                },
+                                "roleLabel": {
+                                  "type": "string"
+                                },
+                                "position": {
+                                  "type": "number"
+                                },
+                                "primary": {
+                                  "type": "boolean"
+                                },
+                                "altText": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "linkId",
+                                "mediaId",
+                                "productId",
+                                "variantId",
+                                "role",
+                                "roleLabel",
+                                "position",
+                                "primary",
+                                "altText"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "Links to this variant only, in order. Shown before the product’s pictures."
+                          }
+                        },
+                        "required": [
+                          "variantId",
+                          "sku",
+                          "title",
+                          "primaryMediaId",
+                          "primaryInherited",
+                          "links"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "media": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "mediaId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "image",
+                              "document"
+                            ]
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "contentType": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "number",
+                            "description": "Bytes of the original file."
+                          },
+                          "sha256": {
+                            "type": "string"
+                          },
+                          "width": {
+                            "description": "Pixels, for images whose header could be read.",
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "height": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "thumbnail": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "description": "Bytes."
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  },
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "url",
+                                  "contentType",
+                                  "size",
+                                  "width",
+                                  "height"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Up to 320 px. Images only."
+                          },
+                          "display": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "description": "Bytes."
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  },
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "url",
+                                  "contentType",
+                                  "size",
+                                  "width",
+                                  "height"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Up to 1,600 px. Images only."
+                          }
+                        },
+                        "required": [
+                          "mediaId",
+                          "kind",
+                          "fileName",
+                          "contentType",
+                          "size",
+                          "sha256",
+                          "width",
+                          "height",
+                          "createdAt",
+                          "thumbnail",
+                          "display"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Each linked file once."
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Starter roles and the roles in use in this shop."
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "mediaPerProduct": {
+                          "type": "number"
+                        },
+                        "imageBytes": {
+                          "type": "number"
+                        },
+                        "documentBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "mediaPerProduct",
+                        "imageBytes",
+                        "documentBytes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "productId",
+                    "product",
+                    "variants",
+                    "media",
+                    "roles",
+                    "limits"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media": {
+      "get": {
+        "operationId": "catalog.media.find",
+        "summary": "Find files in the shop’s media library",
+        "description": "Newest first. Filter by IDs, kind, file name, or files linked to no product. Use it to resolve the media IDs a file field holds.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.media.found",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mediaIds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxItems": 2048,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                },
+                {
+                  "type": "string",
+                  "maxLength": 80000
+                }
+              ],
+              "description": "IDs as an array, or comma-separated."
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "document"
+              ]
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Text in the file name.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "unlinked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Only files linked to no product.",
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Cursor from the previous page.",
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "media": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "mediaId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "image",
+                              "document"
+                            ]
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "contentType": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "number",
+                            "description": "Bytes of the original file."
+                          },
+                          "sha256": {
+                            "type": "string"
+                          },
+                          "width": {
+                            "description": "Pixels, for images whose header could be read.",
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "height": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "thumbnail": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "description": "Bytes."
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  },
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "url",
+                                  "contentType",
+                                  "size",
+                                  "width",
+                                  "height"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Up to 320 px. Images only."
+                          },
+                          "display": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "description": "Bytes."
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  },
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "url",
+                                  "contentType",
+                                  "size",
+                                  "width",
+                                  "height"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Up to 1,600 px. Images only."
+                          },
+                          "linkedProductIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "description": "Products it is linked to (up to 50)."
+                          }
+                        },
+                        "required": [
+                          "mediaId",
+                          "kind",
+                          "fileName",
+                          "contentType",
+                          "size",
+                          "sha256",
+                          "width",
+                          "height",
+                          "createdAt",
+                          "thumbnail",
+                          "display",
+                          "linkedProductIds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "media",
+                    "nextCursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media/primary": {
+      "get": {
+        "operationId": "catalog.media.primary",
+        "summary": "Get the primary picture of each product or variant",
+        "description": "For gallery cards and checks such as “which items have no primary picture”: give up to 200 product or variant IDs. A variant without its own primary picture shows its product’s.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.media.primary_viewed",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "productIds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxItems": 2048,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                },
+                {
+                  "type": "string",
+                  "maxLength": 80000
+                }
+              ],
+              "description": "IDs as an array, or comma-separated."
+            }
+          },
+          {
+            "name": "variantIds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxItems": 2048,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                },
+                {
+                  "type": "string",
+                  "maxLength": 80000
+                }
+              ],
+              "description": "IDs as an array, or comma-separated."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pictures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "recordType": {
+                            "type": "string",
+                            "enum": [
+                              "product",
+                              "variant"
+                            ]
+                          },
+                          "recordId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "mediaId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null when the record has no primary picture."
+                          },
+                          "inherited": {
+                            "type": "boolean",
+                            "description": "True when a variant shows its product’s primary picture."
+                          },
+                          "altText": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "thumbnail": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "description": "Bytes."
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  },
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "url",
+                                  "contentType",
+                                  "size",
+                                  "width",
+                                  "height"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "recordType",
+                          "recordId",
+                          "mediaId",
+                          "inherited",
+                          "altText",
+                          "thumbnail"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "pictures"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media/{mediaId}/original": {
+      "get": {
+        "operationId": "catalog.media.download",
+        "summary": "Get a download link for an original file",
+        "description": "Each call is recorded as a download of the original. The link is valid for at least 5 minutes and needs no other authentication, so share it only with the person who asked.",
+        "x-permission": "catalog.read",
+        "x-connection-scope": "catalog:read",
+        "x-audit-action": "catalog.media.original_downloaded",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mediaId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "fileName": {
+                      "type": "string"
+                    },
+                    "contentType": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "number"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mediaId",
+                    "fileName",
+                    "contentType",
+                    "size",
+                    "url",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media/{mediaId}/links": {
+      "post": {
+        "operationId": "catalog.media.link",
+        "summary": "Attach a file to a product, some of its variants, or both",
+        "description": "scope product (default) shows it for the product and every variant; variants or both need variantIds. The first image in a scope becomes its primary picture. Linking where a link already exists changes nothing; use update_link for role, alt text, and primary.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.media.linked",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "description": "The product."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "product",
+                      "variants",
+                      "both"
+                    ],
+                    "description": "product: the product itself, shown for every variant. variants: only the listed variants. both: the product and the listed variants."
+                  },
+                  "variantIds": {
+                    "anyOf": [
+                      {
+                        "maxItems": 2048,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 80000
+                      }
+                    ],
+                    "description": "IDs as an array, or comma-separated."
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "description": "Any role, such as primary, lifestyle, detail, packaging, dimension_diagram, or swatch."
+                  },
+                  "altText": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Text describing the picture for people who cannot see it; null clears it."
+                  },
+                  "primary": {
+                    "type": "boolean",
+                    "description": "Make this the primary picture of its scope (images only)."
+                  }
+                },
+                "required": [
+                  "productId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "linkId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "mediaId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "variantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null for the product itself."
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "roleLabel": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "number"
+                          },
+                          "primary": {
+                            "type": "boolean"
+                          },
+                          "altText": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "linkId",
+                          "mediaId",
+                          "productId",
+                          "variantId",
+                          "role",
+                          "roleLabel",
+                          "position",
+                          "primary",
+                          "altText"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Every link of this media item on the product."
+                    }
+                  },
+                  "required": [
+                    "links"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media/{mediaId}/links/update": {
+      "post": {
+        "operationId": "catalog.media.links.update",
+        "summary": "Change a file’s role, alt text, or primary flag on a product or variant",
+        "description": "Leave out variantId for the product itself. primary true makes it the scope’s only primary picture; false leaves the scope without one.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.media.link_updated",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "description": "The product."
+                  },
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "description": "A variant of the product. Leave out for the product itself."
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "description": "Any role, such as primary, lifestyle, detail, packaging, dimension_diagram, or swatch."
+                  },
+                  "altText": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Text describing the picture for people who cannot see it; null clears it."
+                  },
+                  "primary": {
+                    "type": "boolean",
+                    "description": "Make this the primary picture of its scope (images only)."
+                  }
+                },
+                "required": [
+                  "productId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "link": {
+                      "type": "object",
+                      "properties": {
+                        "linkId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "mediaId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Null for the product itself."
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "roleLabel": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "number"
+                        },
+                        "primary": {
+                          "type": "boolean"
+                        },
+                        "altText": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "linkId",
+                        "mediaId",
+                        "productId",
+                        "variantId",
+                        "role",
+                        "roleLabel",
+                        "position",
+                        "primary",
+                        "altText"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "link"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/products/{productId}/media/order": {
+      "post": {
+        "operationId": "catalog.media.reorder",
+        "summary": "Set the order of the files on a product or variant",
+        "description": "order lists every media ID linked to that scope, first to last. Leave out variantId for the product itself.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.media.reordered",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "description": "A variant of the product. Leave out for the product itself."
+                  },
+                  "order": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  }
+                },
+                "required": [
+                  "order"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "linkId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "mediaId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "variantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null for the product itself."
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "roleLabel": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "number"
+                          },
+                          "primary": {
+                            "type": "boolean"
+                          },
+                          "altText": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "linkId",
+                          "mediaId",
+                          "productId",
+                          "variantId",
+                          "role",
+                          "roleLabel",
+                          "position",
+                          "primary",
+                          "altText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "links"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/shops/{shopId}/media/{mediaId}/links/remove": {
+      "post": {
+        "operationId": "catalog.media.unlink",
+        "summary": "Remove a file from a product or some of its variants",
+        "description": "scope both (default) removes it from the product and every variant, or the listed ones; variants only from variants (all when none are listed); product only from the product itself. The file stays in the shop’s media library. If a primary picture is removed, the next image in that scope becomes primary.",
+        "x-permission": "catalog.write",
+        "x-connection-scope": "catalog:write",
+        "x-audit-action": "catalog.media.unlinked",
+        "parameters": [
+          {
+            "name": "shopId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "description": "The product."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "product",
+                      "variants",
+                      "both"
+                    ],
+                    "description": "product: the product itself, shown for every variant. variants: only the listed variants. both: the product and the listed variants."
+                  },
+                  "variantIds": {
+                    "anyOf": [
+                      {
+                        "maxItems": 2048,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 80000
+                      }
+                    ],
+                    "description": "IDs as an array, or comma-separated."
+                  }
+                },
+                "required": [
+                  "productId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "linkId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "mediaId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "variantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null for the product itself."
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "roleLabel": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "number"
+                          },
+                          "primary": {
+                            "type": "boolean"
+                          },
+                          "altText": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "linkId",
+                          "mediaId",
+                          "productId",
+                          "variantId",
+                          "role",
+                          "roleLabel",
+                          "position",
+                          "primary",
+                          "altText"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Every link of this media item on the product."
+                    }
+                  },
+                  "required": [
+                    "links"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/shops/{shopId}/warehouses/{warehouseId}/archive": {
       "post": {
         "operationId": "storage.warehouses.archive",

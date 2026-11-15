@@ -284,6 +284,7 @@ function LabelsForm({
   const fieldList = kind === 'item' ? ITEM_LABEL_FIELDS : LOCATION_LABEL_FIELDS;
   const custom = current !== null && !current.templateId && !current.templateKey;
   const tooMany = count > LABEL_LIMITS.labels;
+  const blank = current !== null && current.fields.length === 0;
 
   return (
     <div className="labels-layout">
@@ -431,12 +432,13 @@ function LabelsForm({
           {tooMany ? (
             <p className="notice error">Print at most {LABEL_LIMITS.labels} labels at a time.</p>
           ) : null}
+          {blank ? <p className="notice">Choose at least one thing to show on the label.</p> : null}
           <ErrorNotice error={print.error} />
           {done ? <Notice tone="ok">{done}</Notice> : null}
           <div className="form-actions">
             <button
               type="button"
-              disabled={count === 0 || tooMany || !current || print.isPending}
+              disabled={count === 0 || tooMany || blank || !current || print.isPending}
               onClick={() => {
                 setDone(null);
                 print.mutate();

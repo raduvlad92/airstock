@@ -8339,7 +8339,7 @@
       "post": {
         "operationId": "exports.create",
         "summary": "Export products or variants as CSV",
-        "description": "Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Runs as a job; the file is ready for 24 hours and deleted after 7 days. Downloading needs the dashboard or the API.",
+        "description": "Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Runs as a job; the file is ready for 24 hours and deleted after 7 days. The person downloads it in the Airstock dashboard: Products, then Import, under Recent exports (or through the API).",
         "x-permission": "exports.run",
         "x-connection-scope": "catalog:read",
         "x-audit-action": "catalog.export.created",
@@ -8548,7 +8548,7 @@
                           ]
                         },
                         "downloadPath": {
-                          "description": "For the dashboard: the file downloads there while signed in.",
+                          "description": "An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.",
                           "type": [
                             "string",
                             "null"
@@ -8646,7 +8646,7 @@
                             ]
                           },
                           "downloadPath": {
-                            "description": "For the dashboard: the file downloads there while signed in.",
+                            "description": "An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.",
                             "type": [
                               "string",
                               "null"
@@ -8754,7 +8754,7 @@
                           ]
                         },
                         "downloadPath": {
-                          "description": "For the dashboard: the file downloads there while signed in.",
+                          "description": "An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.",
                           "type": [
                             "string",
                             "null"

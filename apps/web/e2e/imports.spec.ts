@@ -41,4 +41,14 @@ test('imports a CSV with variants and exports it back', async ({ page }) => {
     .then((chunks) => Buffer.concat(chunks).toString('utf8'));
   expect(text).toContain('TEE-M');
   expect(text).toContain('option:Size');
+
+  // Exports started anywhere, such as by an AI assistant, download from the import page.
+  await page.getByRole('link', { name: 'Import' }).click();
+  const recent = page.locator('section', {
+    has: page.getByRole('heading', { name: 'Recent exports' }),
+  });
+  await expect(recent.getByText('3 rows')).toBeVisible();
+  const again = page.waitForEvent('download');
+  await recent.getByRole('button', { name: 'Download' }).click();
+  expect((await again).suggestedFilename()).toMatch(/\.csv$/);
 });

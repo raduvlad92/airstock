@@ -21,7 +21,7 @@ too. Airstock therefore:
 | Worker | `airstock-staging` | Custom domain `airstock.deletecookies.dev`; `workers.dev` and preview URLs are off; Smart Placement; bound to itself as `SELF` (jobs run in the fetch handler, next to the database); sweeps every 30 minutes and partitions daily at 03:00 UTC |
 | Hyperdrive | `airstock-staging` (`d4107a1ef7aa4b6ea8935a208edb0512`) | Query caching **off**: cached reads could cross tenants |
 | Queues | `airstock-staging-audit`, `airstock-staging-jobs`, each with a `-dlq` | |
-| R2 | `airstock-staging-files` | EU jurisdiction |
+| R2 | `airstock-staging-files` | EU jurisdiction. Media under `shops/{shopId}/media/{mediaId}/` (ADR 0015) |
 | Neon project | `airstock-staging` (`autumn-meadow-53762460`), branch `main`, database `airstock` | AWS `eu-central-1` (Frankfurt), PostgreSQL 17 |
 | Database roles | `airstock_owner` (migrations, owns tables), `airstock_app` (runtime, no `BYPASSRLS`) | Hyperdrive connects as `airstock_app` |
 | WorkOS | Staging environment `environment_01M7CV6V2AM1CB2KDKR36JWE56`, client `client_01M7CV6VA3GMRS5MYZ2GC1TJNS` | AuthKit domain `tranquil-mirror-83-staging.authkit.app` |
@@ -66,6 +66,7 @@ Values are never committed. Names only:
 | Worker secret | `SHOPIFY_TOKEN_KEY` | 32 random bytes (Base64) that encrypt stored Shopify tokens; key ID `k1` in `SHOPIFY_TOKEN_KEY_ID` |
 | Worker secret | `WORKOS_API_KEY` | WorkOS key `airstock-staging-worker` |
 | Worker secret | `SESSION_SECRET` | Seals the session cookie |
+| Worker secret | `MEDIA_SIGNING_KEY` | 32 random bytes (Base64) that sign short-lived media links (ADR 0015). Until it is set, media uploads answer 503 and media links are null |
 | Hyperdrive origin | `airstock_app` password | Set with `alter role` and stored only in the Hyperdrive config |
 
 To rotate a Worker secret: `pnpm --filter @airstock/worker exec wrangler secret put NAME`. To

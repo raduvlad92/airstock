@@ -27,6 +27,7 @@ describe('MCP tools', () => {
       'import_export',
       'manage_catalog_schema',
       'manage_media',
+      'manage_purchasing',
       'manage_reservations',
       'manage_storage',
       'manage_suppliers',

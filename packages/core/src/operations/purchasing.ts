@@ -308,15 +308,17 @@ async function resolveLines(
         ? `select i.id, i.supplier_id, i.variant_id, i.pack_id, i.supplier_sku, i.last_cost::text,
              k.base_quantity::text as item_factor, i.status
            from supplier_items i left join packs k on k.shop_id = i.shop_id and k.id = i.pack_id
-           where i.id = $3`
+           where i.id = $1`
         : `select i.id, i.supplier_id, i.variant_id, i.pack_id, i.supplier_sku, i.last_cost::text,
              k.base_quantity::text as item_factor, i.status
            from supplier_items i left join packs k on k.shop_id = i.shop_id and k.id = i.pack_id
            where i.supplier_id = $1 and i.variant_id = $2 and i.status = 'active'
-           order by ($4::uuid is not null and i.pack_id = $4) desc, ($4::uuid is null and i.pack_id is null) desc,
+           order by ($3::uuid is not null and i.pack_id = $3) desc, ($3::uuid is null and i.pack_id is null) desc,
              i.preferred desc, i.id
            limit 1`,
-      [supplierId, line.variantId, line.supplierItemId ?? null, line.packId ?? null],
+      line.supplierItemId
+        ? [line.supplierItemId]
+        : [supplierId, line.variantId, line.packId ?? null],
     );
     if (line.supplierItemId) {
       if (!item) throw at('the supplier item was not found.', 'not_found');

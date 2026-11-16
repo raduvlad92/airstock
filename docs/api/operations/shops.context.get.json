@@ -106,7 +106,9 @@
                         "integrations.sync",
                         "imports.run",
                         "exports.run",
-                        "webhooks.manage"
+                        "webhooks.manage",
+                        "purchasing.manage",
+                        "alerts.manage"
                       ]
                     }
                   },

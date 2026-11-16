@@ -1,0 +1,232 @@
+{
+  "/api/v1/shops/{shopId}/purchase-orders": {
+    "get": {
+      "operationId": "purchasing.orders.list",
+      "summary": "List purchase orders",
+      "description": "Use this to find purchase orders: by status (open means sent or partially received), supplier, variant, or overdue. Newest first, with what is still on order. Totals need costs.read. Not for stock levels (use get_stock).",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "purchasing.orders.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "A state, or \"open\" for sent and partially received orders.",
+            "type": "string",
+            "enum": [
+              "draft",
+              "sent",
+              "partially_received",
+              "received",
+              "closed",
+              "cancelled",
+              "open"
+            ]
+          }
+        },
+        {
+          "name": "supplierId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only orders with a line for this variant.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "overdue",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only open orders expected before today.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        {
+          "name": "after",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Cursor from the previous page.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "purchaseOrders": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "number": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "sent",
+                            "partially_received",
+                            "received",
+                            "closed",
+                            "cancelled"
+                          ]
+                        },
+                        "supplierId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "supplierName": {
+                          "type": "string"
+                        },
+                        "warehouseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "warehouseName": {
+                          "type": "string"
+                        },
+                        "expectedOn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "overdue": {
+                          "type": "boolean",
+                          "description": "Expected before today and still open."
+                        },
+                        "lineCount": {
+                          "type": "number"
+                        },
+                        "ordered": {
+                          "type": "string",
+                          "description": "Base units over all lines."
+                        },
+                        "received": {
+                          "type": "string"
+                        },
+                        "open": {
+                          "type": "string",
+                          "description": "Base units still on order."
+                        },
+                        "total": {
+                          "description": "Needs costs.read.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "number",
+                        "status",
+                        "supplierId",
+                        "supplierName",
+                        "warehouseId",
+                        "warehouseName",
+                        "expectedOn",
+                        "overdue",
+                        "lineCount",
+                        "ordered",
+                        "received",
+                        "open",
+                        "total",
+                        "createdAt",
+                        "sentAt",
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "nextCursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "purchaseOrders",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,508 @@
+{
+  "/api/v1/shops/{shopId}/purchase-orders/{purchaseOrderId}": {
+    "get": {
+      "operationId": "purchasing.orders.get",
+      "summary": "Get a purchase order",
+      "description": "Use this to see one purchase order: supplier, destination, state, and each line with ordered, received, cancelled, and still-open quantities in base units, the receipts against it, and the send log. Unit costs and totals need costs.read.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "purchasing.order.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "purchaseOrderId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "number": {
+                    "type": "string",
+                    "description": "Such as PO-0007."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "sent",
+                      "partially_received",
+                      "received",
+                      "closed",
+                      "cancelled"
+                    ]
+                  },
+                  "supplier": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "contactName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "email": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "phone": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "address": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "contactName",
+                      "email",
+                      "phone",
+                      "address"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "warehouse": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "address": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "address"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "location": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "expectedOn": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "supplierReference": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "notes": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "total": {
+                    "description": "Sum of line totals; needs costs.read.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lines": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "position": {
+                          "type": "number"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productName": {
+                          "type": "string"
+                        },
+                        "variantName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "packId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "packName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "packFactor": {
+                          "description": "Base units per pack when the line was written.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "supplierItemId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "supplierSku": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "quantity": {
+                          "type": "string",
+                          "description": "As ordered: packs when packId is set, else base units."
+                        },
+                        "ordered": {
+                          "type": "string",
+                          "description": "Base units."
+                        },
+                        "received": {
+                          "type": "string",
+                          "description": "Base units received against the line."
+                        },
+                        "cancelled": {
+                          "type": "string",
+                          "description": "Base units cancelled by closing or cancelling."
+                        },
+                        "open": {
+                          "type": "string",
+                          "description": "Base units still on order."
+                        },
+                        "overReceived": {
+                          "type": "string",
+                          "description": "Base units received beyond what was ordered."
+                        },
+                        "unitCost": {
+                          "description": "Per pack, or per base unit; needs costs.read.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lineTotal": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "position",
+                        "variantId",
+                        "productId",
+                        "productName",
+                        "variantName",
+                        "sku",
+                        "packId",
+                        "packName",
+                        "packFactor",
+                        "supplierItemId",
+                        "supplierSku",
+                        "quantity",
+                        "ordered",
+                        "received",
+                        "cancelled",
+                        "open",
+                        "overReceived",
+                        "unitCost",
+                        "lineTotal",
+                        "note"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "receipts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "lineId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        },
+                        "overReceived": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "lineId",
+                        "operationId",
+                        "quantity",
+                        "overReceived",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "sends": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "email",
+                            "manual"
+                          ]
+                        },
+                        "recipient": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "recorded",
+                            "queued",
+                            "sent",
+                            "failed",
+                            "suppressed"
+                          ]
+                        },
+                        "purchaseOrderVersion": {
+                          "type": "number"
+                        },
+                        "error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "channel",
+                        "recipient",
+                        "status",
+                        "purchaseOrderVersion",
+                        "error",
+                        "createdAt",
+                        "completedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "shop": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "sentAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "receivedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "closedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cancelledAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "number",
+                  "status",
+                  "supplier",
+                  "warehouse",
+                  "location",
+                  "currency",
+                  "expectedOn",
+                  "supplierReference",
+                  "notes",
+                  "costVisible",
+                  "total",
+                  "lines",
+                  "receipts",
+                  "sends",
+                  "shop",
+                  "createdAt",
+                  "sentAt",
+                  "receivedAt",
+                  "closedAt",
+                  "cancelledAt",
+                  "updatedAt",
+                  "version"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

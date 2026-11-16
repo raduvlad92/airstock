@@ -42,7 +42,7 @@ ADRs are numbered when they merge. This table links each decision as it lands.
 | D5 | One-of-a-kind items, both ways | [ADR 0024](adr/0024-one-of-a-kind-items.md) |
 | D6 | Shortages | [ADR 0021](adr/0021-shortages.md) |
 | D7 | Valuation | [ADR 0022](adr/0022-valuation.md) |
-| D11 | Purchase orders: per-line quantities, receipts at the line cost, PDF in the Worker, send log | [ADR 0026](adr/0026-purchase-orders.md) |
+| D11 | Purchase orders: per-line quantities, receipts at the line cost, PDF in the Worker, send log | [ADR 0027](adr/0027-purchase-orders.md) |
 | D14 | Webhooks: registry of event types, per-shop subscriptions, signed deliveries with retries | [ADR 0023](adr/0023-outgoing-webhooks.md), [docs/webhooks.md](webhooks.md) |
 | D16 | MCP tools: measured tool choice, not a count | [ADR 0005, update](adr/0005-operation-registry.md) and Section 5.1 |
 | D19 | Media originals shrink above 2,048 px | [ADR 0015, update](adr/0015-media.md) |

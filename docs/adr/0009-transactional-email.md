@@ -24,7 +24,7 @@
 
 ## Update, 16 November 2026 (Phase 2, milestone I3)
 
-- **What sends:** also purchase orders to suppliers, with the PDF attached and the sending member as reply-to ([ADR 0026](0026-purchase-orders.md)), and alert emails to subscribed members.
+- **What sends:** also purchase orders to suppliers, with the PDF attached and the sending member as reply-to ([ADR 0027](0027-purchase-orders.md)), and alert emails to subscribed members.
 - **Staging recipients.** `EMAIL_RECIPIENTS=members` (a Worker variable, set on staging) limits email to addresses of the shop's own members, so suppliers with made-up addresses in test shops never receive anything; such a send is logged as `suppressed`. Unset or `any` sends to any address, as production will.
 
 ## Revisit when

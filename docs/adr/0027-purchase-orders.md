@@ -1,4 +1,4 @@
-# 0026. Purchase orders
+# 0027. Purchase orders
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D11, Section 5.8, and PRD 6.8 (milestone I3).
 

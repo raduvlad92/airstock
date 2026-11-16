@@ -263,8 +263,10 @@ export async function previewRows(
       packs: [],
     };
     const packFor = (name: string) => {
-      let pack = data.packs!.find((p) => p.name.toLowerCase() === name.toLowerCase());
-      if (!pack) data.packs!.push((pack = { name }));
+      const found = data.packs!.find((p) => p.name.toLowerCase() === name.toLowerCase());
+      if (found) return found;
+      const pack: ImportPack = { name };
+      data.packs!.push(pack);
       return pack;
     };
     let supplierSku: string | null = null;

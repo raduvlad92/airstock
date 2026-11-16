@@ -1,0 +1,129 @@
+{
+  "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/conflicts/resolve": {
+    "post": {
+      "operationId": "shopify.conflicts.resolve",
+      "summary": "Resolve a Shopify quantity conflict",
+      "description": "Use this when Shopify and Airstock disagree on a quantity no order explains (a conflict in sync health) and the person has decided which is right. choice \"push_airstock\" sets Shopify to Airstock’s availability (compare-and-set against Shopify’s quantity as last read; if it moved again, a new conflict opens). choice \"take_shopify\" makes Airstock match Shopify with a stock adjustment (reason count_correction, needs inventory.adjust) at that Shopify location’s scope, then nothing is pushed; it works for items sold one unit at a time, not packs, bundles, lots, or serials. Ask the person which side is right before calling.",
+      "x-permission": "connections.manage",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "shopify.conflict.resolved",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "connectionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "inventoryItemId": {
+                  "type": "string",
+                  "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$",
+                  "description": "The Shopify inventory item, as sync health lists it."
+                },
+                "shopifyLocationId": {
+                  "type": "string",
+                  "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                },
+                "choice": {
+                  "type": "string",
+                  "enum": [
+                    "push_airstock",
+                    "take_shopify"
+                  ]
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "inventoryItemId",
+                "shopifyLocationId",
+                "choice"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "choice": {
+                    "type": "string",
+                    "enum": [
+                      "push_airstock",
+                      "take_shopify"
+                    ]
+                  },
+                  "airstock": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "What Shopify should show now."
+                  },
+                  "shopify": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "adjustmentOperationIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  }
+                },
+                "required": [
+                  "choice",
+                  "airstock",
+                  "shopify",
+                  "adjustmentOperationIds"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

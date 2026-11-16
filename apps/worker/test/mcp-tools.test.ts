@@ -60,6 +60,7 @@ describe('MCP tools', () => {
       'run_report',
       'search_activity',
       'search_catalog',
+      'shopify_sync',
       'stock_alerts',
       'transfer_stock',
       'warehouse_work',

@@ -1,0 +1,580 @@
+{
+  "/api/v1/shops/{shopId}/shopify/sync-health": {
+    "get": {
+      "operationId": "shopify.sync.health",
+      "summary": "Show whether Shopify is in step with Airstock",
+      "description": "Use this when someone asks whether Shopify is in sync, why a Shopify quantity looks wrong, or what the Shopify connection needs: per connected store, the last sync and push, pending pushes, quantity conflicts (with what Airstock and Shopify each show), Shopify order shortages, unmapped Shopify variants and locations, and the mappings. Read only. Not for stock levels themselves (use get_stock) or alerts in general (use stock_alerts).",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "shopify.sync.health_viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "connectionId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "One store; leave out for every connected store.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "description": "Most rows per list (conflicts, pending pushes, shortages, unmapped, maps).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connections": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "connectionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "shopDomain": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "uninstalled"
+                          ]
+                        },
+                        "lastSyncAt": {
+                          "description": "The last reconciler run that finished.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastPushedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastWebhookAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "ordersSyncedThrough": {
+                          "description": "Orders Shopify changed up to this time are applied here.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "levelsComparedAt": {
+                          "description": "The last full comparison of every level.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastError": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "message": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "message",
+                                "at"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pendingPushes": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "levels": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "inventoryItemId": {
+                                    "type": "string"
+                                  },
+                                  "shopifyLocationId": {
+                                    "type": "string"
+                                  },
+                                  "shopifyLocationName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "scopeName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "variantId": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "sku": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "sells": {
+                                    "type": "string",
+                                    "description": "What the Shopify variant sells: \"unit\", the pack name, or \"bundle\"."
+                                  },
+                                  "shopifyVariantId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "airstock": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "shopify": {
+                                    "anyOf": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": -9007199254740991,
+                                        "maximum": 9007199254740991
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "What Airstock last knew of Shopify."
+                                  }
+                                },
+                                "required": [
+                                  "inventoryItemId",
+                                  "shopifyLocationId",
+                                  "shopifyLocationName",
+                                  "scopeName",
+                                  "variantId",
+                                  "sku",
+                                  "sells",
+                                  "shopifyVariantId",
+                                  "airstock",
+                                  "shopify"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "levels"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "conflicts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "inventoryItemId": {
+                                "type": "string"
+                              },
+                              "shopifyLocationId": {
+                                "type": "string"
+                              },
+                              "shopifyLocationName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "scopeName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "variantId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "sku": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "sells": {
+                                "type": "string",
+                                "description": "What the Shopify variant sells: \"unit\", the pack name, or \"bundle\"."
+                              },
+                              "shopifyVariantId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "expected": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "What Airstock believed Shopify held."
+                              },
+                              "airstock": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "shopify": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "since": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "alertId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "inventoryItemId",
+                              "shopifyLocationId",
+                              "shopifyLocationName",
+                              "scopeName",
+                              "variantId",
+                              "sku",
+                              "sells",
+                              "shopifyVariantId",
+                              "expected",
+                              "airstock",
+                              "shopify",
+                              "since",
+                              "alertId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "shortages": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "reservationId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "variantId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "sku": {
+                                "type": "string"
+                              },
+                              "externalRef": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "quantity": {
+                                "type": "string"
+                              },
+                              "shortage": {
+                                "type": "string"
+                              },
+                              "since": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reservationId",
+                              "variantId",
+                              "sku",
+                              "externalRef",
+                              "quantity",
+                              "shortage",
+                              "since"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "unmappedVariants": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "sample": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "shopifyVariantId": {
+                                    "type": "string"
+                                  },
+                                  "sku": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "shopifyVariantId",
+                                  "sku",
+                                  "title"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "sample"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "unmappedLocations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "mappings": {
+                          "type": "object",
+                          "properties": {
+                            "locations": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "shopifyLocationId": {
+                                    "type": "string"
+                                  },
+                                  "shopifyLocationName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "scopeId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "scopeName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "shopifyLocationId",
+                                  "shopifyLocationName",
+                                  "scopeId",
+                                  "scopeName"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "variantCount": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "variants": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "shopifyVariantId": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "variantId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "sku": {
+                                    "type": "string"
+                                  },
+                                  "sells": {
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "shopifyVariantId",
+                                  "title",
+                                  "variantId",
+                                  "sku",
+                                  "sells",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "locations",
+                            "variantCount",
+                            "variants"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "connectionId",
+                        "shopDomain",
+                        "status",
+                        "lastSyncAt",
+                        "lastPushedAt",
+                        "lastWebhookAt",
+                        "ordersSyncedThrough",
+                        "levelsComparedAt",
+                        "lastError",
+                        "pendingPushes",
+                        "conflicts",
+                        "shortages",
+                        "unmappedVariants",
+                        "unmappedLocations",
+                        "mappings"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "connections"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

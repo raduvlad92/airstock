@@ -3,7 +3,7 @@
     "get": {
       "operationId": "shopify.connections.list",
       "summary": "List connected Shopify stores",
-      "description": "Shows each connected Shopify store with its location and variant mappings, the Shopify locations not mapped, webhook status, and unexplained quantity differences.",
+      "description": "Use this when someone asks which Shopify stores are connected or how one is set up: each store with its location maps, how many variants are mapped, the Shopify locations not mapped (never synced, never guessed), webhook status, and the number of open quantity conflicts. For what is out of step and why, use action \"health\".",
       "x-permission": "shop.read",
       "x-connection-scope": "shop:read",
       "x-audit-action": "shopify.connections.listed",

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { findBarcodeOwner, normalizeBarcode } from '../catalog/barcodes.ts';
 import { displayValue } from '../catalog/fields.ts';
 import {
+  type Condition,
   type Cursor,
   compileFilter,
   compileSearch,
@@ -53,7 +54,9 @@ const ConditionInput = z.object({
   value: z
     .unknown()
     .optional()
-    .describe('Option labels or IDs for selects; "2 kg" for measurements; [from, to] for between.'),
+    .describe(
+      'Option labels or IDs for selects, and family names or IDs for family; "2 kg" for measurements; [from, to] for between.',
+    ),
 });
 
 export const FilterInput = z
@@ -199,6 +202,58 @@ const FROM = {
   products: 'products p',
 } as const;
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `family` filters take family IDs or names, as select filters take option IDs or labels. In the
+ * Phase 1 ChatGPT run a family name matched nothing without an error. Names resolve
+ * case-insensitively; a value that names no family is refused with the shop's family names.
+ */
+async function resolveFamilyNames(
+  tx: Tx,
+  filter: FilterItem[] | undefined,
+): Promise<FilterItem[] | undefined> {
+  const targets = (filter ?? []).flatMap((item, i) =>
+    'any' in item
+      ? item.any.map((c, j) => ({ c, path: `filter.${i}.any.${j}.value` }))
+      : [{ c: item, path: `filter.${i}.value` }],
+  );
+  const family = targets.filter(
+    (t) => t.c.field === 'family' && (t.c.op === 'is_any_of' || t.c.op === 'is_none_of'),
+  );
+  const named = family.filter((t) =>
+    (Array.isArray(t.c.value) ? t.c.value : [t.c.value]).some(
+      (v) => typeof v !== 'string' || !UUID.test(v),
+    ),
+  );
+  if (named.length === 0) return filter;
+  const families = await tx.query<{ id: string; name: string }>(
+    'select id, name from product_families order by lower(name)',
+  );
+  const byName = new Map(families.map((f) => [f.name.toLowerCase(), f.id]));
+  const resolved = new Map<Condition, Condition>();
+  for (const { c, path } of named) {
+    const values = (Array.isArray(c.value) ? c.value : [c.value]).map((v) => {
+      if (typeof v === 'string' && UUID.test(v)) return v;
+      const id = typeof v === 'string' ? byName.get(v.trim().toLowerCase()) : undefined;
+      if (id) return id;
+      const known = families.map((f) => `"${f.name}"`).join(', ');
+      throw new QueryError(
+        path,
+        families.length > 0
+          ? `No family is called ${JSON.stringify(v)}. Use a family ID or one of: ${known}.`
+          : 'This shop has no families yet.',
+      );
+    });
+    resolved.set(c, { ...c, value: values });
+  }
+  return (filter ?? []).map((item) =>
+    'any' in item
+      ? { any: item.any.map((c) => resolved.get(c) ?? c) }
+      : (resolved.get(item) ?? item),
+  );
+}
+
 /** Runs a catalog query for the caller: filters, search, sort, keyset paging, and selected values. */
 export async function runQuery(
   ctx: HandlerContext,
@@ -210,6 +265,7 @@ export async function runQuery(
   const mode = input.mode;
   const rowId = mode === 'variants' ? 'v.id' : 'p.id';
   try {
+    input = { ...input, filter: await resolveFamilyNames(ctx.tx, input.filter as FilterItem[]) };
     const params = new Params();
     const { conditions, rank } = buildWhere(input, fields, params);
     const sort =

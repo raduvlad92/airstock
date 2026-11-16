@@ -31,6 +31,10 @@ export class FakeStore implements ShopifyAdmin {
   reads = 0;
   /** The next writes fail as throttled (Shopify's cost limit). */
   throttleNext = 0;
+  /** Inventory items whose product was deleted in Shopify. */
+  readonly deletedItems = new Set<string>();
+  /** Orders per page of the search by updated time (Shopify's is 25); one page by default. */
+  orderPageSize = Number.POSITIVE_INFINITY;
   /** Orders Shopify's search by updated time does not list yet (its index trails). */
   readonly searchLag = new Set<string>();
   /** Pictures uploaded to staged storage, by resource URL. */
@@ -461,6 +465,17 @@ export class FakeStore implements ShopifyAdmin {
       throw new ShopifyApiError('Throttled', 200, true, 'THROTTLED');
     }
     this.setCalls.push(input.quantities.length);
+    // An item deleted in Shopify: the whole call is refused with a user error (nothing applied),
+    // which the HTTP client raises as a non-retryable ShopifyApiError.
+    const gone = input.quantities.find((q) => this.deletedItems.has(q.inventoryItemId));
+    if (gone) {
+      throw new ShopifyApiError(
+        'The specified inventory item could not be found.',
+        200,
+        false,
+        'INVALID_INVENTORY_ITEM',
+      );
+    }
     const stale: number[] = [];
     input.quantities.forEach((q, i) => {
       const actual = this.levels.get(this.key(q.inventoryItemId, q.locationId)) ?? 0;
@@ -493,11 +508,16 @@ export class FakeStore implements ShopifyAdmin {
     const order = this.orders.find((o) => o.orderId === orderId);
     return order ? structuredClone(order) : null;
   }
-  async ordersUpdatedSince(since: string) {
+  async ordersUpdatedSince(since: string, after: string | null = null) {
     const orders = this.orders
       .filter((o) => (o.updatedAt ?? o.createdAt) >= since && !this.searchLag.has(o.orderId))
       .sort((a, b) => ((a.updatedAt ?? '') < (b.updatedAt ?? '') ? -1 : 1));
-    return { orders: structuredClone(orders), next: null };
+    const start = after ? Number(after) : 0;
+    const end = start + this.orderPageSize;
+    return {
+      orders: structuredClone(orders.slice(start, end)),
+      next: end < orders.length ? String(end) : null,
+    };
   }
   async lineLocations(orderId: string) {
     const order = this.orders.find((o) => o.orderId === orderId);

@@ -22,6 +22,7 @@ import {
 import {
   type AppliedMove,
   applyMoves,
+  assertReturnUnitsKept,
   type EnteredPack,
   findPositions,
   lockStock,
@@ -519,6 +520,10 @@ export const changeCondition = defineOperation({
     }
     const applied = await applyMoves(ctx, operationId, moves);
     await syncSerials(ctx, operationId, applied);
+    await assertReturnUnitsKept(
+      ctx.tx,
+      applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+    );
     const events = [...lock.events];
     const shortagesFilled: Array<{ reservationId: string; quantity: string }> = [];
     for (const variantId of sellable) {
@@ -781,6 +786,10 @@ async function reverseConditionChange(
   }
   const applied = await applyMoves(ctx, operationId, moves);
   await syncSerials(ctx, operationId, applied);
+  await assertReturnUnitsKept(
+    ctx.tx,
+    applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+  );
   return {
     changes: applied.flatMap((m) => [
       {

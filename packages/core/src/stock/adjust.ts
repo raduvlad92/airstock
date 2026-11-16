@@ -15,6 +15,7 @@ import {
 import {
   type AppliedMove,
   applyMoves,
+  assertReturnUnitsKept,
   type EnteredPack,
   findPositions,
   keyOf,
@@ -483,6 +484,10 @@ export async function applyChanges(
   });
   const applied = await applyMoves(ctx, operationId, moves);
   await syncSerials(ctx, operationId, applied, 'written_off');
+  await assertReturnUnitsKept(
+    ctx.tx,
+    applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+  );
 
   const shortagesFilled: AppliedChanges['shortagesFilled'] = [];
   for (const variantId of raisedSellable) {

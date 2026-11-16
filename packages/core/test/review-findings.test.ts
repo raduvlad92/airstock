@@ -781,7 +781,7 @@ describe('F-PICK-COMPLETE-EXPIRED: one expired reservation blocks completing the
 // or completed (inspection_pending).
 // ---------------------------------------------------------------------------------------------
 describe('F-RETURN-SKIPS-INSPECTION: a return’s quarantined units can be made sellable uninspected', () => {
-  it.fails('refuses to move a return’s uninspected units out of quarantine', async () => {
+  it('refuses to move a return’s uninspected units out of quarantine', async () => {
     const orderRef = `ORD-${uuidv7().slice(-6)}`;
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '5' });

@@ -18,6 +18,7 @@ import {
 import {
   type AppliedMove,
   applyMoves,
+  assertReturnUnitsKept,
   type EnteredPack,
   findPositions,
   findSerials,
@@ -801,6 +802,10 @@ export async function dispatchItems(
   }
   const applied = await applyMoves(ctx, operationId, moves);
   await syncSerials(ctx, operationId, applied);
+  await assertReturnUnitsKept(
+    ctx.tx,
+    applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+  );
   await bumpLines(ctx, items, 'dispatched');
   await refreshStatuses(ctx.tx, reservationIds);
   return { moves: applied, events };

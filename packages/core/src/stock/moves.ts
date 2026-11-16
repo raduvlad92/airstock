@@ -415,6 +415,49 @@ export async function syncSerials(
   );
 }
 
+/**
+ * Refuses a change that leaves a quarantine position with fewer units than open returns are
+ * still to inspect there (ADR 0029): inspection is the only way a return's units leave
+ * quarantine. Runs after the moves, with the positions locked; an inspection of the same units
+ * waits for those locks, so the figures it reads are settled.
+ */
+export async function assertReturnUnitsKept(tx: Tx, positionIds: string[]): Promise<void> {
+  if (positionIds.length === 0) return;
+  const short = await tx.query<{
+    position_id: string;
+    variant_id: string;
+    on_hand: string;
+    uninspected: string;
+  }>(
+    `select p.id as position_id, p.variant_id, p.on_hand::text, h.uninspected::text
+     from inventory_positions p
+     cross join lateral (
+       select coalesce(sum(u.received - u.inspected), 0) as uninspected
+       from return_units u join returns r on r.shop_id = u.shop_id and r.id = u.return_id
+       where u.shop_id = p.shop_id and r.location_id = p.location_id
+         and r.status not in ('completed', 'cancelled')
+         and u.variant_id = p.variant_id and u.lot_id is not distinct from p.lot_id
+         and u.serial_id is not distinct from p.serial_id and u.received > u.inspected) h
+     where p.id = any($1::uuid[]) and p.condition = 'quarantine' and p.transfer_id is null
+       and p.on_hand < h.uninspected`,
+    [[...new Set(positionIds)]],
+  );
+  if (short.length > 0) {
+    throw errors.conflict(
+      'return_units_uninspected',
+      'These quarantined units came back on an open return and wait for inspection; inspect them on the return instead.',
+      {
+        positions: short.map((r) => ({
+          positionId: r.position_id,
+          variantId: r.variant_id,
+          onHandAfter: normalize(r.on_hand),
+          uninspected: normalize(r.uninspected),
+        })),
+      },
+    );
+  }
+}
+
 /** The shop's in-transit system location (migration 0017). */
 export async function inTransitLocation(tx: Tx): Promise<string> {
   const [row] = await tx.query<{ id: string }>(

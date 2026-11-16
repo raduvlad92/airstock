@@ -361,6 +361,83 @@ export function catalogChangeEmit(operationId: string, events: AuditEvent[]): We
   });
 }
 
+// transfer.status_changed ----------------------------------------------------------------------
+
+const TransferQuantities = z.object({
+  planned: z.string(),
+  cancelled: z.string(),
+  dispatched: z.string(),
+  received: z.string(),
+  resolved: z.string(),
+  inTransit: z.string(),
+});
+
+const TransferLocation = z.object({
+  locationId: z.string(),
+  path: z.string(),
+  warehouseId: z.string().nullable(),
+});
+
+const TransferStatusChanged = z.object({
+  transfer: z.object({
+    id: z.string(),
+    kind: z.enum(['transfer', 'move']),
+    reference: z.string().nullable(),
+    status: z.string(),
+    from: TransferLocation,
+    to: TransferLocation,
+    totals: TransferQuantities,
+    lines: z.array(TransferQuantities.extend({ variantId: z.string(), sku: z.string() })),
+    version: z.number().int(),
+  }),
+  status: z.object({ from: z.string().nullable(), to: z.string() }),
+});
+
+const TransferStatusInput = z.object({
+  transferId: z.string(),
+  from: z.string().nullable(),
+  to: z.string(),
+});
+
+/** The transfer as it is when the event is sent, with the change the command made. */
+async function buildTransferStatusChanged(
+  tx: Tx,
+  input: unknown,
+): Promise<BuiltWebhookEvent | null> {
+  const parsed = TransferStatusInput.safeParse(input);
+  if (!parsed.success || !UUID_PATTERN.test(parsed.data.transferId)) return null;
+  const [row] = await tx.query<{ transfer: z.infer<typeof TransferStatusChanged>['transfer'] }>(
+    `select json_build_object('id', t.id, 'kind', t.kind, 'reference', t.reference,
+       'status', t.status, 'version', t.version,
+       'from', json_build_object('locationId', fl.id, 'path', fl.path, 'warehouseId', fl.warehouse_id),
+       'to', json_build_object('locationId', tl.id, 'path', tl.path, 'warehouseId', tl.warehouse_id),
+       'totals', (select json_build_object('planned', coalesce(sum(l.planned), 0)::text,
+           'cancelled', coalesce(sum(l.cancelled), 0)::text,
+           'dispatched', coalesce(sum(l.dispatched), 0)::text,
+           'received', coalesce(sum(l.received), 0)::text,
+           'resolved', coalesce(sum(l.resolved), 0)::text,
+           'inTransit', coalesce(sum(l.dispatched - l.received - l.resolved), 0)::text)
+         from transfer_lines l where l.shop_id = t.shop_id and l.transfer_id = t.id),
+       'lines', coalesce((select json_agg(json_build_object('variantId', l.variant_id, 'sku', v.sku,
+           'planned', l.planned::text, 'cancelled', l.cancelled::text,
+           'dispatched', l.dispatched::text, 'received', l.received::text,
+           'resolved', l.resolved::text,
+           'inTransit', (l.dispatched - l.received - l.resolved)::text) order by l.position)
+         from transfer_lines l join variants v on v.shop_id = l.shop_id and v.id = l.variant_id
+         where l.shop_id = t.shop_id and l.transfer_id = t.id), '[]'::json)) as transfer
+     from transfers t
+     join locations fl on fl.shop_id = t.shop_id and fl.id = t.from_location_id
+     join locations tl on tl.shop_id = t.shop_id and tl.id = t.to_location_id
+     where t.id = $1`,
+    [parsed.data.transferId],
+  );
+  if (!row) return null;
+  return {
+    data: { transfer: row.transfer, status: { from: parsed.data.from, to: parsed.data.to } },
+    locationIds: [row.transfer.from.locationId, row.transfer.to.locationId],
+  };
+}
+
 // job.completed ---------------------------------------------------------------------------------
 
 const JobCompleted = z.object({
@@ -467,6 +544,8 @@ const SAMPLE_IDS = {
   transfer: '0193a1b2-0000-7000-8000-000000000080',
   purchaseOrder: '0193a1b2-0000-7000-8000-000000000090',
   return: '0193a1b2-0000-7000-8000-0000000000a0',
+  toWarehouse: '0193a1b2-0000-7000-8000-0000000000b0',
+  toLocation: '0193a1b2-0000-7000-8000-0000000000b1',
 } as const;
 
 const sampleLocation = {
@@ -643,16 +722,53 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   },
   {
     id: 'transfer.status_changed',
-    description: 'A transfer moved to another state, such as dispatched or received (I2).',
-    status: 'coming',
+    description:
+      'A transfer or a move changed state, such as ready, dispatched, partially received, received, cancelled, or exception: the transfer with its per-line quantities and the change.',
+    status: 'available',
     permission: 'inventory.read',
     filters: ['locations'],
-    data: z.object({ transfer: z.record(z.string(), z.unknown()), status: ComingStatus }),
+    data: TransferStatusChanged,
     sample: {
-      transfer: { id: SAMPLE_IDS.transfer, reference: 'TR-0001' },
+      transfer: {
+        id: SAMPLE_IDS.transfer,
+        kind: 'transfer',
+        reference: 'TR-0001',
+        status: 'dispatched',
+        from: {
+          locationId: SAMPLE_IDS.location,
+          path: 'Main warehouse/A1',
+          warehouseId: SAMPLE_IDS.warehouse,
+        },
+        to: {
+          locationId: SAMPLE_IDS.toLocation,
+          path: 'Store/Front',
+          warehouseId: SAMPLE_IDS.toWarehouse,
+        },
+        totals: {
+          planned: '10.000000',
+          cancelled: '0.000000',
+          dispatched: '10.000000',
+          received: '0.000000',
+          resolved: '0.000000',
+          inTransit: '10.000000',
+        },
+        lines: [
+          {
+            variantId: SAMPLE_IDS.variant,
+            sku: 'ETB-PRE-01',
+            planned: '10.000000',
+            cancelled: '0.000000',
+            dispatched: '10.000000',
+            received: '0.000000',
+            resolved: '0.000000',
+            inTransit: '10.000000',
+          },
+        ],
+        version: 3,
+      },
       status: { from: 'ready', to: 'dispatched' },
     },
-    build: passthrough,
+    build: buildTransferStatusChanged,
   },
   {
     id: 'purchase_order.status_changed',

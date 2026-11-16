@@ -1,0 +1,410 @@
+{
+  "/api/v1/shops/{shopId}/transfers/{transferId}": {
+    "get": {
+      "operationId": "inventory.transfers.get",
+      "summary": "Show one transfer with its lines",
+      "description": "Use this to see a transfer’s state: per line the planned, cancelled, dispatched, received, and resolved quantities, what is still held or in transit (with lots and serials), and the summary status.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.transfer.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "transferId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "transferId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "transfer",
+                      "move"
+                    ]
+                  },
+                  "reference": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "trackingReference": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "ready",
+                      "partially_dispatched",
+                      "dispatched",
+                      "partially_received",
+                      "received",
+                      "cancelled",
+                      "exception"
+                    ]
+                  },
+                  "from": {
+                    "type": "object",
+                    "properties": {
+                      "locationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "warehouseId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "locationId",
+                      "path",
+                      "warehouseId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "to": {
+                    "type": "object",
+                    "properties": {
+                      "locationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "warehouseId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "locationId",
+                      "path",
+                      "warehouseId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "exception": {
+                    "type": "object",
+                    "properties": {
+                      "open": {
+                        "type": "boolean"
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "open",
+                      "note"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "readyAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "closedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "type": "number"
+                  },
+                  "totals": {
+                    "type": "object",
+                    "properties": {
+                      "planned": {
+                        "type": "string"
+                      },
+                      "cancelled": {
+                        "type": "string"
+                      },
+                      "dispatched": {
+                        "type": "string"
+                      },
+                      "received": {
+                        "type": "string"
+                      },
+                      "resolved": {
+                        "type": "string",
+                        "description": "Settled by an exception resolution (lost, damaged, short)."
+                      },
+                      "held": {
+                        "type": "string",
+                        "description": "Still held at the source, waiting for dispatch."
+                      },
+                      "inTransit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "planned",
+                      "cancelled",
+                      "dispatched",
+                      "received",
+                      "resolved",
+                      "held",
+                      "inTransit"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "lines": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "planned": {
+                          "type": "string"
+                        },
+                        "cancelled": {
+                          "type": "string"
+                        },
+                        "dispatched": {
+                          "type": "string"
+                        },
+                        "received": {
+                          "type": "string"
+                        },
+                        "resolved": {
+                          "type": "string",
+                          "description": "Settled by an exception resolution (lost, damaged, short)."
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "Still held at the source, waiting for dispatch."
+                        },
+                        "inTransit": {
+                          "type": "string"
+                        },
+                        "lineId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "condition": {
+                          "type": "string",
+                          "enum": [
+                            "sellable",
+                            "quarantine",
+                            "damaged",
+                            "repair",
+                            "supplier_return"
+                          ]
+                        },
+                        "lotCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "serials": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Serials named when the line was made."
+                        },
+                        "entered": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "packId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "packName": {
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "string"
+                                },
+                                "factor": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "packId",
+                                "packName",
+                                "quantity",
+                                "factor"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "reservationId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The transfer hold at the source."
+                        },
+                        "inTransitUnits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "lotCode": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "serial": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "quantity": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "lotCode",
+                              "serial",
+                              "quantity"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "planned",
+                        "cancelled",
+                        "dispatched",
+                        "received",
+                        "resolved",
+                        "held",
+                        "inTransit",
+                        "lineId",
+                        "variantId",
+                        "sku",
+                        "name",
+                        "condition",
+                        "lotCode",
+                        "serials",
+                        "entered",
+                        "reservationId",
+                        "inTransitUnits"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "transferId",
+                  "kind",
+                  "reference",
+                  "trackingReference",
+                  "note",
+                  "status",
+                  "from",
+                  "to",
+                  "exception",
+                  "createdAt",
+                  "readyAt",
+                  "closedAt",
+                  "version",
+                  "totals",
+                  "lines"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

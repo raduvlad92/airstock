@@ -1,0 +1,538 @@
+{
+  "/api/v1/shops/{shopId}/transfers": {
+    "post": {
+      "operationId": "inventory.transfers.create",
+      "summary": "Create a transfer between locations",
+      "description": "Use this to plan sending stock from one location or warehouse to another, such as restocking a store from the warehouse. Creates a draft with one line per variant (quantities in base units or packs, optionally a lot or exact serials); a draft holds no stock. Set ready: true to hold the stock at the source at once. Not for a shelf-to-shelf move inside one warehouse that happens right now (use action \"move\"), and not for orders (use manage_reservations).",
+      "x-permission": "inventory.transfer",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.transfer.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "fromLocationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "description": "Stock is taken from this location and its sub-locations."
+                },
+                "toLocationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "description": "Units arrive here, or at a shelf inside it."
+                },
+                "lines": {
+                  "minItems": 1,
+                  "maxItems": 200,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "quantity": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                        "description": "Base units, or packs when packId is set."
+                      },
+                      "packId": {
+                        "description": "Enter the quantity in one of the variant’s packs.",
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "lotCode": {
+                        "description": "Move only this lot.",
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "serials": {
+                        "description": "Serial-tracked variants: exactly these serials.",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        }
+                      },
+                      "condition": {
+                        "default": "sellable",
+                        "description": "Which stock to move; transfers keep the condition.",
+                        "type": "string",
+                        "enum": [
+                          "sellable",
+                          "quarantine",
+                          "damaged",
+                          "repair",
+                          "supplier_return"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "variantId",
+                      "quantity"
+                    ]
+                  }
+                },
+                "reference": {
+                  "description": "Your transfer number or another reference.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "trackingReference": {
+                  "description": "A carrier tracking number.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "ready": {
+                  "description": "Also hold the stock at the source now.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "fromLocationId",
+                "toLocationId",
+                "lines"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operationId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The stock operation this step recorded, if it moved stock."
+                  },
+                  "transfer": {
+                    "type": "object",
+                    "properties": {
+                      "transferId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "transfer",
+                          "move"
+                        ]
+                      },
+                      "reference": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "trackingReference": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "draft",
+                          "ready",
+                          "partially_dispatched",
+                          "dispatched",
+                          "partially_received",
+                          "received",
+                          "cancelled",
+                          "exception"
+                        ]
+                      },
+                      "from": {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "warehouseId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "path",
+                          "warehouseId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "to": {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "warehouseId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "path",
+                          "warehouseId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "exception": {
+                        "type": "object",
+                        "properties": {
+                          "open": {
+                            "type": "boolean"
+                          },
+                          "note": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "open",
+                          "note"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "readyAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "closedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "version": {
+                        "type": "number"
+                      },
+                      "totals": {
+                        "type": "object",
+                        "properties": {
+                          "planned": {
+                            "type": "string"
+                          },
+                          "cancelled": {
+                            "type": "string"
+                          },
+                          "dispatched": {
+                            "type": "string"
+                          },
+                          "received": {
+                            "type": "string"
+                          },
+                          "resolved": {
+                            "type": "string",
+                            "description": "Settled by an exception resolution (lost, damaged, short)."
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "Still held at the source, waiting for dispatch."
+                          },
+                          "inTransit": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "planned",
+                          "cancelled",
+                          "dispatched",
+                          "received",
+                          "resolved",
+                          "held",
+                          "inTransit"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "lines": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "planned": {
+                              "type": "string"
+                            },
+                            "cancelled": {
+                              "type": "string"
+                            },
+                            "dispatched": {
+                              "type": "string"
+                            },
+                            "received": {
+                              "type": "string"
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "description": "Settled by an exception resolution (lost, damaged, short)."
+                            },
+                            "held": {
+                              "type": "string",
+                              "description": "Still held at the source, waiting for dispatch."
+                            },
+                            "inTransit": {
+                              "type": "string"
+                            },
+                            "lineId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "variantId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sku": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "condition": {
+                              "type": "string",
+                              "enum": [
+                                "sellable",
+                                "quarantine",
+                                "damaged",
+                                "repair",
+                                "supplier_return"
+                              ]
+                            },
+                            "lotCode": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "serials": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Serials named when the line was made."
+                            },
+                            "entered": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "packId": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    "packName": {
+                                      "type": "string"
+                                    },
+                                    "quantity": {
+                                      "type": "string"
+                                    },
+                                    "factor": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "packId",
+                                    "packName",
+                                    "quantity",
+                                    "factor"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "reservationId": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The transfer hold at the source."
+                            },
+                            "inTransitUnits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "lotCode": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "serial": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "quantity": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "lotCode",
+                                  "serial",
+                                  "quantity"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "planned",
+                            "cancelled",
+                            "dispatched",
+                            "received",
+                            "resolved",
+                            "held",
+                            "inTransit",
+                            "lineId",
+                            "variantId",
+                            "sku",
+                            "name",
+                            "condition",
+                            "lotCode",
+                            "serials",
+                            "entered",
+                            "reservationId",
+                            "inTransitUnits"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "transferId",
+                      "kind",
+                      "reference",
+                      "trackingReference",
+                      "note",
+                      "status",
+                      "from",
+                      "to",
+                      "exception",
+                      "createdAt",
+                      "readyAt",
+                      "closedAt",
+                      "version",
+                      "totals",
+                      "lines"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "operationId",
+                  "transfer"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -54,6 +54,10 @@ const DETAILS: Array<[string, string]> = [
     'What the stock is worth, now or on a past date (inventory_value with at), and cost of goods come from run_report; a date means the end of that day. Totals marked partial cover only the locations this connection may see.',
   ],
   [
+    'shopify_sync',
+    'For a Shopify quantity that looks wrong, read shopify_sync health first. Resolve a conflict only after the person says which side is right: Airstock never overwrites a quantity someone set in Shopify on its own.',
+  ],
+  [
     'import_export',
     'Exports start with import_export; the file is downloaded from the dashboard, never returned in chat.',
   ],

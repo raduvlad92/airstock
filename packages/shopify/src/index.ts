@@ -54,6 +54,7 @@ export {
   pushLevels,
   readShopify,
   recordConflict,
+  resolveConflictAlert,
 } from './push.ts';
 export {
   reconcileConnection,

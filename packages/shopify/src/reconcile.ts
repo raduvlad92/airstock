@@ -1,5 +1,12 @@
 import { levelTargets } from '@airstock/core';
-import { clearConflict, type PushLevel, pushLevels, readShopify, recordConflict } from './push.ts';
+import {
+  clearConflict,
+  type PushLevel,
+  pushLevels,
+  readShopify,
+  recordConflict,
+  resolveConflictAlert,
+} from './push.ts';
 import {
   type ConnectedStore,
   catchUpOrders,
@@ -242,6 +249,26 @@ export async function reconcileConnection(
     ).length;
   }
 
+  // Conflict alerts whose level no longer has a conflict (a remap cleared it): resolved.
+  await deps.db.transaction({ shopId, userId: null }, async (tx) => {
+    const orphans = await tx.query<{ item: string; location: string }>(
+      `select split_part(split_part(a.dedupe_key, ':', 3), '@', 1) as item,
+         split_part(split_part(a.dedupe_key, ':', 3), '@', 2) as location
+       from alerts a
+       where a.kind = 'shopify_sync' and a.status <> 'resolved' and a.dedupe_key like $1
+         and not exists (select 1 from shopify_inventory_levels l where l.connection_id = $2
+           and l.conflict_at is not null and l.conflict_alert_id = a.id)`,
+      [`shopify_conflict:${connectionId}:%`, connectionId],
+    );
+    for (const o of orphans) {
+      await resolveConflictAlert(
+        tx,
+        store,
+        { connectionId, inventoryItemId: o.item, shopifyLocationId: o.location },
+        'cleared',
+      );
+    }
+  });
   await deps.db.transaction({ shopId, userId: null }, (tx) =>
     tx.query(
       `update shopify_connections set reconciled_at = now(),

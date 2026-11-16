@@ -11,9 +11,6 @@ export { shopifyNumericId };
 // Shopify slice (plan Section 8). These operations only touch PostgreSQL; calls to Shopify
 // live in packages/shopify, which runs them through the same pipeline.
 
-const SYNC_TOOL_LATER =
-  'Temporary: Shopify sync is managed from the dashboard until the sync tool arrives in Phase 3.';
-
 const ShopDomain = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/, 'A myshopify.com domain.');
@@ -55,7 +52,7 @@ export const listShopifyConnections = defineOperation({
   id: 'shopify.connections.list',
   summary: 'List connected Shopify stores',
   description:
-    'Shows each connected Shopify store with its location and variant mappings, the Shopify locations not mapped, webhook status, and unexplained quantity differences.',
+    'Use this when someone asks which Shopify stores are connected or how one is set up: each store with its location maps, how many variants are mapped, the Shopify locations not mapped (never synced, never guessed), webhook status, and the number of open quantity conflicts. For what is out of step and why, use action "health".',
   kind: 'read',
   scope: 'shop',
   input: z.object({}),
@@ -65,7 +62,7 @@ export const listShopifyConnections = defineOperation({
   audit: { action: 'shopify.connections.listed' },
   idempotency: 'none',
   http: { method: 'GET', path: '/shops/{shopId}/shopify/connections' },
-  mcp: { exception: SYNC_TOOL_LATER },
+  mcp: { tool: 'shopify_sync', action: 'connections', readOnly: true, destructive: false },
   async handler(ctx) {
     const rows = await ctx.tx.query<{
       id: string;

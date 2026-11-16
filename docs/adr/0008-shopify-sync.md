@@ -39,3 +39,5 @@ transaction ([ADR 0035](0035-shopify-order-lifecycle.md)). Shortage reservations
 `insufficient_stock` outcome (ADR 0021), and the line's record of Shopify's quantity follows every
 change Shopify makes itself, so the compare-and-set push stays quiet for those.
 
+Also on 16 November 2026: the temporary MCP exception for `shopify.connections.list` ends. It is the `connections` action of the `shopify_sync` tool, with sync health and conflict resolution ([ADR 0037](0037-shopify-sync-health.md)); `shopify.mappings.set` keeps an exception because mapping happens in the dashboard (ADR 0033).
+

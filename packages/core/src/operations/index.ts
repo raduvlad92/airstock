@@ -41,6 +41,7 @@ import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopifyMappingOperations } from './shopify-mapping.ts';
 import { shopifyOnboardingCallbacks, shopifyOnboardingOperations } from './shopify-onboarding.ts';
 import { shopifyOrderCallbacks } from './shopify-orders.ts';
+import { shopifySyncOperations } from './shopify-sync.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
 import { suppliersOperations } from './suppliers.ts';
@@ -82,6 +83,7 @@ export const operations: readonly AnyOperation[] = [
   ...shopifyOperations,
   ...shopifyMappingOperations,
   ...shopifyOnboardingOperations,
+  ...shopifySyncOperations,
   ...shopsOperations,
   ...storageOperations,
   ...suppliersOperations,
@@ -137,6 +139,7 @@ export * from './shopify.ts';
 export * from './shopify-mapping.ts';
 export * from './shopify-onboarding.ts';
 export * from './shopify-orders.ts';
+export * from './shopify-sync.ts';
 export * from './shops.ts';
 export * from './storage.ts';
 export * from './suppliers.ts';

@@ -539,6 +539,18 @@ export async function clearConflict(
     );
   }
   if (!row) return false;
+  await resolveConflictAlert(tx, store, level, resolution, details);
+  return true;
+}
+
+/** Resolves the open conflict alert of a level, if there is one. */
+export async function resolveConflictAlert(
+  tx: Tx,
+  store: Pick<ConnectedStore, 'shopId' | 'caller'>,
+  level: PushLevel,
+  resolution: string,
+  details: Record<string, unknown> = {},
+): Promise<void> {
   const [alert] = await tx.query<{ id: string }>(
     `select id from alerts where dedupe_key = $1 and status <> 'resolved' for update`,
     [conflictKey(level)],
@@ -571,5 +583,4 @@ export async function clearConflict(
     }
     await insertWebhookEvents(tx, effects.webhooks, uuidv7);
   }
-  return true;
 }

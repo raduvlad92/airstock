@@ -129,7 +129,7 @@ const SyncResult = z.object({
   skipped: z.enum(['before_connection']).nullable(),
 });
 
-interface Acc {
+export interface Acc {
   /** Levels whose record of Shopify's quantity changed: pushed after commit. */
   levels: Set<string>;
   /**
@@ -147,7 +147,7 @@ interface Acc {
  * Runs another command's handler inside this transaction, so the order's state and every stock
  * effect commit together. Its audit event is written with this command's, under the connector.
  */
-async function inner<O extends AnyOperation>(
+export async function inner<O extends AnyOperation>(
   ctx: HandlerContext,
   acc: Acc,
   op: O,

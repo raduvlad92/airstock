@@ -1,0 +1,265 @@
+{
+  "/api/v1/shops/{shopId}/stock-check": {
+    "get": {
+      "operationId": "inventory.reconciliation.get",
+      "summary": "Get the stock check result",
+      "description": "Use this for \"does my stock add up\" questions. Airstock checks every 30 minutes after stock changes, and daily, that history, balances, reservations, serials, and the quantity behind the average cost agree. Returns the latest scheduled checks, the reconciliation alert, and the problems found right now. Repairs are made by a person in the dashboard or over REST.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.reconciliation.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lastCheck": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "trigger": {
+                            "type": "string",
+                            "enum": [
+                              "scheduled",
+                              "daily"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": "string"
+                          },
+                          "problemCount": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "trigger",
+                          "checkedAt",
+                          "problemCount"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recent": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "trigger": {
+                          "type": "string",
+                          "enum": [
+                            "scheduled",
+                            "daily"
+                          ]
+                        },
+                        "checkedAt": {
+                          "type": "string"
+                        },
+                        "problemCount": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "trigger",
+                        "checkedAt",
+                        "problemCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The last 10 scheduled checks, newest first."
+                  },
+                  "alert": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "open",
+                              "acknowledged",
+                              "resolved"
+                            ]
+                          },
+                          "openedAt": {
+                            "type": "string"
+                          },
+                          "lastSeenAt": {
+                            "type": "string"
+                          },
+                          "occurrences": {
+                            "type": "number",
+                            "description": "Checks that found problems while the alert was open."
+                          },
+                          "resolvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "status",
+                          "openedAt",
+                          "lastSeenAt",
+                          "occurrences",
+                          "resolvedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The open reconciliation alert, else the last resolved one."
+                  },
+                  "current": {
+                    "type": "object",
+                    "properties": {
+                      "problemCount": {
+                        "type": "number"
+                      },
+                      "problems": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "problem": {
+                              "type": "string",
+                              "enum": [
+                                "on_hand_mismatch",
+                                "allocated_mismatch",
+                                "over_allocated",
+                                "reservation_total_mismatch",
+                                "reservation_status_mismatch",
+                                "bundle_component_mismatch",
+                                "serial_mismatch",
+                                "cost_quantity_mismatch"
+                              ]
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "targetType": {
+                              "type": "string",
+                              "enum": [
+                                "position",
+                                "reservation",
+                                "serial_unit",
+                                "variant"
+                              ]
+                            },
+                            "targetId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "expected": {
+                              "type": "string",
+                              "description": "What the history (or the source records) says."
+                            },
+                            "actual": {
+                              "type": "string",
+                              "description": "What the stored figure says."
+                            },
+                            "variantId": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "sku": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "locationPath": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "repairable": {
+                              "type": "boolean",
+                              "description": "Whether a reviewed repair is offered for this problem."
+                            }
+                          },
+                          "required": [
+                            "problem",
+                            "title",
+                            "targetType",
+                            "targetId",
+                            "expected",
+                            "actual",
+                            "variantId",
+                            "sku",
+                            "locationPath",
+                            "repairable"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "At most 100."
+                      }
+                    },
+                    "required": [
+                      "problemCount",
+                      "problems"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "lastCheck",
+                  "recent",
+                  "alert",
+                  "current"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

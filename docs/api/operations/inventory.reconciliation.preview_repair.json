@@ -1,0 +1,218 @@
+{
+  "/api/v1/shops/{shopId}/stock-check/repair-preview": {
+    "get": {
+      "operationId": "inventory.reconciliation.preview_repair",
+      "summary": "Preview the repair of a stock check problem",
+      "description": "Shows the compensating operation that would fix one problem the stock check reports, without changing anything. Commit it with the repair operation, a reason, and confirm: true.",
+      "x-permission": "inventory.adjust",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.reconciliation.repair_previewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "problem",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "on_hand_mismatch",
+              "allocated_mismatch",
+              "over_allocated",
+              "reservation_total_mismatch",
+              "reservation_status_mismatch",
+              "bundle_component_mismatch",
+              "serial_mismatch",
+              "cost_quantity_mismatch"
+            ]
+          }
+        },
+        {
+          "name": "targetId",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "The position or variant the problem names."
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reported": {
+                    "type": "boolean",
+                    "description": "False when the problem is no longer there."
+                  },
+                  "problem": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "problem": {
+                            "type": "string",
+                            "enum": [
+                              "on_hand_mismatch",
+                              "allocated_mismatch",
+                              "over_allocated",
+                              "reservation_total_mismatch",
+                              "reservation_status_mismatch",
+                              "bundle_component_mismatch",
+                              "serial_mismatch",
+                              "cost_quantity_mismatch"
+                            ]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "targetType": {
+                            "type": "string",
+                            "enum": [
+                              "position",
+                              "reservation",
+                              "serial_unit",
+                              "variant"
+                            ]
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "expected": {
+                            "type": "string",
+                            "description": "What the history (or the source records) says."
+                          },
+                          "actual": {
+                            "type": "string",
+                            "description": "What the stored figure says."
+                          },
+                          "variantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sku": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "locationPath": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "repairable": {
+                            "type": "boolean",
+                            "description": "Whether a reviewed repair is offered for this problem."
+                          }
+                        },
+                        "required": [
+                          "problem",
+                          "title",
+                          "targetType",
+                          "targetId",
+                          "expected",
+                          "actual",
+                          "variantId",
+                          "sku",
+                          "locationPath",
+                          "repairable"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "repair": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "summary": {
+                            "type": "string",
+                            "description": "What the repair records, in a sentence."
+                          },
+                          "field": {
+                            "type": "string",
+                            "enum": [
+                              "history",
+                              "allocated",
+                              "owned_quantity"
+                            ],
+                            "description": "history: a ledger entry so history explains the balance; allocated: the reserved total set from the open allocations; owned_quantity: a cost-history entry so the quantity behind the average matches stock."
+                          },
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "delta": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "summary",
+                          "field",
+                          "from",
+                          "to",
+                          "delta"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Null when no repair is offered for this problem."
+                  },
+                  "guidance": {
+                    "description": "What to do when no repair is offered.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "reported",
+                  "problem",
+                  "repair",
+                  "guidance"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

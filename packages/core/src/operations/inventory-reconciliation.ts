@@ -1,6 +1,6 @@
 import type { Tx } from '@airstock/db';
 import { z } from 'zod';
-import { compare, normalize, subtract } from '../catalog/decimal.ts';
+import { compare, isDecimal, normalize, subtract } from '../catalog/decimal.ts';
 import { errors } from '../errors.ts';
 import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
@@ -62,6 +62,11 @@ const Problem = z.object({
 });
 type ProblemOut = z.infer<typeof Problem>;
 
+/** Quantities without trailing zeros; a status (for reservation problems) as it is. */
+function figure(value: string): string {
+  return isDecimal(value) ? normalize(value) : value;
+}
+
 /** Adds the SKU and location a person needs to find each problem. */
 async function describeProblems(tx: Tx, problems: StockProblem[]): Promise<ProblemOut[]> {
   if (problems.length === 0) return [];
@@ -91,8 +96,8 @@ async function describeProblems(tx: Tx, problems: StockProblem[]): Promise<Probl
       title: PROBLEM_TITLES[kind] ?? p.problem,
       targetType: p.targetType as ProblemOut['targetType'],
       targetId: p.targetId,
-      expected: normalize(p.expected),
-      actual: normalize(p.actual),
+      expected: figure(p.expected),
+      actual: figure(p.actual),
       variantId: label?.variant_id ?? null,
       sku: label?.sku ?? null,
       locationPath: label?.location_path ?? null,
@@ -433,8 +438,8 @@ export const repairStockProblem = defineOperation({
   kind: 'command',
   scope: 'shop',
   input: RepairTarget.extend({
-    expected: z.string().describe('The expected figure from the preview.'),
-    actual: z.string().describe('The actual figure from the preview.'),
+    expected: z.string().max(100).describe('The expected figure from the preview.'),
+    actual: z.string().max(100).describe('The actual figure from the preview.'),
     reason: z
       .string()
       .trim()
@@ -473,8 +478,8 @@ export const repairStockProblem = defineOperation({
       );
     }
     if (
-      compare(normalize(input.expected), plan.problem.expected) !== 0 ||
-      compare(normalize(input.actual), plan.problem.actual) !== 0
+      figure(input.expected) !== plan.problem.expected ||
+      figure(input.actual) !== plan.problem.actual
     ) {
       throw errors.conflict(
         'problem_changed',

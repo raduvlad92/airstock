@@ -97,6 +97,7 @@
                         "inventory.receive",
                         "inventory.reserve",
                         "inventory.fulfill",
+                        "inventory.adjust",
                         "activity.read",
                         "credentials.manage",
                         "connections.manage",

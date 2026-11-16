@@ -1,6 +1,6 @@
-# 0028. Returns: quarantine on receipt, inspection by condition, cost back at the fulfillment cost
+# 0029. Returns: quarantine on receipt, inspection by condition, cost back at the fulfillment cost
 
-**Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D9, Section 5.5, and PRD 6.5 (milestone I2). Builds on [ADR 0020](0020-stock-model.md), [ADR 0022](0022-valuation.md), and [ADR 0027](0027-transfers.md).
+**Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D9, Section 5.5, and PRD 6.5 (milestone I2). Builds on [ADR 0020](0020-stock-model.md), [ADR 0022](0022-valuation.md), and [ADR 0028](0028-transfers.md).
 
 **Summary:** Requests and authorizations change no stock; receipt puts units in quarantine at one receiving location with their lots and serials; inspection moves them to sellable, damaged, repair, or supplier return, or writes them off; returned units re-enter valuation at the cost they were fulfilled at, else the moving average; a serial not fulfilled here is received and flagged
 

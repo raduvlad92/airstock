@@ -424,6 +424,64 @@ A purchase order was drafted or moved to another state: sent, partially received
 }
 ```
 
+### `return.status_changed`
+
+A return changed state, such as authorized, received, inspecting, or completed: the return with its per-line expected, received, and dispositioned quantities, and the change.
+
+- **Needs:** `inventory.read` (held by whoever subscribes)
+- **Filters:** warehouses and locations
+
+```json
+{
+  "id": "0193a1b2-0000-7000-8000-0000000000ff",
+  "type": "return.status_changed",
+  "created_at": "2026-11-16T09:00:00.000Z",
+  "shop_id": "0193a1b2-0000-7000-8000-000000000001",
+  "api_version": "v1",
+  "data": {
+    "return": {
+      "id": "0193a1b2-0000-7000-8000-0000000000a0",
+      "reference": "RMA-0001",
+      "orderRef": "1001",
+      "fulfillmentRef": null,
+      "status": "completed",
+      "location": {
+        "locationId": "0193a1b2-0000-7000-8000-000000000021",
+        "path": "Main warehouse/A1",
+        "warehouseId": "0193a1b2-0000-7000-8000-000000000020"
+      },
+      "totals": {
+        "expected": "6.000000",
+        "received": "6.000000",
+        "sellable": "4.000000",
+        "damaged": "2.000000",
+        "repair": "0.000000",
+        "supplierReturn": "0.000000",
+        "disposed": "0.000000"
+      },
+      "lines": [
+        {
+          "variantId": "0193a1b2-0000-7000-8000-000000000011",
+          "sku": "ETB-PRE-01",
+          "expected": "6.000000",
+          "received": "6.000000",
+          "sellable": "4.000000",
+          "damaged": "2.000000",
+          "repair": "0.000000",
+          "supplierReturn": "0.000000",
+          "disposed": "0.000000"
+        }
+      ],
+      "version": 5
+    },
+    "status": {
+      "from": "inspecting",
+      "to": "completed"
+    }
+  }
+}
+```
+
 ### Coming with later milestones
 
 Registered, listed by the API with `"status": "coming"`, hidden in the dashboard, and refused when subscribing until the milestone that emits them ships. The samples show the planned shape.
@@ -433,7 +491,6 @@ Registered, listed by the API with `"status": "coming"`, hidden in the dashboard
 | `alert.opened` | An alert opened, such as low stock or a lot nearing expiry (I3). | warehouses and locations, alert kinds |
 | `alert.resolved` | An alert resolved because stock recovered, or was acknowledged (I3). | warehouses and locations, alert kinds |
 | `reservation.shortage` | A connector order was reserved with a shortage it could not cover (I1). | warehouses and locations |
-| `return.status_changed` | A return moved to another state, such as received or inspected (I2). | warehouses and locations |
 | `shopify.sync_conflict` | Shopify and Airstock disagree on a quantity or field that no order explains (I6). | warehouses and locations |
 
 <!-- event-catalog:end -->

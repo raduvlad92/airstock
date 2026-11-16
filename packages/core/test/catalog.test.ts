@@ -54,22 +54,32 @@ describe('A01: four kinds of product in one shop, each with its family and field
       'furniture',
       'food',
       'spare_parts',
+      'trading_cards',
+      'building_sets',
     ]);
   });
 
-  it('adds the four starter families; a shared key is reused and its options merged', async () => {
+  it('adds the starter families; a shared key is reused and its options merged', async () => {
     const apparel = await h.run(ops.addTemplate, { template: 'apparel' });
     expect(apparel.createdFields).toContain('material');
     const furniture = await h.run(ops.addTemplate, { template: 'furniture' });
     expect(furniture.reusedFields).toEqual(['material']);
     await h.run(ops.addTemplate, { template: 'food' });
     await h.run(ops.addTemplate, { template: 'spare_parts' });
+    // The Phase 2 families (D5) keep their item condition apart from spare parts' condition.
+    const cards = await h.run(ops.addTemplate, { template: 'trading_cards' });
+    expect(cards.createdFields).toEqual(
+      expect.arrayContaining(['card_condition', 'grade', 'certificate_number']),
+    );
+    await h.run(ops.addTemplate, { template: 'building_sets' });
     schema = await describe_();
     expect(schema.families.map((f: { name: string }) => f.name)).toEqual([
       'Apparel',
+      'Building sets',
       'Food',
       'Furniture',
       'Spare parts',
+      'Trading cards',
     ]);
     const material = schema.fields.find((f: { key: string }) => f.key === 'material');
     const labels = material.options.map((o: { label: string }) => o.label);

@@ -98,6 +98,10 @@ export const QueryInput = z.object({
     .optional()
     .describe('Custom field keys (and weight, available) to return with each row.'),
   archived: z.enum(['exclude', 'include', 'only']).default('exclude'),
+  sold: z
+    .enum(['exclude', 'include', 'only'])
+    .default('exclude')
+    .describe('One-of-a-kind items that were sold are hidden unless included.'),
   limit: z.number().int().min(1).max(QUERY_LIMITS.pageSize).default(50),
   cursor: z
     .string()
@@ -178,6 +182,8 @@ function buildWhere(
 ): { conditions: string[]; rank: string | null } {
   const mode: Mode = input.mode;
   const conditions: string[] = [];
+  if (input.sold === 'exclude') conditions.push(`p.status <> 'sold'`);
+  if (input.sold === 'only') conditions.push(`p.status = 'sold'`);
   if (mode === 'variants') {
     if (input.archived === 'exclude')
       conditions.push(`p.status <> 'archived' and v.status = 'active'`);
@@ -491,6 +497,7 @@ export const queryItems = defineOperation({
           sort: input.sort ?? null,
           fields: input.fields ?? [],
           archived: input.archived,
+          sold: input.sold,
           page: input.cursor ? 'next' : 'first',
           returned: result.rows.length,
           total: result.total,

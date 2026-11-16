@@ -61,6 +61,8 @@ export const VariantOut = z.object({
   baseUnit: z.string(),
   quantityScale: z.number(),
   trackingMode: z.string(),
+  oneOfAKind: z.boolean(),
+  sellByMarginDays: z.number(),
   status: z.enum(['active', 'archived']),
   isDefault: z.boolean(),
   version: z.number(),
@@ -74,7 +76,9 @@ export const ItemDetail = z.object({
     id: Id,
     name: z.string(),
     description: z.string().nullable(),
-    status: z.enum(['draft', 'active', 'archived']),
+    status: z
+      .enum(['draft', 'active', 'archived', 'sold'])
+      .describe('sold: a one-of-a-kind item that was fulfilled; it is active again if it returns.'),
     family: z.object({ id: Id, name: z.string() }).nullable(),
     tags: z.array(z.string()),
     weight: z.unknown(),
@@ -242,6 +246,8 @@ async function renderDetail(tx: Tx, loaded: Loaded, defs: StoredField[]): Promis
       baseUnit: v.base_unit,
       quantityScale: v.quantity_scale,
       trackingMode: v.tracking_mode,
+      oneOfAKind: v.one_of_a_kind,
+      sellByMarginDays: v.sell_by_margin_days,
       status: v.status,
       isDefault: v.is_default,
       version: v.version,

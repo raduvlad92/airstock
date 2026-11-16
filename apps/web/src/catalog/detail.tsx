@@ -14,7 +14,7 @@ import {
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
 import { ActivityTable, useActivity } from '../pages/activity.tsx';
-import { StockPanel } from '../pages/inventory.tsx';
+import { StockPanel, StockSettingsForm } from '../pages/inventory.tsx';
 import { telemetry } from '../telemetry.ts';
 import { RichText } from './rich-text.tsx';
 import { type CatalogSchema, type Column, columnsFor, useCatalogSchema } from './schema.ts';
@@ -1036,6 +1036,14 @@ function StockTab({ shopId, item }: { shopId: string; item: Item }) {
         </Field>
       ) : null}
       <StockPanel shopId={shopId} variantId={variantId} title="Stock by location" />
+      {active.find((v) => v.id === variantId) ? (
+        <StockSettingsForm
+          key={variantId}
+          shopId={shopId}
+          productId={item.product.id}
+          variant={active.find((v) => v.id === variantId)!}
+        />
+      ) : null}
     </div>
   );
 }

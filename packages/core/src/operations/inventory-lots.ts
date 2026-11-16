@@ -4,7 +4,7 @@ import { errors } from '../errors.ts';
 import { defineOperation } from '../registry.ts';
 import { Id } from '../schemas.ts';
 import { normalizeCode } from '../stock/engine.ts';
-import { LotCode } from './inventory.ts';
+import { Flag, isSet, LotCode } from './inventory.ts';
 
 // Lots, lot trace, and serial history (plan Section 5.7, D4). All three are queries over the
 // ledger: entries name the lot, serial, and reservation they moved.
@@ -23,8 +23,8 @@ export const listLots = defineOperation({
   scope: 'shop',
   input: z.object({
     variantId: Id,
-    includeEmpty: z.boolean().optional(),
-    expiringWithinDays: z
+    includeEmpty: Flag.optional(),
+    expiringWithinDays: z.coerce
       .number()
       .int()
       .min(0)
@@ -102,7 +102,7 @@ export const listLots = defineOperation({
         input.variantId,
         ctx.locationScope,
         variant.margin,
-        input.includeEmpty ?? false,
+        isSet(input.includeEmpty),
         input.expiringWithinDays ?? null,
       ],
     );

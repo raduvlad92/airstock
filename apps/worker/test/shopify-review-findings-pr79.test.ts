@@ -5,10 +5,11 @@ import { ownerQuery } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
 import { type Merchant, type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
 
-// Review of the Shopify connector (16 November 2026), findings in PR #79 (listings): one test per
-// confirmed defect, named after the finding. Each is `it.fails` so CI stays green until the fix
-// lands; the comment above each says what goes wrong. The findings on main are in
-// shopify-review-findings.test.ts. Every query here is limited to this file's shops.
+// Review of the Shopify connector (16 November 2026), findings in the listings code of PR #79,
+// which merged into main during the review: one test per confirmed defect, named after the
+// finding. Each is `it.fails` so CI stays green until the fix lands; the comment above each says
+// what goes wrong. The other findings are in shopify-review-findings.test.ts. Every query here is
+// limited to this file's shops.
 
 let h: ShopifyHarness;
 beforeAll(async () => {
@@ -71,7 +72,7 @@ async function webhook(s: Setup, topic: string, productId: string) {
   return h.runJobs(s.m.shopId);
 }
 
-describe('Shopify connector review findings (PR #79, listings)', () => {
+describe('Shopify connector review findings (listings, from PR #79)', () => {
   // FINDING L1 (Shopify quantity overwritten; PR #79). shopify.products.sync creates an Airstock
   // item for a new single-variant Shopify product (with no stock) and maps it at once, with no
   // person involved. The map change pushes: the first push reads Shopify's quantity as the record

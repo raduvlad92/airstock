@@ -13,12 +13,15 @@ import {
   type JobDeps,
   type Logger,
   notifyAlertOpened,
+  ONBOARDING_RUN_TOPIC,
   type OutboxMessage,
   reconcileStock,
   recoverWebhookDeliveries,
   runDailyAlertChecks,
   runExportJob,
   runImportJob,
+  SHOPIFY_PUSH_TOPIC,
+  type ShopifyPushPayload,
   sendInvitationEmail,
   sendPurchaseOrderEmail,
   sendWebhookDisabledEmail,
@@ -42,7 +45,9 @@ import {
   httpShopifyAuth,
   NotConnectedError,
   pushAvailability,
+  pushConnection,
   runJob,
+  runOnboarding,
   type SyncDeps,
   TokenCipher,
 } from '@airstock/shopify';
@@ -377,6 +382,29 @@ export default {
           })),
         );
       }
+      // Shopify onboarding imports whose run stopped resume from their stored state.
+      const onboardings = await db.transaction(
+        { shopId: null, userId: null, readOnly: true },
+        (tx) =>
+          tx.query<{ shop_id: string; id: string }>(
+            'select shop_id, id from stale_shopify_onboardings($1)',
+            [20],
+          ),
+      );
+      if (onboardings.length > 0) {
+        await env.JOBS_QUEUE.sendBatch(
+          onboardings.map((r) => ({
+            body: {
+              id: crypto.randomUUID(),
+              shopId: r.shop_id,
+              topic: ONBOARDING_RUN_TOPIC,
+              payload: { onboardingId: r.id },
+              createdAt: new Date().toISOString(),
+            },
+            contentType: 'json' as const,
+          })),
+        );
+      }
       if (controller.cron === '0 3 * * *') {
         // Lots nearing expiry, and every reorder rule and shortage checked again (D12).
         await runDailyAlertChecks(db);
@@ -560,7 +588,14 @@ function timingSafeEqualText(a: string, b: string): boolean {
 async function runJobsBatch(env: Env, db: Database, items: JobsItem[]): Promise<JobsOutcome[]> {
   const shopify = await shopifyConfigFromEnv(env);
   const deps: SyncDeps | null = shopify
-    ? { db, audit: queueSink(env), logger, shopify, dispatch: () => deliverOutbox(env, db) }
+    ? {
+        db,
+        audit: queueSink(env),
+        logger,
+        shopify,
+        files: jobDeps(env, db).files,
+        dispatch: () => deliverOutbox(env, db),
+      }
     : null;
   const outcomes: JobsOutcome[] = [];
   for (const item of items) {
@@ -677,6 +712,29 @@ async function runJobsMessage(
         body.shopId,
         (body.payload as { exportId: string }).exportId,
       );
+      return null;
+    }
+    if (body.topic === SHOPIFY_PUSH_TOPIC) {
+      // A mapping changed: push those levels (or all of the connection's).
+      if (!deps) return 300;
+      await pushConnection(deps, body.shopId, body.payload as ShopifyPushPayload);
+      return null;
+    }
+    if (body.topic === ONBOARDING_RUN_TOPIC) {
+      // One step of an onboarding import; it says when to run again (a bulk read in progress,
+      // the import job still writing).
+      if (!deps) return 300;
+      const step = await runOnboarding(
+        deps,
+        body.shopId,
+        (body.payload as { onboardingId: string }).onboardingId,
+      );
+      if (step.status === 'again') {
+        await env.JOBS_QUEUE.send(
+          { ...body, id: crypto.randomUUID() },
+          { contentType: 'json', delaySeconds: step.delaySeconds },
+        );
+      }
       return null;
     }
     if (body.topic === 'inventory.availability_changed') {

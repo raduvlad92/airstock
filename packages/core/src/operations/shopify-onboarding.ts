@@ -546,7 +546,10 @@ export const finishShopifyOnboarding = defineOperation({
           ? [
               {
                 topic: 'shopify.levels.push',
-                payload: { connectionId: onboarding.connection_id, inventoryItemIds: applied.items },
+                payload: {
+                  connectionId: onboarding.connection_id,
+                  inventoryItemIds: applied.items,
+                },
               },
             ]
           : [],

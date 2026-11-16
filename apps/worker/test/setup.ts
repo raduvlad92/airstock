@@ -188,7 +188,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     rateLimiter: options.rateLimiter,
     webhookSecrets: options.webhookSecrets ?? null,
     fonts: options.fonts ?? diskFonts,
-    logger: { error: () => {} },
+    logger: { error: (m, d) => (process.env.TEST_LOG ? console.error(m, d) : undefined) },
   });
   return {
     app,

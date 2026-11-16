@@ -38,10 +38,7 @@ import { reorderOperations } from './reorder.ts';
 import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopifyMappingOperations } from './shopify-mapping.ts';
-import {
-  shopifyOnboardingCallbacks,
-  shopifyOnboardingOperations,
-} from './shopify-onboarding.ts';
+import { shopifyOnboardingCallbacks, shopifyOnboardingOperations } from './shopify-onboarding.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
 import { suppliersOperations } from './suppliers.ts';

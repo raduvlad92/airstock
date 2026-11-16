@@ -166,7 +166,8 @@ export function parseCatalogJsonl(text: string): CatalogProduct[] {
       products.set(id, {
         productId: numeric(id),
         title: String(row.title ?? ''),
-        description: typeof row.description === 'string' && row.description ? row.description : null,
+        description:
+          typeof row.description === 'string' && row.description ? row.description : null,
         status: String(row.status ?? 'ACTIVE'),
         options: ((row.options as Array<{ name: string }> | undefined) ?? []).map((o) => o.name),
         images: [],
@@ -198,7 +199,11 @@ export function parseCatalogJsonl(text: string): CatalogProduct[] {
       if (item) byItem.set(item.id, variant);
       products.get(row.__parentId ?? '')?.variants.push(variant);
     } else if (id.startsWith('gid://shopify/MediaImage/')) {
-      const image = row.image as { url: string; width: number | null; height: number | null } | null;
+      const image = row.image as {
+        url: string;
+        width: number | null;
+        height: number | null;
+      } | null;
       if (image?.url) {
         const picture: CatalogImage = {
           url: image.url,
@@ -453,7 +458,8 @@ export function httpShopifyAdmin(
     },
 
     async fetchCatalog(url) {
-      if (!url.startsWith('https://')) throw new ShopifyApiError('Unexpected result URL.', 0, false);
+      if (!url.startsWith('https://'))
+        throw new ShopifyApiError('Unexpected result URL.', 0, false);
       const res = await doFetch(url);
       if (!res.ok) {
         throw new ShopifyApiError(`Bulk result download returned ${res.status}.`, res.status, true);

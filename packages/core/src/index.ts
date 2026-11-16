@@ -103,25 +103,6 @@ export {
 export { shopifyNumericId } from './operations/shopify.ts';
 export { ONBOARDING_RUN_TOPIC } from './operations/shopify-onboarding.ts';
 export {
-  type CatalogImage,
-  type CatalogProduct,
-  type CatalogVariant,
-  type MatchedRow,
-  matchCatalog,
-  onboardingCsv,
-} from './shopify/catalog.ts';
-export {
-  type AffectedLevel,
-  affectedLevels,
-  type LevelTarget,
-  levelTargets,
-  SHOPIFY_PUSH_TOPIC,
-  type SalesMap,
-  type ShopifyPushPayload,
-  salesMaps,
-  shopifyChannel,
-} from './shopify/targets.ts';
-export {
   CONNECTION_SCOPES,
   type ConnectionScope,
   effectivePermissions,
@@ -162,6 +143,25 @@ export {
   type OperationOutput,
 } from './registry.ts';
 export { normalizeSku } from './schemas.ts';
+export {
+  type CatalogImage,
+  type CatalogProduct,
+  type CatalogVariant,
+  type MatchedRow,
+  matchCatalog,
+  onboardingCsv,
+} from './shopify/catalog.ts';
+export {
+  type AffectedLevel,
+  affectedLevels,
+  type LevelTarget,
+  levelTargets,
+  type SalesMap,
+  SHOPIFY_PUSH_TOPIC,
+  type ShopifyPushPayload,
+  salesMaps,
+  shopifyChannel,
+} from './shopify/targets.ts';
 export {
   ALERT_OPENED_TOPIC,
   ALERT_RESOLVED_TOPIC,

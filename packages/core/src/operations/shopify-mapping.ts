@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { errors } from '../errors.ts';
 import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id } from '../schemas.ts';
-import { SHOPIFY_PUSH_TOPIC, shopifyChannel } from '../shopify/targets.ts';
 import { MAPPING_IN_DASHBOARD, ShopifyId, shopifyNumericId } from '../shopify/ids.ts';
+import { SHOPIFY_PUSH_TOPIC, shopifyChannel } from '../shopify/targets.ts';
 
 // Mapping a connected Shopify store (plan Section 5.14, PRD 8.5): each Shopify location to a
 // warehouse or a location, each Shopify variant to a variant, a sales pack, or a bundle. Unmapped
@@ -70,25 +70,25 @@ export async function applyLocationMaps(
   }
   // Scopes with their ancestry, locked against archiving or moving while mapped (share lock, as
   // receipts take).
-  const scopes = await ctx.tx.query<{
-    id: string;
-    kind: 'warehouse' | 'location';
-    status: string;
-    path_ids: string[];
-  }>(
-    `select w.id, 'warehouse' as kind, w.status, array[w.id] as path_ids from warehouses w
-     where w.id = any($1::uuid[])
-     union all
-     select l.id, 'location', l.status, l.path_ids from locations l
-     where l.id = any($1::uuid[]) and l.kind = 'storage'
-     for share`,
-    [scopeIds],
-  );
+  type Scope = { id: string; kind: 'warehouse' | 'location'; status: string; path_ids: string[] };
+  const scopes: Scope[] = [
+    ...(await ctx.tx.query<Scope>(
+      `select w.id, 'warehouse' as kind, w.status, array[w.id] as path_ids from warehouses w
+       where w.id = any($1::uuid[]) for share`,
+      [scopeIds],
+    )),
+    ...(await ctx.tx.query<Scope>(
+      `select l.id, 'location' as kind, l.status, l.path_ids from locations l
+       where l.id = any($1::uuid[]) and l.kind = 'storage' for share`,
+      [scopeIds],
+    )),
+  ];
   const byId = new Map(scopes.map((s) => [s.id, s]));
   input.forEach((m, i) => {
     const scope = byId.get(scopeIds[i]!);
     const wanted = m.warehouseId ? 'warehouse' : 'location';
-    if (!scope || scope.kind !== wanted) throw errors.notFound(m.warehouseId ? 'Warehouse' : 'Location');
+    if (!scope || scope.kind !== wanted)
+      throw errors.notFound(m.warehouseId ? 'Warehouse' : 'Location');
     if (scope.status !== 'active') {
       throw errors.unprocessable('scope_archived', 'Map an active warehouse or location.');
     }

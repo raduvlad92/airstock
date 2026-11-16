@@ -1,4 +1,6 @@
+import type { CatalogImage, CatalogProduct } from '@airstock/core';
 import {
+  type BulkOperationState,
   SHOPIFY_SCOPES,
   type ShopifyAdmin,
   type ShopifyAuth,
@@ -25,6 +27,26 @@ export class FakeStore implements ShopifyAdmin {
     { id: '1001', name: 'Shop location', active: true },
     { id: '1002', name: 'Warehouse', active: true },
   ];
+  /** Products for the onboarding read; variants added with addVariant get one each. */
+  readonly products: Array<{
+    productId: string;
+    title: string;
+    status: string;
+    description: string | null;
+    options: string[];
+    images: CatalogImage[];
+    variants: Array<{
+      variant: ShopifyVariant;
+      barcode: string | null;
+      price: string | null;
+      options: Array<{ name: string; value: string }>;
+      image: CatalogImage | null;
+    }>;
+  }> = [];
+  readonly bulkReads: string[] = [];
+  /** Polls a bulk read answers "running" before it completes. */
+  bulkPolls = 1;
+  private polls = new Map<string, number>();
   private nextId = 5_000_000;
 
   constructor(readonly domain: string) {}
@@ -43,7 +65,121 @@ export class FakeStore implements ShopifyAdmin {
     };
     this.variants.push(variant);
     this.levels.set(this.key(variant.inventoryItemId, location), quantity);
+    this.products.push({
+      productId: String(this.nextId++),
+      title: sku,
+      status: 'ACTIVE',
+      description: null,
+      options: ['Title'],
+      images: [],
+      variants: [
+        {
+          variant,
+          barcode: null,
+          price: null,
+          options: [{ name: 'Title', value: 'Default Title' }],
+          image: null,
+        },
+      ],
+    });
     return variant;
+  }
+
+  /** A product with options, barcodes, prices, pictures, and quantities per location. */
+  addProduct(input: {
+    title: string;
+    status?: string;
+    description?: string;
+    options?: string[];
+    images?: string[];
+    variants: Array<{
+      sku: string | null;
+      barcode?: string;
+      price?: string;
+      options?: string[];
+      quantities?: Record<string, number>;
+      tracked?: boolean;
+      image?: string;
+    }>;
+  }): ShopifyVariant[] {
+    const optionNames = input.options ?? ['Title'];
+    const out: ShopifyVariant[] = [];
+    const product = {
+      productId: String(this.nextId++),
+      title: input.title,
+      status: input.status ?? 'ACTIVE',
+      description: input.description ?? null,
+      options: optionNames,
+      images: (input.images ?? []).map((url) => ({ url, alt: null, width: 2048, height: 2048 })),
+      variants: [] as (typeof this.products)[number]['variants'],
+    };
+    for (const v of input.variants) {
+      const variant: ShopifyVariant = {
+        variantId: String(this.nextId++),
+        inventoryItemId: String(this.nextId++),
+        sku: v.sku ?? '',
+        title: (v.options ?? ['Default Title']).join(' / '),
+        tracked: v.tracked ?? true,
+      };
+      this.variants.push(variant);
+      for (const [location, quantity] of Object.entries(v.quantities ?? {})) {
+        this.levels.set(this.key(variant.inventoryItemId, location), quantity);
+      }
+      product.variants.push({
+        variant,
+        barcode: v.barcode ?? null,
+        price: v.price ?? null,
+        options: v.options
+          ? v.options.map((value, i) => ({ name: optionNames[i]!, value }))
+          : [{ name: 'Title', value: 'Default Title' }],
+        image: v.image ? { url: v.image, alt: null, width: 800, height: 800 } : null,
+      });
+      out.push(variant);
+    }
+    this.products.push(product);
+    return out;
+  }
+
+  async startCatalogRead() {
+    const id = `gid://shopify/BulkOperation/${this.nextId++}`;
+    this.bulkReads.push(id);
+    return id;
+  }
+  async bulkOperation(id: string): Promise<BulkOperationState> {
+    if (!this.bulkReads.includes(id)) return { status: 'failed', url: null, error: 'NOT_FOUND' };
+    const polls = (this.polls.get(id) ?? 0) + 1;
+    this.polls.set(id, polls);
+    if (polls <= this.bulkPolls) return { status: 'running', url: null, error: null };
+    return {
+      status: 'completed',
+      url: `https://storage.test/bulk/${id.split('/').pop()}`,
+      error: null,
+    };
+  }
+  async fetchCatalog(_url: string): Promise<CatalogProduct[]> {
+    return this.products.map((p) => ({
+      productId: p.productId,
+      title: p.title,
+      description: p.description,
+      status: p.status,
+      options: p.options,
+      images: p.images,
+      variants: p.variants.map((v) => ({
+        variantId: v.variant.variantId,
+        inventoryItemId: v.variant.inventoryItemId,
+        sku: v.variant.sku || null,
+        barcode: v.barcode,
+        title: v.variant.title,
+        price: v.price,
+        options: v.options,
+        tracked: v.variant.tracked,
+        levels: this.locationList.flatMap((l) => {
+          const q = this.levels.get(this.key(v.variant.inventoryItemId, l.id));
+          return q === undefined ? [] : [{ locationId: l.id, available: q }];
+        }),
+        image: v.image,
+      })),
+    }));
   }
 
   /** A checkout: Shopify commits the units right away and returns the order. */

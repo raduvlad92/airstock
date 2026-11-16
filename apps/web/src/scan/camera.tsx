@@ -104,6 +104,14 @@ export function CameraScanner({
       el.srcObject = media;
       await el.play();
       const track = media.getVideoTracks()[0];
+      // iOS ends the stream when something else takes the camera, such as Quick add's photo
+      // capture or a call; reopen it once the page is back.
+      track?.addEventListener('ended', () => {
+        if (stream.current !== media) return;
+        stop();
+        setState({ status: 'off' });
+        if (wanted.current && !document.hidden) setTimeout(() => void start(), 400);
+      });
       const capabilities = (track?.getCapabilities?.() ?? {}) as TrackCapabilities;
       setCaps(capabilities);
       const settings = (track?.getSettings?.() ?? {}) as { zoom?: number };

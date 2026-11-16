@@ -1,27 +1,90 @@
 import type { ops } from '@airstock/core';
-import { add, compare, multiply, normalize } from '@airstock/core/catalog/decimal';
-import { useMutation } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
-import { command, errorMessage, type Out } from '../api.ts';
+import {
+  add,
+  compare,
+  divide,
+  multiply,
+  normalize,
+  subtract,
+} from '@airstock/core/catalog/decimal';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { formatDecimal } from '../components/ui.tsx';
 import { can } from '../context.tsx';
 import { type ScanEnv, useScanHandler } from './flows.ts';
 import { ItemTitle } from './lookup.tsx';
-import type { Resolved, ScanItem } from './resolve.ts';
+import { type Resolved, resolveScan, type ScanItem } from './resolve.ts';
 import { ScanField } from './scan-field.tsx';
 import { UnknownCode } from './unknown.tsx';
 
 type Receipt = Out<typeof ops.receiveStock>;
+type PoReceipt = Out<typeof ops.receivePurchaseOrderLine>;
+type Order = Out<typeof ops.getPurchaseOrder>;
+type OrderLine = Order['lines'][number];
+type Orders = Out<typeof ops.listPurchaseOrders>;
 type Pack = ScanItem['packs'][number];
 
+const DECIMAL = /^\d+(\.\d{1,6})?$/;
+
+function remembered(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function remember(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Private mode: not remembered.
+  }
+}
+
 /**
- * Receive (plan 5.2, 5.12): a free receipt into the current location through the receipt
- * command. Scan the item (or its case), adjust the quantity and pack, capture the lot and expiry
- * or scan serials one by one, optionally enter a unit cost (costs.read only), and confirm. The
- * quantity and pack are spelled out on the button before anything is committed. Receiving
- * against a purchase order plugs in here as a second source of the item and quantity (I4b).
+ * Receive (plan 5.2, 5.8, 5.12): a free receipt into the current location, or a delivery against
+ * a purchase order. Either way the item and quantity lead to the same confirm step: adjust the
+ * quantity and pack, capture the lot and expiry or scan serials one by one, and confirm, with the
+ * quantity and pack spelled out on the button before anything is committed.
  */
 export function ReceiveFlow({ env }: { env: ScanEnv }) {
+  const sourceKey = `airstock.scan.receive-source.${env.shopId}`;
+  const [source, setSourceState] = useState<'free' | 'po'>(() =>
+    remembered(sourceKey) === 'po' ? 'po' : 'free',
+  );
+  const setSource = (next: 'free' | 'po') => {
+    remember(sourceKey, next);
+    setSourceState(next);
+  };
+  return (
+    <>
+      <fieldset className="scan-segments" aria-label="Receive from">
+        <button
+          type="button"
+          aria-pressed={source === 'free'}
+          className={source === 'free' ? 'chosen' : 'secondary'}
+          onClick={() => setSource('free')}
+        >
+          Free receipt
+        </button>
+        <button
+          type="button"
+          aria-pressed={source === 'po'}
+          className={source === 'po' ? 'chosen' : 'secondary'}
+          onClick={() => setSource('po')}
+        >
+          Purchase order
+        </button>
+      </fieldset>
+      {source === 'free' ? <FreeReceive env={env} /> : <PoReceive env={env} />}
+    </>
+  );
+}
+
+function FreeReceive({ env }: { env: ScanEnv }) {
   const [item, setItem] = useState<ScanItem | null>(null);
   const [unknown, setUnknown] = useState<string | null>(null);
 
@@ -46,43 +109,367 @@ export function ReceiveFlow({ env }: { env: ScanEnv }) {
   if (item) {
     return <ReceiveForm key={item.variantId} env={env} item={item} onDone={() => setItem(null)} />;
   }
+  return unknown ? (
+    <UnknownCode
+      key={unknown}
+      env={env}
+      code={unknown}
+      onDone={(resolved: Resolved) => {
+        if (resolved.kind === 'item') start(resolved.item);
+      }}
+    />
+  ) : (
+    <div className="scan-hint">
+      <h2>Receive</h2>
+      <p>
+        {env.location
+          ? `Scan the item or its case to receive into ${env.location.path}.`
+          : 'Scan a location label first, then the item.'}
+      </p>
+    </div>
+  );
+}
+
+// Against a purchase order ------------------------------------------------------------------------
+
+/** PO-0007, 0007, or 7: the number people read off the order. */
+function poNumber(code: string): number | null {
+  const m = /^(?:PO[-\s]?)?0*(\d{1,9})$/i.exec(code.trim());
+  return m ? Number(m[1]) : null;
+}
+
+function PoReceive({ env }: { env: ScanEnv }) {
+  const storeKey = `airstock.scan.receive-po.${env.shopId}`;
+  const [orderId, setOrderId] = useState<string | null>(() => remembered(storeKey));
+  const [first, setFirst] = useState<ScanItem | null>(null);
+  const choose = (id: string | null, item: ScanItem | null = null) => {
+    remember(storeKey, id);
+    setFirst(item);
+    setOrderId(id);
+  };
+  if (!orderId) return <PoChooser env={env} onChoose={choose} />;
+  return (
+    <PoWalk key={orderId} env={env} orderId={orderId} first={first} onLeave={() => choose(null)} />
+  );
+}
+
+function PoChooser({
+  env,
+  onChoose,
+}: {
+  env: ScanEnv;
+  onChoose: (id: string, item?: ScanItem | null) => void;
+}) {
+  const [everywhere, setEverywhere] = useState(false);
+  const [withItem, setWithItem] = useState<ScanItem | null>(null);
+  const orders = useQuery({
+    queryKey: ['shop', env.shopId, 'purchase-orders', 'open', withItem?.variantId ?? null],
+    queryFn: () =>
+      api<Orders>(`/shops/${env.shopId}/purchase-orders`, {
+        query: { status: 'open', limit: 200, variantId: withItem?.variantId },
+      }),
+  });
+  const warehouseId = env.location?.warehouseId ?? null;
+  const all = orders.data?.purchaseOrders ?? [];
+  const shown = everywhere || !warehouseId ? all : all.filter((o) => o.warehouseId === warehouseId);
+
+  const pickNumber = (code: string): boolean => {
+    const n = poNumber(code);
+    const found = n === null ? undefined : all.find((o) => poNumber(o.number) === n);
+    if (found) {
+      env.feedback('ok', `${found.number} from ${found.supplierName}.`);
+      onChoose(found.id);
+      return true;
+    }
+    return false;
+  };
+
+  useScanHandler(async (scan) => {
+    if (scan.kind === 'location') return false;
+    if (scan.kind === 'unknown') {
+      if (!pickNumber(scan.code)) {
+        env.feedback('error', `No open purchase order or item has the code ${scan.code}.`);
+      }
+      return true;
+    }
+    // An item: the open orders with a line for it.
+    const found = await api<Orders>(`/shops/${env.shopId}/purchase-orders`, {
+      query: { status: 'open', limit: 200, variantId: scan.item.variantId },
+    });
+    const here = found.purchaseOrders.filter((o) => !warehouseId || o.warehouseId === warehouseId);
+    const candidates = here.length > 0 ? here : found.purchaseOrders;
+    if (candidates.length === 1) {
+      env.feedback('ok', `${candidates[0]!.number} from ${candidates[0]!.supplierName}.`);
+      onChoose(candidates[0]!.id, scan.item);
+    } else if (candidates.length === 0) {
+      env.feedback('error', `No open purchase order has ${scan.item.sku}.`);
+    } else {
+      setWithItem(scan.item);
+      setEverywhere(here.length === 0);
+      env.feedback('notice', `${candidates.length} open orders have ${scan.item.sku}: choose one.`);
+    }
+    return true;
+  });
+
+  return (
+    <div className="scan-card">
+      <h2>Receive a purchase order</h2>
+      <p className="muted">
+        Choose the order, scan or type its number, or scan an item to find the orders it is on.
+      </p>
+      <ScanField
+        label="Order number"
+        placeholder="PO-0007"
+        button="Open"
+        onSubmit={(code) => {
+          if (!pickNumber(code)) env.feedback('error', `No open purchase order ${code}.`);
+        }}
+      />
+      {withItem ? (
+        <p className="scan-meta">
+          <span>With {withItem.sku}</span>
+          <button type="button" className="ghost small" onClick={() => setWithItem(null)}>
+            Show all
+          </button>
+        </p>
+      ) : null}
+      {shown.length > 0 ? (
+        <ul className="scan-choices" aria-label="Open purchase orders">
+          {shown.map((o) => (
+            <li key={o.id}>
+              <button
+                type="button"
+                className="scan-choice"
+                onClick={() => onChoose(o.id, withItem?.variantId ? withItem : null)}
+              >
+                <strong>
+                  {o.number} · {o.supplierName}
+                </strong>
+                <span className="muted">
+                  {formatDecimal(o.open)} units open · {o.warehouseName}
+                  {o.expectedOn ? ` · expected ${o.expectedOn}` : ''}
+                  {o.overdue ? ' · overdue' : ''}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : orders.isPending ? (
+        <p className="muted">Loading…</p>
+      ) : (
+        <p className="muted">
+          No open purchase order{warehouseId && !everywhere ? ' for this warehouse' : ''}.
+        </p>
+      )}
+      {warehouseId && !everywhere && all.length > shown.length ? (
+        <button type="button" className="secondary" onClick={() => setEverywhere(true)}>
+          Other warehouses ({all.length - shown.length})
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The line a scanned item (or case) belongs to: same variant, same pack first, open first. */
+export function matchLine(order: Order, item: ScanItem): OrderLine | null {
+  const mine = order.lines.filter((l) => l.variantId === item.variantId);
+  const pack = item.pack?.packId ?? null;
+  const open = (l: OrderLine) => compare(l.open, '0') > 0;
+  return (
+    mine.find((l) => l.packId === pack && open(l)) ??
+    mine.find(open) ??
+    mine.find((l) => l.packId === pack) ??
+    mine[0] ??
+    null
+  );
+}
+
+/** "4 × Case (6) = 24": a line's base quantity in its pack where whole packs fit. */
+function inLinePack(line: OrderLine, base: string): string {
+  if (!line.packId || !line.packFactor) return formatDecimal(base);
+  const packs = normalize(divide(base, line.packFactor));
+  return !packs.includes('.')
+    ? `${formatDecimal(packs)} × ${line.packName} (${formatDecimal(line.packFactor)}) = ${formatDecimal(base)}`
+    : formatDecimal(base);
+}
+
+function PoWalk({
+  env,
+  orderId,
+  first,
+  onLeave,
+}: {
+  env: ScanEnv;
+  orderId: string;
+  first: ScanItem | null;
+  onLeave: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const queryKey = ['shop', env.shopId, 'purchase-order', orderId];
+  const order = useQuery({
+    queryKey,
+    queryFn: () => api<Order>(`/shops/${env.shopId}/purchase-orders/${orderId}`),
+  });
+  const [open, setOpen] = useState<{ line: OrderLine; item: ScanItem } | null>(null);
+  const [pendingFirst, setPendingFirst] = useState(first);
+
+  // The item scanned to find this order opens its line once the order is loaded.
+  useEffect(() => {
+    if (!pendingFirst || !order.data) return;
+    const line = matchLine(order.data, pendingFirst);
+    if (line) setOpen({ line, item: pendingFirst });
+    setPendingFirst(null);
+  }, [pendingFirst, order.data]);
+
+  const openLine = async (line: OrderLine) => {
+    try {
+      const found = await resolveScan(env.shopId, line.sku);
+      if (found.kind === 'item' && found.item.variantId === line.variantId) {
+        setOpen({ line, item: { ...found.item, pack: null } });
+      } else {
+        env.feedback('notice', `Scan ${line.sku} to receive it.`);
+      }
+    } catch (error) {
+      env.feedback('error', errorMessage(error));
+    }
+  };
+
+  useScanHandler((scan) => {
+    if (scan.kind === 'location' || !order.data || open) return false;
+    if (scan.kind === 'unknown') {
+      env.feedback('error', `No item has the code ${scan.code}.`);
+      return true;
+    }
+    const line = matchLine(order.data, scan.item);
+    if (!line) {
+      env.feedback('error', `${order.data.number} has no line for ${scan.item.sku}.`);
+      return true;
+    }
+    setOpen({ line, item: scan.item });
+    env.feedback('ok');
+    return true;
+  });
+
+  if (order.isPending) return <p className="muted">Loading the order…</p>;
+  if (order.error) {
+    return (
+      <div className="scan-card">
+        <p className="notice error">{errorMessage(order.error)}</p>
+        <button type="button" className="secondary" onClick={onLeave}>
+          Other orders
+        </button>
+      </div>
+    );
+  }
+  const o = order.data;
+  if (open) {
+    return (
+      <ReceiveForm
+        key={open.line.id}
+        env={env}
+        item={open.item}
+        po={{ order: o, line: open.line }}
+        onDone={(updated) => {
+          if (updated) queryClient.setQueryData(queryKey, updated);
+          setOpen(null);
+        }}
+      />
+    );
+  }
+  const receivable = o.status === 'sent' || o.status === 'partially_received';
   return (
     <>
-      {unknown ? (
-        <UnknownCode
-          key={unknown}
-          env={env}
-          code={unknown}
-          onDone={(resolved: Resolved) => {
-            if (resolved.kind === 'item') start(resolved.item);
-          }}
-        />
-      ) : (
-        <div className="scan-hint">
-          <h2>Receive</h2>
-          <p>
-            {env.location
-              ? `Scan the item or its case to receive into ${env.location.path}.`
-              : 'Scan a location label first, then the item.'}
-          </p>
+      <div className="scan-card">
+        <div className="scan-pick-progress">
+          <strong>
+            {o.number} · {o.supplier.name}
+          </strong>
+          <span>{o.status.replaceAll('_', ' ')}</span>
         </div>
-      )}
+        <p className="muted">
+          {o.warehouse.name}
+          {o.location ? ` · receives into ${o.location.path}` : ''}
+          {o.expectedOn ? ` · expected ${o.expectedOn}` : ''}
+        </p>
+        <p>
+          {receivable
+            ? env.location || o.location
+              ? `Scan each item or its case to receive it${env.location ? ` into ${env.location.path}` : ''}.`
+              : 'Scan a location label first, then the items.'
+            : `This order is ${o.status.replaceAll('_', ' ')}; nothing more is expected.`}
+        </p>
+      </div>
+      <ul className="scan-pick-lines" aria-label="Order lines">
+        {o.lines.map((l) => (
+          <li key={l.id}>
+            <button
+              type="button"
+              disabled={!receivable}
+              onClick={() => void openLine(l)}
+              aria-label={`${l.sku}: ordered ${formatDecimal(l.ordered)}, received ${formatDecimal(l.received)}, open ${formatDecimal(l.open)}`}
+            >
+              <span>
+                {l.sku} · {l.productName}
+                {l.variantName ? ` · ${l.variantName}` : ''}
+              </span>
+              <span className="muted">
+                Ordered {inLinePack(l, l.ordered)} · received {formatDecimal(l.received)}
+                {compare(l.overReceived, '0') > 0 ? ` (${formatDecimal(l.overReceived)} over)` : ''}
+              </span>
+              <span className="scan-line-status">
+                {compare(l.open, '0') > 0 ? `${formatDecimal(l.open)} open` : 'done'}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" className="secondary" onClick={onLeave}>
+        Other orders
+      </button>
     </>
   );
 }
 
-function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDone: () => void }) {
+// The confirm step, shared ------------------------------------------------------------------------
+
+function ReceiveForm({
+  env,
+  item,
+  po,
+  onDone,
+}: {
+  env: ScanEnv;
+  item: ScanItem;
+  /** Receiving against this purchase order line instead of a free receipt. */
+  po?: { order: Order; line: OrderLine };
+  onDone: (order?: Order) => void;
+}) {
   const serialMode = item.trackingMode === 'serial';
   const lotMode = item.trackingMode === 'lot' || item.trackingMode === 'lot_expiry';
-  const [pack, setPack] = useState<Pack | null>(serialMode ? null : item.pack);
-  const [quantity, setQuantity] = useState('1');
+  // Against an order the quantity is in the line's pack or in units; a free receipt takes any pack.
+  const linePack: Pack | null =
+    po?.line.packId && po.line.packFactor
+      ? {
+          packId: po.line.packId,
+          name: po.line.packName ?? 'Pack',
+          baseQuantity: po.line.packFactor,
+        }
+      : null;
+  const packs = po ? (linePack ? [linePack] : []) : item.packs;
+  const scannedOther = po && item.pack && item.pack.packId !== linePack?.packId ? item.pack : null;
+  const [pack, setPack] = useState<Pack | null>(
+    serialMode ? null : po ? (scannedOther ? null : item.pack ? linePack : null) : item.pack,
+  );
+  const [quantity, setQuantity] = useState(scannedOther ? scannedOther.baseQuantity : '1');
   const [lotCode, setLotCode] = useState('');
   const [expiresOn, setExpiresOn] = useState('');
   const [serials, setSerials] = useState<string[]>([]);
   const [unitCost, setUnitCost] = useState('');
   const [costPer, setCostPer] = useState<'base_unit' | 'pack'>('base_unit');
+  const [confirmOver, setConfirmOver] = useState(false);
   const key = useRef(crypto.randomUUID());
-  const seesCosts = can(env.shop, 'costs.read');
+  const seesCosts = can(env.shop, 'costs.read') && !po;
+  const location = env.location ?? (po?.order.location ? { path: po.order.location.path } : null);
 
   const addSerial = (code: string) => {
     const s = code.trim();
@@ -108,7 +495,14 @@ function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDo
         return true;
       }
       const scannedPack = scan.item.pack;
-      if ((scannedPack?.packId ?? null) !== (pack?.packId ?? null)) {
+      const current = DECIMAL.test(quantity) ? quantity : '0';
+      if (po && scannedPack && scannedPack.packId !== linePack?.packId) {
+        // A pack the order line is not in: count its units.
+        const units = pack ? normalize(multiply(current, pack.baseQuantity)) : current;
+        setPack(null);
+        setQuantity(normalize(add(units, scannedPack.baseQuantity)));
+        env.feedback('ok', `${scannedPack.name}: counted in units.`);
+      } else if ((scannedPack?.packId ?? null) !== (pack?.packId ?? null)) {
         setPack(scannedPack);
         setQuantity('1');
         env.feedback(
@@ -116,7 +510,7 @@ function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDo
           scannedPack ? `Switched to ${scannedPack.name}.` : 'Switched to units.',
         );
       } else {
-        setQuantity((q) => normalize(add(/^\d+(\.\d{1,6})?$/.test(q) ? q : '0', '1')));
+        setQuantity(normalize(add(current, '1')));
         env.feedback('ok');
       }
       return true;
@@ -134,54 +528,97 @@ function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDo
     return true;
   });
 
-  const typed = /^\d+(\.\d{1,6})?$/.test(quantity) ? quantity : '0';
-  const entered = serialMode ? String(serials.length) : typed;
+  const typedQty = DECIMAL.test(quantity) ? quantity : '0';
+  const entered = serialMode ? String(serials.length) : typedQty;
   const base = pack ? normalize(multiply(entered, pack.baseQuantity)) : normalize(entered);
+  const over =
+    po && compare(base, po.line.open) > 0 ? normalize(subtract(base, po.line.open)) : '0';
   const valid =
-    env.location !== null &&
+    location !== null &&
     compare(entered, '0') > 0 &&
     (!lotMode || lotCode.trim() !== '') &&
-    (item.trackingMode !== 'lot_expiry' || expiresOn !== '');
+    (item.trackingMode !== 'lot_expiry' || expiresOn !== '') &&
+    (over === '0' || confirmOver);
 
+  const tracked = {
+    ...(lotMode ? { lotCode: lotCode.trim() } : {}),
+    ...(lotMode && expiresOn ? { expiresOn } : {}),
+    ...(serialMode ? { serials } : {}),
+  };
   const receive = useMutation({
-    mutationFn: () =>
-      command<Receipt>(
+    mutationFn: async (): Promise<{ quantity: string; order?: Order }> => {
+      if (po) {
+        const r = await command<PoReceipt>(
+          `/shops/${env.shopId}/purchase-orders/${po.order.id}/receive`,
+          {
+            lineId: po.line.id,
+            quantity: entered,
+            ...(!pack && po.line.packId ? { inBaseUnits: true } : {}),
+            ...(env.location ? { locationId: env.location.locationId } : {}),
+            ...tracked,
+            ...(over !== '0' ? { confirmOverReceipt: true } : {}),
+          },
+          key.current,
+        );
+        return { quantity: r.receipt.quantity, order: r.purchaseOrder };
+      }
+      const r = await command<Receipt>(
         `/shops/${env.shopId}/receipts`,
         {
           variantId: item.variantId,
           locationId: env.location!.locationId,
           quantity: entered,
           ...(pack ? { packId: pack.packId } : {}),
-          ...(lotMode ? { lotCode: lotCode.trim() } : {}),
-          ...(lotMode && expiresOn ? { expiresOn } : {}),
-          ...(serialMode ? { serials } : {}),
+          ...tracked,
           ...(seesCosts && unitCost.trim()
             ? { unitCost: unitCost.trim(), costPer: pack ? costPer : 'base_unit' }
             : {}),
         },
         key.current,
-      ),
+      );
+      return { quantity: r.quantity };
+    },
     onSuccess: (r) => {
       key.current = crypto.randomUUID();
-      const text = `Received ${formatDecimal(r.quantity)} × ${item.sku} into ${env.location?.path}.`;
-      env.feedback('ok', text);
-      onDone();
+      if (po && r.order) {
+        const left = r.order.lines.find((l) => l.id === po.line.id)?.open ?? '0';
+        env.feedback(
+          'ok',
+          `Received ${formatDecimal(r.quantity)} × ${item.sku} against ${po.order.number}${compare(left, '0') > 0 ? ` (${formatDecimal(left)} still open)` : ''}.`,
+        );
+      } else {
+        env.feedback(
+          'ok',
+          `Received ${formatDecimal(r.quantity)} × ${item.sku} into ${location?.path}.`,
+        );
+      }
+      onDone(r.order);
     },
-    onError: (error) => env.feedback('error', errorMessage(error)),
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'over_receipt') {
+        // Another receipt got there first: the line has less open than shown.
+        setConfirmOver(false);
+      }
+      env.feedback('error', errorMessage(error));
+    },
   });
 
   const step = (delta: string) =>
     setQuantity((q) => {
-      const next = normalize(add(/^\d+(\.\d{1,6})?$/.test(q) ? q : '0', delta));
+      const next = normalize(add(DECIMAL.test(q) ? q : '0', delta));
       return compare(next, '1') < 0 ? '1' : next;
     });
 
   return (
     <div className="scan-card">
       <ItemTitle item={item} />
-      {!env.location ? (
-        <p className="notice error">Scan a location label: where do these go?</p>
+      {po ? (
+        <p className="scan-po-line">
+          <strong>{po.order.number}</strong> · ordered {formatDecimal(po.line.ordered)} · received{' '}
+          {formatDecimal(po.line.received)} · <strong>{formatDecimal(po.line.open)} open</strong>
+        </p>
       ) : null}
+      {!location ? <p className="notice error">Scan a location label: where do these go?</p> : null}
 
       {serialMode ? (
         <>
@@ -212,16 +649,16 @@ function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDo
         </>
       ) : (
         <>
-          {item.packs.length > 0 ? (
+          {packs.length > 0 ? (
             <select
               aria-label="Pack"
               value={pack?.packId ?? ''}
               onChange={(e) => {
-                setPack(item.packs.find((p) => p.packId === e.target.value) ?? null);
+                setPack(packs.find((p) => p.packId === e.target.value) ?? null);
               }}
             >
               <option value="">Units</option>
-              {item.packs.map((p) => (
+              {packs.map((p) => (
                 <option key={p.packId} value={p.packId}>
                   {p.name} ({formatDecimal(p.baseQuantity)})
                 </option>
@@ -299,12 +736,26 @@ function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDo
         </div>
       ) : null}
 
+      {over !== '0' ? (
+        <label className="scan-over notice">
+          <input
+            type="checkbox"
+            checked={confirmOver}
+            onChange={(e) => setConfirmOver(e.target.checked)}
+          />
+          <span>
+            This is {formatDecimal(over)} more than the {formatDecimal(po!.line.open)} still open.
+            Receive the extra {formatDecimal(over)} as an over-receipt.
+          </span>
+        </label>
+      ) : null}
+
       <p className="scan-confirm" aria-live="polite">
         {pack
           ? `${formatDecimal(entered)} × ${pack.name} (${formatDecimal(pack.baseQuantity)}) = ${formatDecimal(base)} units`
           : `${formatDecimal(base)} ${base === '1' ? 'unit' : 'units'}`}
         {lotMode && lotCode ? ` · lot ${lotCode}` : ''}
-        {env.location ? ` → ${env.location.path}` : ''}
+        {location ? ` → ${location.path}` : ''}
       </p>
       <div className="scan-actions">
         <button
@@ -312,7 +763,9 @@ function ReceiveForm({ env, item, onDone }: { env: ScanEnv; item: ScanItem; onDo
           disabled={!valid || receive.isPending}
           onClick={() => receive.mutate()}
         >
-          {receive.isPending ? 'Receiving…' : `Receive ${formatDecimal(base)}`}
+          {receive.isPending
+            ? 'Receiving…'
+            : `Receive ${formatDecimal(base)}${over !== '0' ? ` (${formatDecimal(over)} over)` : ''}`}
         </button>
         <button type="button" className="secondary" onClick={() => onDone()}>
           Cancel

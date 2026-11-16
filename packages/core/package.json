@@ -12,7 +12,8 @@
     "./barcodes": "./src/catalog/barcodes.ts",
     "./labels": "./src/labels/layouts.ts",
     "./packs": "./src/catalog/packs.ts",
-    "./activity": "./src/activity/vocabulary.ts"
+    "./activity": "./src/activity/vocabulary.ts",
+    "./reports": "./src/reports/catalog.ts"
   },
   "dependencies": {
     "@airstock/db": "workspace:*",

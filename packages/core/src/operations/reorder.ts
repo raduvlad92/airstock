@@ -1,3 +1,4 @@
+import type { Tx } from '@airstock/db';
 import { z } from 'zod';
 import { applyAlertChanges, type RuleState, reorderRuleStates } from '../alerts/check.ts';
 import { compare, normalize, subtract } from '../catalog/decimal.ts';
@@ -37,7 +38,7 @@ const RuleOut = z.object({
 type RuleView = z.infer<typeof RuleOut>;
 
 /** Whether the caller's scope covers a rule: its warehouse, or its location's path. */
-function ruleInScope(scope: string[] | null, s: Pick<RuleState, 'scopeIds'>): boolean {
+export function ruleInScope(scope: string[] | null, s: Pick<RuleState, 'scopeIds'>): boolean {
   return scope === null || s.scopeIds.some((id) => scope.includes(id));
 }
 
@@ -516,42 +517,6 @@ export const suggestFromLowStock = defineOperation({
         audit: { targetType: 'purchase_order', targetId: 'suggestions', context: { input } },
       };
     }
-    // The supplier item: the rule's preferred supplier's item for the variant, else the variant's
-    // preferred supplier item.
-    const items = await ctx.tx.query<{
-      variant_id: string;
-      supplier_id: string;
-      supplier_name: string;
-      id: string;
-      supplier_sku: string | null;
-      pack_id: string | null;
-      pack_name: string | null;
-      pack_factor: string | null;
-      minimum_order_quantity: string | null;
-      last_cost: string | null;
-      preferred: boolean;
-      quantity_scale: number;
-    }>(
-      `select i.variant_id, i.supplier_id, s.name as supplier_name, i.id, i.supplier_sku, i.pack_id,
-         k.name as pack_name, k.base_quantity::text as pack_factor,
-         i.minimum_order_quantity::text, i.last_cost::text, i.preferred, v.quantity_scale
-       from supplier_items i
-       join suppliers s on s.shop_id = i.shop_id and s.id = i.supplier_id and s.status = 'active'
-       join variants v on v.shop_id = i.shop_id and v.id = i.variant_id
-       left join packs k on k.shop_id = i.shop_id and k.id = i.pack_id and k.status = 'active'
-       where i.status = 'active' and i.variant_id = any($1::uuid[])
-       order by i.preferred desc, i.id`,
-      [[...new Set(states.map((s) => s.variantId))]],
-    );
-    const suppliers = await ctx.tx.query<{ id: string; name: string }>(
-      `select id, name from suppliers where id = any($1::uuid[]) and status = 'active'`,
-      [states.map((s) => s.preferredSupplierId).filter((id): id is string => id !== null)],
-    );
-    const [scales] = await ctx.tx.query<{ scales: Record<string, number> }>(
-      `select coalesce(jsonb_object_agg(id, quantity_scale), '{}'::jsonb) as scales
-       from variants where id = any($1::uuid[])`,
-      [[...new Set(states.map((s) => s.variantId))]],
-    );
     const drafts = new Map<
       string,
       {
@@ -569,17 +534,9 @@ export const suggestFromLowStock = defineOperation({
       productName: string;
       need: string;
     }> = [];
-    for (const s of states) {
-      const wanted = s.reorderQuantity ? s.reorderQuantity : subtract(s.maximumLevel!, s.available);
-      const need = normalize(subtract(wanted, s.onOrder));
+    for (const { state: s, need, supplier, line } of await suggestReorders(ctx.tx, states, costs)) {
       if (compare(need, '0') <= 0) continue;
-      const item = s.preferredSupplierId
-        ? items.find((i) => i.variant_id === s.variantId && i.supplier_id === s.preferredSupplierId)
-        : items.find((i) => i.variant_id === s.variantId && i.preferred);
-      const supplierId = s.preferredSupplierId ?? item?.supplier_id ?? null;
-      const supplierName =
-        suppliers.find((x) => x.id === supplierId)?.name ?? item?.supplier_name ?? null;
-      if (!supplierId || !supplierName) {
+      if (!supplier || !line) {
         withoutSupplier.push({
           ruleId: s.ruleId,
           variantId: s.variantId,
@@ -589,24 +546,110 @@ export const suggestFromLowStock = defineOperation({
         });
         continue;
       }
-      if (input.supplierId && supplierId !== input.supplierId) continue;
-      const factor = item?.pack_id && item.pack_factor ? normalize(item.pack_factor) : null;
-      const scale = scales?.scales[s.variantId] ?? 0;
-      // Whole packs; base units rounded up to the variant's decimal places; then the minimum.
-      let quantity = factor
-        ? ceilDecimal(normalize(divideExact(need, factor)), 0)
-        : ceilDecimal(need, scale);
-      if (item?.minimum_order_quantity)
-        quantity = max(quantity, normalize(item.minimum_order_quantity));
-      const key = `${supplierId}:${s.warehouseId}`;
+      if (input.supplierId && supplier.id !== input.supplierId) continue;
+      const key = `${supplier.id}:${s.warehouseId}`;
       const draft = drafts.get(key) ?? {
-        supplierId,
-        supplierName,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
         warehouseId: s.warehouseId,
         warehouseName: s.warehouseName,
         lines: [],
       };
-      draft.lines.push({
+      draft.lines.push(line);
+      drafts.set(key, draft);
+    }
+    return {
+      result: {
+        drafts: [...drafts.values()].sort((a, b) => a.supplierName.localeCompare(b.supplierName)),
+        withoutSupplier,
+        costVisible: costs,
+      },
+      audit: { targetType: 'purchase_order', targetId: 'suggestions', context: { input } },
+    };
+  },
+});
+
+/** A low rule's suggested reorder: what it needs, from whom, and the rounded line. */
+export interface ReorderSuggestion {
+  state: RuleState;
+  /** Base units the rule asks for, minus what is already on order (can be zero or less). */
+  need: string;
+  supplier: { id: string; name: string } | null;
+  /** Null without a supplier. */
+  line: z.infer<typeof SuggestedLine> | null;
+}
+
+/**
+ * The suggestion for each rule state (D11): the reorder quantity, or the amount up to the maximum
+ * level, minus what is on order, rounded up to the supplier's pack and minimum order quantity.
+ * The supplier item is the rule's preferred supplier's item for the variant, else the variant's
+ * preferred supplier item. Shared by drafting from low stock and the low-stock report.
+ */
+export async function suggestReorders(
+  tx: Tx,
+  states: RuleState[],
+  costs: boolean,
+): Promise<ReorderSuggestion[]> {
+  if (states.length === 0) return [];
+  const variantIds = [...new Set(states.map((s) => s.variantId))];
+  const items = await tx.query<{
+    variant_id: string;
+    supplier_id: string;
+    supplier_name: string;
+    id: string;
+    supplier_sku: string | null;
+    pack_id: string | null;
+    pack_name: string | null;
+    pack_factor: string | null;
+    minimum_order_quantity: string | null;
+    last_cost: string | null;
+    preferred: boolean;
+    quantity_scale: number;
+  }>(
+    `select i.variant_id, i.supplier_id, s.name as supplier_name, i.id, i.supplier_sku, i.pack_id,
+       k.name as pack_name, k.base_quantity::text as pack_factor,
+       i.minimum_order_quantity::text, i.last_cost::text, i.preferred, v.quantity_scale
+     from supplier_items i
+     join suppliers s on s.shop_id = i.shop_id and s.id = i.supplier_id and s.status = 'active'
+     join variants v on v.shop_id = i.shop_id and v.id = i.variant_id
+     left join packs k on k.shop_id = i.shop_id and k.id = i.pack_id and k.status = 'active'
+     where i.status = 'active' and i.variant_id = any($1::uuid[])
+     order by i.preferred desc, i.id`,
+    [variantIds],
+  );
+  const suppliers = await tx.query<{ id: string; name: string }>(
+    `select id, name from suppliers where id = any($1::uuid[]) and status = 'active'`,
+    [states.map((s) => s.preferredSupplierId).filter((id): id is string => id !== null)],
+  );
+  const [scales] = await tx.query<{ scales: Record<string, number> }>(
+    `select coalesce(jsonb_object_agg(id, quantity_scale), '{}'::jsonb) as scales
+     from variants where id = any($1::uuid[])`,
+    [variantIds],
+  );
+  return states.map((s) => {
+    const wanted = s.reorderQuantity ? s.reorderQuantity : subtract(s.maximumLevel!, s.available);
+    const need = normalize(subtract(wanted, s.onOrder));
+    const item = s.preferredSupplierId
+      ? items.find((i) => i.variant_id === s.variantId && i.supplier_id === s.preferredSupplierId)
+      : items.find((i) => i.variant_id === s.variantId && i.preferred);
+    const supplierId = s.preferredSupplierId ?? item?.supplier_id ?? null;
+    const supplierName =
+      suppliers.find((x) => x.id === supplierId)?.name ?? item?.supplier_name ?? null;
+    if (!supplierId || !supplierName) return { state: s, need, supplier: null, line: null };
+    const factor = item?.pack_id && item.pack_factor ? normalize(item.pack_factor) : null;
+    const scale = scales?.scales[s.variantId] ?? 0;
+    const positive = compare(need, '0') > 0 ? need : '0';
+    // Whole packs; base units rounded up to the variant's decimal places; then the minimum.
+    let quantity = factor
+      ? ceilDecimal(normalize(divideExact(positive, factor)), 0)
+      : ceilDecimal(positive, scale);
+    if (item?.minimum_order_quantity && compare(positive, '0') > 0)
+      quantity = max(quantity, normalize(item.minimum_order_quantity));
+    return {
+      state: s,
+      need,
+      supplier: { id: supplierId, name: supplierName },
+      line: {
         ruleId: s.ruleId,
         variantId: s.variantId,
         sku: s.sku,
@@ -626,19 +669,10 @@ export const suggestFromLowStock = defineOperation({
         quantity,
         ordered: normalize(factor ? exactProduct(quantity, factor) : quantity),
         unitCost: costs && item?.last_cost ? item.last_cost : null,
-      });
-      drafts.set(key, draft);
-    }
-    return {
-      result: {
-        drafts: [...drafts.values()].sort((a, b) => a.supplierName.localeCompare(b.supplierName)),
-        withoutSupplier,
-        costVisible: costs,
       },
-      audit: { targetType: 'purchase_order', targetId: 'suggestions', context: { input } },
     };
-  },
-});
+  });
+}
 
 /**
  * a ÷ b for rounding up to whole packs: the whole quotient, plus a small fraction when there is a

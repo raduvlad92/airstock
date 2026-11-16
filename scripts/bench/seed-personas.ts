@@ -11,7 +11,9 @@
  * values go through the product's own encoders (fields, barcodes, packs, SKUs), and opening stock
  * follows the import's receipt path: an operation, a position, a ledger entry with its unit cost,
  * and a completed idempotency record per variant and location, so the ledger reconciles with the
- * balances. The catalog is dated `--days` ago, where seed-history.ts starts the activity. No audit
+ * balances. Where the schema has milestone I1's stock engine (migration 0017), it also writes the
+ * moving-average cost and its history, and runs I1's reconciler; columns and tables a schema lacks
+ * are left out. The catalog is dated `--days` ago, where seed-history.ts starts the activity. No audit
  * events are written here; seed-history.ts writes the history, including the import itself.
  *
  * Shop names start with "Bench ". A shop that already exists is left as it is and reported, so a
@@ -164,11 +166,20 @@ const TABLES: Array<[string, string]> = [
   ],
   [
     'inventory_positions',
-    'id uuid, variant_id uuid, location_id uuid, condition text, on_hand numeric, version bigint, created_at timestamptz, updated_at timestamptz',
+    'id uuid, variant_id uuid, location_id uuid, condition text, on_hand numeric, version bigint, received_at timestamptz, created_at timestamptz, updated_at timestamptz',
   ],
   [
     'inventory_entries',
-    'id uuid, operation_id uuid, position_id uuid, variant_id uuid, location_id uuid, delta numeric, unit_cost numeric, created_at timestamptz',
+    'id uuid, operation_id uuid, position_id uuid, variant_id uuid, location_id uuid, delta numeric, unit_cost numeric, cost_basis text, created_at timestamptz',
+  ],
+  // Moving-average cost (milestone I1, migration 0017): skipped on an older schema.
+  [
+    'variant_cost_history',
+    'id uuid, variant_id uuid, operation_id uuid, occurred_at timestamptz, kind text, quantity_delta numeric, unit_cost numeric, quantity_after numeric, average_after numeric',
+  ],
+  [
+    'variant_costs',
+    'variant_id uuid, quantity numeric, average_cost numeric, updated_at timestamptz',
   ],
   [
     'idempotency_records',
@@ -773,6 +784,7 @@ class ShopSeed {
   /** Opening stock along the import's receipt path (imports.ts, receiveOpeningStock). */
   receipts() {
     const callerId = `user:${this.ownerUserId}`;
+    const costs = new Map<string, { quantity: number; average: number }>();
     const sorted = [...this.stock.values()].sort((a, b) =>
       a.variantId + a.locationId < b.variantId + b.locationId ? -1 : 1,
     );
@@ -797,6 +809,7 @@ class ShopSeed {
         condition: 'sellable',
         on_hand: String(s.quantity),
         version: 0,
+        received_at: startIso,
         created_at: startIso,
         updated_at: startIso,
       });
@@ -808,7 +821,24 @@ class ShopSeed {
         location_id: s.locationId,
         delta: String(s.quantity),
         unit_cost: s.cost,
+        cost_basis: 'entered',
         created_at: startIso,
+      });
+      // As apply_stock_cost does for a receipt with a cost: the moving average and its history.
+      const c = costs.get(s.variantId) ?? { quantity: 0, average: 0 };
+      const quantity = c.quantity + s.quantity;
+      const average = (c.quantity * c.average + s.quantity * Number(s.cost)) / quantity;
+      costs.set(s.variantId, { quantity, average });
+      this.push('variant_cost_history', {
+        id: uuidv7(start.getTime()),
+        variant_id: s.variantId,
+        operation_id: operationId,
+        occurred_at: startIso,
+        kind: 'receipt',
+        quantity_delta: String(s.quantity),
+        unit_cost: s.cost,
+        quantity_after: String(quantity),
+        average_after: average.toFixed(6),
       });
       this.push('idempotency_records', {
         caller_id: callerId,
@@ -820,6 +850,14 @@ class ShopSeed {
         created_at: startIso,
         completed_at: startIso,
         result_operation_id: operationId,
+      });
+    }
+    for (const [variantId, c] of costs) {
+      this.push('variant_costs', {
+        variant_id: variantId,
+        quantity: String(c.quantity),
+        average_cost: c.average.toFixed(6),
+        updated_at: startIso,
       });
     }
     if (this.generated > 0) this.push('barcode_sequences', { last_value: this.generated });
@@ -837,8 +875,32 @@ const client = new pg.Client({ connectionString: url });
 await client.connect();
 const q = (sql: string, params: unknown[] = []) => client.query(sql, params);
 
+// The seed runs on the schema it finds: columns and tables a migration has not added yet are
+// left out, so the same seed works before and after milestone I1's stock engine.
+const existingColumns = new Map<string, Set<string>>();
+for (const r of (
+  await q(
+    `select table_name, column_name from information_schema.columns where table_schema = 'public'`,
+  )
+).rows as Array<{ table_name: string; column_name: string }>) {
+  existingColumns.set(
+    r.table_name,
+    (existingColumns.get(r.table_name) ?? new Set()).add(r.column_name),
+  );
+}
+const skipped = new Set<string>();
+
 async function insert(table: string, columns: string, shopId: string, rows: Row[]) {
-  const cols = columns.split(',').map((c) => c.trim().split(/\s+/));
+  const present = existingColumns.get(table);
+  const cols = columns
+    .split(',')
+    .map((c) => c.trim().split(/\s+/))
+    .filter(([n]) => {
+      if (present?.has(n!)) return true;
+      if (rows.length > 0) skipped.add(present ? `${table}.${n}` : table);
+      return false;
+    });
+  if (!present || rows.length === 0) return;
   const names = cols.map(([n]) => `"${n}"`).join(', ');
   const types = cols.map(([n, ...t]) => `"${n}" ${t.join(' ')}`).join(', ');
   for (let i = 0; i < rows.length; i += 2000) {
@@ -932,6 +994,16 @@ const mismatch = await q(
   [out.map((s) => s.shopId)],
 );
 console.log(`Positions whose ledger does not sum to on hand: ${mismatch.rows[0].n}`);
+if (skipped.size > 0) console.log(`Not in this schema, so not written: ${[...skipped].join(', ')}`);
+if (existingColumns.has('variant_costs')) {
+  // Milestone I1's reconciler checks the whole database, other shops included.
+  const problems = await q(
+    'select problem, count(*)::int as n from stock_reconciliation_problems() group by problem',
+  );
+  console.log(
+    `Stock reconciliation (whole database): ${problems.rows.length === 0 ? 'no problems' : JSON.stringify(problems.rows)}`,
+  );
+}
 await client.end();
 
 if (args.check) await check(out);

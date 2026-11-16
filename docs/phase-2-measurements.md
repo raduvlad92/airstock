@@ -8,14 +8,14 @@ Each milestone adds its section here: what was seeded, the sizes, and the timing
 ## I0 baseline (bench project)
 
 **When:** 16 November 2026.  
-**Database:** Neon `airstock-bench`, Frankfurt, PostgreSQL 17, free plan, compute autoscaling between 0.25 and 2 CU. Schema at migration 0015 (Phase 1 complete), with no new indexes.  
+**Database:** Neon `airstock-bench`, Frankfurt, PostgreSQL 17, free plan, compute autoscaling between 0.25 and 2 CU. Schema at migration 0015 and product code as at the end of Phase 1, before milestone I1's stock engine (migration 0017). No new indexes.  
 **Client:** a laptop in Europe. One round trip to the database takes about 15 ms, so the tables give the server's time separately from the client's.
 
 ### Seed
 
 `scripts/bench/seed-personas.ts` writes the six shops of plan Section 7.2. Each catalog is made up in its persona's style, and no product is a real brand's. Every EAN uses the restricted-circulation prefix 2, which no real product carries.
 
-Values go through the product's own encoders for fields, barcodes, packs, and SKUs. Rows are written in batches as the database owner, as in Phase 1. Opening stock follows the import's receipt path: per variant and location, one operation, one position, one ledger entry with its unit cost, and one completed idempotency record. The ledger reconciles with the balances (0 mismatches). A read-back through the product's own read operations succeeds for every shop except one grid query, which fails because of a product bug (see [Findings](#findings)).
+Values go through the product's own encoders for fields, barcodes, packs, and SKUs. Rows are written in batches as the database owner, as in Phase 1. Opening stock follows the import's receipt path: per variant and location, one operation, one position, one ledger entry with its unit cost, and one completed idempotency record. On a schema with I1's stock engine (migration 0017), the seed also writes the moving-average cost and its history, as `apply_stock_cost` does for a receipt with a cost. The seed was checked on that schema: I1's `stock_reconciliation_problems()` finds nothing. The ledger reconciles with the balances (0 mismatches). A read-back through the product's own read operations succeeds for every shop except one grid query, which fails because of a product bug (see [Findings](#findings)).
 
 | Shop | Persona | Variants | Products | Packs | Barcodes | Supplier items | Bundles | Locations | Positions |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -126,6 +126,7 @@ Neon counts the whole cluster: the `postgres`, `template0`, and `template1` data
 - **Search grows with the catalog:** about 0.3 s at 20,000 variants and 18,000 products. That is not yet a problem.
 - **The owner's shop fails two shapes:** default sort and in-stock failed in all eight runs (500, first finding below).
 - **Caches were warm.** The run followed the seed.
+- **I1 has since changed the in-stock shape.** It now reads the shared `stock_positions` function, so I1's own bench run replaces that row.
 
 ### Activity search
 

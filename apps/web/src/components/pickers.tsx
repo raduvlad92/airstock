@@ -1,4 +1,5 @@
 import type { SelectHTMLAttributes } from 'react';
+import { countries } from './countries.ts';
 
 type SelectProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, 'children' | 'value'> & {
   value: string;
@@ -109,6 +110,22 @@ export function TimeZoneSelect({ value, ...rest }: SelectProps) {
             </option>
           ))}
         </optgroup>
+      ))}
+    </select>
+  );
+}
+
+/** A country picker: every ISO 3166-1 country by English name, with "Not set" first. */
+export function CountrySelect({ value, ...rest }: SelectProps) {
+  const list = countries();
+  return (
+    <select value={value} {...rest}>
+      <option value="">Not set</option>
+      {value && !list.some((c) => c.code === value) ? <option value={value}>{value}</option> : null}
+      {list.map((c) => (
+        <option key={c.code} value={c.code}>
+          {c.name}
+        </option>
       ))}
     </select>
   );

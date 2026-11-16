@@ -171,6 +171,45 @@ describe('warehouses page', () => {
     expect(save.body).not.toHaveProperty('contract');
   });
 
+  it('starts the time zone, country, and currency from the shop when the warehouse has none', async () => {
+    const bare = { ...warehouses(true), warehouses: [] as unknown[] };
+    bare.warehouses = [{ ...warehouses(true).warehouses[0]!, address: null, contract: null }];
+    const calls = mockApi({
+      [`/shops/${SHOP}`]: context([...STORAGE, 'storage.commercial.read']),
+      '/shops': { shops: [] },
+      [`/shops/${SHOP}/warehouses`]: bare,
+      [`/shops/${SHOP}/locations`]: LOCATIONS,
+      [`/shops/${SHOP}/warehouses/${WH}`]: { warehouse: bare.warehouses[0] },
+    });
+    renderAt(`/app/shops/${SHOP}/warehouses`);
+    expect(await screen.findByText('Europe/Bucharest')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]!);
+    const form = (await screen.findByRole('button', { name: 'Save' })).closest('form')!;
+    const pick = (label: string) => within(form).getByLabelText(label) as HTMLSelectElement;
+    expect(pick('Time zone').value).toBe('Europe/Bucharest');
+    expect(pick('Country').value).toBe('RO');
+    expect(pick('Country').selectedOptions[0]!.textContent).toBe('Romania');
+    expect(pick('Currency').value).toBe('EUR');
+    expect(within(form).queryByText(/Empty uses the shop/)).toBeNull();
+    expect(
+      within(form).getByPlaceholderText(
+        "The site's IDs in other systems, one per line: provider: ID",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText('Fees'), { target: { value: 'Per pallet' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === `/shops/${SHOP}/warehouses/${WH}`)).toBe(true),
+    );
+    const save = calls.find((c) => c.path === `/shops/${SHOP}/warehouses/${WH}`)!;
+    // The shop's own zone stays null, so the warehouse follows the shop if it changes.
+    expect(save.body).toMatchObject({
+      timezone: null,
+      address: { country: 'RO' },
+      contract: { feeDescription: 'Per pallet', currency: 'EUR' },
+    });
+  });
+
   it('renames a location with the version it read', async () => {
     const calls = mockApi({
       [`/shops/${SHOP}`]: context(STORAGE),

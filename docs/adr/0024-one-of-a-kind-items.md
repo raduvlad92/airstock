@@ -1,4 +1,4 @@
-# 0023. One-of-a-kind items, both ways
+# 0024. One-of-a-kind items, both ways
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D5 and Section 5.7 (milestone I1). The phone flow follows in I4, and listing on Shopify in I6.
 

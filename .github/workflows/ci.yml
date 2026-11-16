@@ -45,17 +45,18 @@ jobs:
       - name: ADR index and numbers
         run: node scripts/adr-index.mjs --check
 
-      # Documentation-only changes skip the heavy steps but still report this check, so a
+      # Documentation-only pull requests skip the heavy steps but still report this check, so a
       # required status never waits forever (a workflow-level path filter would).
+      # Pushes to main always build, test, and deploy. Superseded main runs are cancelled, so
+      # skipping a documentation-only push could leave the cancelled run's code undeployed
+      # (it happened on 16 November: #78 was cancelled by the docs-only #81).
       - name: Detect code changes
         id: changes
         run: |
+          base=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
             base=FETCH_HEAD
-          else
-            base="${{ github.event.before }}"
-            git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || base=""
           fi
           if [ -z "$base" ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"

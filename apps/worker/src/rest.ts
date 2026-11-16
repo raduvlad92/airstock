@@ -38,6 +38,7 @@ export function mountRestRoutes(app: Hono<AppEnv>, deps: AppDeps): void {
         logger: deps.logger,
         ...fileAccess(deps),
         media: mediaDelivery(deps),
+        ...(deps.webhookSecrets ? { webhookSecrets: deps.webhookSecrets } : {}),
       },
       op,
       {

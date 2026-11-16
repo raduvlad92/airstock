@@ -1,0 +1,62 @@
+{
+  "/api/v1/shops/{shopId}/webhook-subscriptions/{subscriptionId}/delete": {
+    "post": {
+      "operationId": "webhooks.subscriptions.delete",
+      "summary": "Delete a webhook subscription",
+      "description": "Stops all deliveries and cancels pending retries. The delivery log and history are kept.",
+      "x-permission": "webhooks.manage",
+      "x-connection-scope": "webhooks:manage",
+      "x-audit-action": "webhook.subscription.deleted",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "subscriptionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscriptionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "deleted": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "subscriptionId",
+                  "deleted"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

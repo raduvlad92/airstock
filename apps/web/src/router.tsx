@@ -17,6 +17,7 @@ import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.
 import { ShopsPage } from './pages/shops.tsx';
 import { SuppliersPage } from './pages/suppliers.tsx';
 import { WarehousesPage } from './pages/warehouses.tsx';
+import { WebhooksPage } from './pages/webhooks.tsx';
 
 const rootRoute = createRootRoute({ component: RootLayout });
 
@@ -120,6 +121,11 @@ const apiRoute = createRoute({
   path: '/api',
   component: ApiCredentialsPage,
 });
+const webhooksRoute = createRoute({
+  getParentRoute: () => integrationsRoute,
+  path: '/webhooks',
+  component: WebhooksPage,
+});
 
 const settingsRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -165,7 +171,13 @@ export const routeTree = rootRoute.addChildren([
     suppliersRoute,
     labelsRoute,
     activityRoute,
-    integrationsRoute.addChildren([integrationsIndexRoute, shopifyRoute, aiRoute, apiRoute]),
+    integrationsRoute.addChildren([
+      integrationsIndexRoute,
+      shopifyRoute,
+      aiRoute,
+      apiRoute,
+      webhooksRoute,
+    ]),
     settingsRoute.addChildren([
       settingsIndexRoute,
       shopSettingsRoute,

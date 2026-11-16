@@ -99,6 +99,7 @@ export interface TestOptions {
   media?: AppDeps['media'];
   runJobNow?: AppDeps['runJobNow'];
   rateLimiter?: AppDeps['rateLimiter'];
+  webhookSecrets?: AppDeps['webhookSecrets'];
 }
 
 export interface TestApp {
@@ -179,6 +180,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     media: options.media,
     runJobNow: options.runJobNow,
     rateLimiter: options.rateLimiter,
+    webhookSecrets: options.webhookSecrets ?? null,
     logger: { error: () => {} },
   });
   return {

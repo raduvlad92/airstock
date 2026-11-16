@@ -103,7 +103,8 @@
                         "members.manage",
                         "integrations.sync",
                         "imports.run",
-                        "exports.run"
+                        "exports.run",
+                        "webhooks.manage"
                       ]
                     }
                   },

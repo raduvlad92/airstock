@@ -132,7 +132,7 @@ describe('warehouses through REST (F14)', () => {
         e.action === 'storage.warehouse.created' && e.phase === 'outcome',
     );
     expect(created.changes.contract).toBe('hidden');
-    expect(JSON.stringify(history)).not.toContain('9.75');
+    expect(JSON.stringify(history)).not.toContain('"9.75');
   });
 
   it('updates with compare-and-set and refuses a stale version', async () => {

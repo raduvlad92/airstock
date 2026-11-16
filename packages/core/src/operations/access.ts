@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { errors } from '../errors.ts';
 import { sha256Hex } from '../hash.ts';
-import { CONNECTION_SCOPES, effectivePermissions } from '../permissions.ts';
+import {
+  CONNECTION_SCOPES,
+  effectivePermissions,
+  MCP_CONNECTION_SCOPES,
+  type McpConnectionScope,
+} from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
 
@@ -205,7 +210,10 @@ export const createConnection = defineOperation({
   kind: 'command',
   scope: 'shop',
   input: z.object({
-    scopes: z.array(z.enum(CONNECTION_SCOPES)).min(1),
+    // Webhook management is never grantable to an MCP connection (D14).
+    scopes: z
+      .array(z.enum(MCP_CONNECTION_SCOPES as [McpConnectionScope, ...McpConnectionScope[]]))
+      .min(1),
   }),
   output: z.object({ grantId: Id, scopes: z.array(z.string()) }),
   permission: 'shop.read',
@@ -217,7 +225,7 @@ export const createConnection = defineOperation({
   async handler(ctx, input) {
     if (!ctx.membership) throw errors.forbidden('A shop membership is required.');
     const grantId = ctx.newId();
-    const scopes = CONNECTION_SCOPES.filter((s) => input.scopes.includes(s));
+    const scopes = MCP_CONNECTION_SCOPES.filter((s) => input.scopes.includes(s));
     await ctx.tx.query(
       `insert into connection_grants (shop_id, id, membership_id, scopes)
        values (app_shop_id(), $1, $2, $3)`,

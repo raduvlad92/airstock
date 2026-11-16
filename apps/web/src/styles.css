@@ -1428,3 +1428,45 @@ button.danger {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Webhooks (plan 5.13) --------------------------------------------------------------------- */
+
+.webhook-form {
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.webhook-form h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.check.event-type {
+  align-items: flex-start;
+}
+
+.check.event-type > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.badge.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chip-remove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0 0.15rem;
+  line-height: 1;
+}
+
+.webhook-actions {
+  margin-top: 0.75rem;
+  align-items: flex-end;
+}

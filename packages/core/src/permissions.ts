@@ -28,6 +28,8 @@ export const PERMISSIONS = [
   'integrations.sync',
   'imports.run',
   'exports.run',
+  /** Create and change outgoing webhook subscriptions, and see their deliveries (D14). */
+  'webhooks.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -76,8 +78,18 @@ export const CONNECTION_SCOPES = [
   'inventory:read',
   'inventory:write',
   'activity:read',
+  'webhooks:manage',
 ] as const;
 export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
+
+/**
+ * Scopes an MCP connection can be granted. Webhook subscriptions are managed in the dashboard
+ * and the API only, so a connected AI client cannot open a channel that sends shop data out (D14).
+ */
+export type McpConnectionScope = Exclude<ConnectionScope, 'webhooks:manage'>;
+export const MCP_CONNECTION_SCOPES: readonly McpConnectionScope[] = CONNECTION_SCOPES.filter(
+  (s): s is McpConnectionScope => s !== 'webhooks:manage',
+);
 export type RequiredScope = ConnectionScope | 'session';
 
 /** The permissions a member actually has: an explicit set for connectors, else the role's. */

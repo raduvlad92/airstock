@@ -1,0 +1,232 @@
+{
+  "/api/v1/shops/{shopId}/webhook-deliveries": {
+    "get": {
+      "operationId": "webhooks.deliveries.list",
+      "summary": "List webhook deliveries",
+      "description": "The delivery log, newest first, kept for 30 days: status, attempts, the last response code and up to 1 KB of its body. Page with `before`.",
+      "x-permission": "webhooks.manage",
+      "x-connection-scope": "webhooks:manage",
+      "x-audit-action": "webhooks.deliveries.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "subscriptionId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sending",
+              "retrying",
+              "delivered",
+              "failed",
+              "cancelled"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        {
+          "name": "before",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Cursor from the previous page.",
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deliveries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "deliveryId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "subscriptionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "subscriptionName": {
+                          "type": "string"
+                        },
+                        "eventId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "description": "The envelope `id`: the same on every retry and replay."
+                        },
+                        "eventType": {
+                          "type": "string"
+                        },
+                        "test": {
+                          "type": "boolean"
+                        },
+                        "replayOf": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "sending",
+                            "retrying",
+                            "delivered",
+                            "failed",
+                            "cancelled"
+                          ]
+                        },
+                        "attempts": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "nextAttemptAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastAttemptAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastStatusCode": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastResponse": {
+                          "description": "At most the first 1 KB of the last response.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastDurationMs": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "deliveredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "deliveryId",
+                        "subscriptionId",
+                        "subscriptionName",
+                        "eventId",
+                        "eventType",
+                        "test",
+                        "replayOf",
+                        "status",
+                        "attempts",
+                        "nextAttemptAt",
+                        "lastAttemptAt",
+                        "lastStatusCode",
+                        "lastError",
+                        "lastResponse",
+                        "lastDurationMs",
+                        "deliveredAt",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "nextCursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "deliveries",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

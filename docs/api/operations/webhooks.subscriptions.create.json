@@ -1,0 +1,240 @@
+{
+  "/api/v1/shops/{shopId}/webhook-subscriptions": {
+    "post": {
+      "operationId": "webhooks.subscriptions.create",
+      "summary": "Create a webhook subscription",
+      "description": "Sends the chosen event types to an HTTPS URL, signed with a new secret. The secret is returned once, here; store it in the receiving system to check the `Airstock-Signature` header.",
+      "x-permission": "webhooks.manage",
+      "x-connection-scope": "webhooks:manage",
+      "x-audit-action": "webhook.subscription.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000,
+                  "description": "An HTTPS URL on a public host."
+                },
+                "eventTypes": {
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                },
+                "filters": {
+                  "type": "object",
+                  "properties": {
+                    "locationIds": {
+                      "default": [],
+                      "description": "Warehouse or location IDs. Event types that carry locations are sent only when the event touches one of them, or a location inside one. Empty means every location.",
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      }
+                    },
+                    "alertKinds": {
+                      "default": [],
+                      "description": "Alert kinds for alert event types. Empty means every kind.",
+                      "maxItems": 5,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "low_stock",
+                          "lot_expiring",
+                          "shortage",
+                          "shopify_sync",
+                          "reconciliation_mismatch"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "url",
+                "eventTypes"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscription": {
+                    "type": "object",
+                    "properties": {
+                      "subscriptionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "eventTypes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filters": {
+                        "type": "object",
+                        "properties": {
+                          "locationIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            }
+                          },
+                          "alertKinds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "locationIds",
+                          "alertKinds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "disabled"
+                        ]
+                      },
+                      "disabledReason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "manual",
+                              "failing"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "secretHint": {
+                        "type": "string",
+                        "description": "The last four characters of the current signing secret."
+                      },
+                      "previousSecretExpiresAt": {
+                        "description": "During a rotation, deliveries carry a signature from the previous secret too.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "failingSince": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastSuccessAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastFailureAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "subscriptionId",
+                      "name",
+                      "url",
+                      "eventTypes",
+                      "filters",
+                      "status",
+                      "disabledReason",
+                      "secretHint",
+                      "previousSecretExpiresAt",
+                      "failingSince",
+                      "lastSuccessAt",
+                      "lastFailureAt",
+                      "createdAt",
+                      "updatedAt",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Shown only now. Rotate it to get a new one."
+                  }
+                },
+                "required": [
+                  "subscription",
+                  "secret"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

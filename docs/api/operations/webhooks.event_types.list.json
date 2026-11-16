@@ -1,0 +1,103 @@
+{
+  "/api/v1/shops/{shopId}/webhook-event-types": {
+    "get": {
+      "operationId": "webhooks.event_types.list",
+      "summary": "List the webhook event types",
+      "description": "Every event type a subscription can choose, with a description, the filters that apply, and a sample envelope. New types appear here without client changes.",
+      "x-permission": "webhooks.manage",
+      "x-connection-scope": "webhooks:manage",
+      "x-audit-action": "webhooks.event_types.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apiVersion": {
+                    "type": "string"
+                  },
+                  "eventTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "available",
+                            "coming"
+                          ],
+                          "description": "`coming` types are registered but not emitted yet; they cannot be chosen."
+                        },
+                        "permission": {
+                          "type": "string",
+                          "description": "What the person who subscribes must hold."
+                        },
+                        "filters": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "locations",
+                              "alertKinds"
+                            ]
+                          }
+                        },
+                        "sample": {
+                          "description": "A sample envelope as delivered."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "description",
+                        "status",
+                        "permission",
+                        "filters",
+                        "sample"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "alertKinds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "apiVersion",
+                  "eventTypes",
+                  "alertKinds"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

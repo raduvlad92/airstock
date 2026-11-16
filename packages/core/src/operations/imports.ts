@@ -24,6 +24,7 @@ import { effectivePermissions, isRole } from '../permissions.ts';
 import type { Logger } from '../pipeline.ts';
 import { defineOperation, type FileAccess, type HandlerContext } from '../registry.ts';
 import { Id, iso, normalizeSku } from '../schemas.ts';
+import { insertWebhookEvents, webhookEvent } from '../webhooks/events.ts';
 import { QueryInput, runQuery } from './catalog-query.ts';
 
 // Imports and exports (plan Section 5.12, decision D10, ADR 0018).
@@ -738,6 +739,12 @@ async function finish(
       `update import_jobs set status = $2, error = $3, completed_at = now(), updated_at = now(),
          counts = counts || $4::jsonb, version = version + 1 where id = $1`,
       [importId, status, error, JSON.stringify(c)],
+    );
+    // Announced in the same transaction, only to shops that subscribe (D14).
+    await insertWebhookEvents(
+      tx,
+      [webhookEvent('job.completed', { kind: 'import', id: importId })],
+      uuidv7,
     );
     return c!;
   });
@@ -2074,13 +2081,18 @@ export async function runExportJob(
       `﻿${[header, ...body].join('\r\n')}\r\n`,
       'text/csv; charset=utf-8',
     );
-    await deps.db.transaction({ shopId, userId: null }, (tx) =>
-      tx.query(
+    await deps.db.transaction({ shopId, userId: null }, async (tx) => {
+      await tx.query(
         `update export_jobs set status = 'completed', file_key = $2, row_count = $3, completed_at = now(),
            download_until = now() + interval '24 hours', delete_after = now() + interval '7 days' where id = $1`,
         [exportId, exportFileKey(shopId, exportId), count],
-      ),
-    );
+      );
+      await insertWebhookEvents(
+        tx,
+        [webhookEvent('job.completed', { kind: 'export', id: exportId })],
+        uuidv7,
+      );
+    });
     await deps.audit.send([
       auditEvent(
         { shopId, caller, requestId: uuidv7(), attemptId: null, idempotencyKey: null },
@@ -2096,12 +2108,17 @@ export async function runExportJob(
     ]);
   } catch (error) {
     if (error instanceof AppError) {
-      await deps.db.transaction({ shopId, userId: null }, (tx) =>
-        tx.query(`update export_jobs set status = 'failed', error = $2 where id = $1`, [
+      await deps.db.transaction({ shopId, userId: null }, async (tx) => {
+        await tx.query(`update export_jobs set status = 'failed', error = $2 where id = $1`, [
           exportId,
           error.message,
-        ]),
-      );
+        ]);
+        await insertWebhookEvents(
+          tx,
+          [webhookEvent('job.completed', { kind: 'export', id: exportId })],
+          uuidv7,
+        );
+      });
       return 'done';
     }
     throw error;

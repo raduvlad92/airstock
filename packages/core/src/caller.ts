@@ -1,7 +1,16 @@
 import type { ConnectionScope, Permission, Role } from './permissions.ts';
 
 export type CallerKind = 'user' | 'api_credential' | 'connection' | 'connector' | 'system';
-export type Source = 'dashboard' | 'api' | 'mcp' | 'import' | 'scheduled' | 'admin' | 'shopify';
+export type Source =
+  | 'dashboard'
+  | 'api'
+  | 'mcp'
+  | 'import'
+  | 'scheduled'
+  | 'admin'
+  | 'shopify'
+  /** Outgoing webhook deliveries (plan Section 5.13). */
+  | 'webhooks';
 
 export interface Membership {
   id: string;

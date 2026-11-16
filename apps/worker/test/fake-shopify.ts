@@ -30,6 +30,8 @@ export class FakeStore implements ShopifyAdmin {
   reads = 0;
   /** The next writes fail as throttled (Shopify's cost limit). */
   throttleNext = 0;
+  /** Orders Shopify's search by updated time does not list yet (its index trails). */
+  readonly searchLag = new Set<string>();
   locationList: ShopifyLocation[] = [
     { id: '1001', name: 'Shop location', active: true },
     { id: '1002', name: 'Warehouse', active: true },
@@ -488,7 +490,7 @@ export class FakeStore implements ShopifyAdmin {
   }
   async ordersUpdatedSince(since: string) {
     const orders = this.orders
-      .filter((o) => (o.updatedAt ?? o.createdAt) >= since)
+      .filter((o) => (o.updatedAt ?? o.createdAt) >= since && !this.searchLag.has(o.orderId))
       .sort((a, b) => ((a.updatedAt ?? '') < (b.updatedAt ?? '') ? -1 : 1));
     return { orders: structuredClone(orders), next: null };
   }

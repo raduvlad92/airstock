@@ -1,6 +1,7 @@
 import { type ShopifyPushPayload, uuidv7 } from '@airstock/core';
 import {
   pushAvailability,
+  pushChanges,
   pushConnection,
   runJob,
   runOnboarding,
@@ -240,6 +241,24 @@ export async function shopifyHarness() {
     return outcomes;
   }
 
+  /** Like flush, but every new outbox event of the shop goes to one push, as a queue batch. */
+  async function flushTogether(shopId: string) {
+    const rows = (
+      await ownerQuery<{ id: string; topic: string; payload: object }>(
+        `select id, topic, payload from outbox_events
+         where shop_id = $1 and topic in ('inventory.availability_changed', 'shopify.levels.push')
+         order by created_at, id`,
+        [shopId],
+      )
+    ).filter((r) => !handled.has(r.id));
+    for (const row of rows) handled.add(row.id);
+    return pushChanges(
+      deps(),
+      shopId,
+      rows.map((r) => ({ topic: r.topic, payload: r.payload })),
+    );
+  }
+
   /** Runs an onboarding's steps until it waits for a person or finishes. */
   async function runOnboardingSteps(shopId: string, onboardingId: string, max = 10) {
     const steps = [];
@@ -268,6 +287,7 @@ export async function shopifyHarness() {
     deliver,
     runJobs,
     flush,
+    flushTogether,
     runOnboardingSteps,
     newStore: (prefix: string) => new FakeStore(`${prefix}-${uuidv7().slice(-8)}.myshopify.com`),
   };

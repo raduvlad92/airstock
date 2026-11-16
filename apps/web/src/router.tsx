@@ -4,6 +4,7 @@ import { parseLabelsSearch } from './labels/search.ts';
 import { ActivityPage } from './pages/activity.tsx';
 import { AlertsPage } from './pages/alerts.tsx';
 import { FamiliesSettingsPage, FieldsSettingsPage } from './pages/catalog-settings.tsx';
+import { CountsPage } from './pages/counts.tsx';
 import { ImportsPage } from './pages/imports.tsx';
 import {
   AiConnectionsPage,
@@ -86,6 +87,15 @@ const inventoryIndexRoute = createRoute({
   getParentRoute: () => inventoryRoute,
   path: '/',
   component: InventoryPage,
+});
+const countsRoute = createRoute({
+  getParentRoute: () => inventoryRoute,
+  path: '/counts',
+  component: CountsPage,
+  validateSearch: (search: Record<string, unknown>): { count?: string } =>
+    typeof search.count === 'string' && /^[0-9a-f-]{36}$/.test(search.count)
+      ? { count: search.count }
+      : {},
 });
 const returnsRoute = createRoute({
   getParentRoute: () => inventoryRoute,
@@ -228,7 +238,7 @@ export const routeTree = rootRoute.addChildren([
     shopIndexRoute,
     productsRoute,
     importsRoute,
-    inventoryRoute.addChildren([inventoryIndexRoute, transfersRoute, returnsRoute]),
+    inventoryRoute.addChildren([inventoryIndexRoute, transfersRoute, returnsRoute, countsRoute]),
     warehousesRoute,
     suppliersRoute,
     purchasingRoute,

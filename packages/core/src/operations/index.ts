@@ -20,6 +20,8 @@ import { catalogSchemaOperations } from './catalog-schema.ts';
 import { catalogVariantsOperations } from './catalog-variants.ts';
 import { importsOperations } from './imports.ts';
 import { inventoryOperations } from './inventory.ts';
+import { inventoryAdjustmentsOperations } from './inventory-adjustments.ts';
+import { inventoryCountsOperations } from './inventory-counts.ts';
 import { inventoryLotsOperations } from './inventory-lots.ts';
 import { inventoryQuickAddOperations } from './inventory-quick-add.ts';
 import { inventoryReconciliationOperations } from './inventory-reconciliation.ts';
@@ -56,6 +58,8 @@ export const operations: readonly AnyOperation[] = [
   ...catalogVariantsOperations,
   ...importsOperations,
   ...inventoryOperations,
+  ...inventoryAdjustmentsOperations,
+  ...inventoryCountsOperations,
   ...inventoryLotsOperations,
   ...inventoryQuickAddOperations,
   ...inventoryReconciliationOperations,
@@ -101,6 +105,8 @@ export * from './catalog-schema.ts';
 export * from './catalog-variants.ts';
 export * from './imports.ts';
 export * from './inventory.ts';
+export * from './inventory-adjustments.ts';
+export * from './inventory-counts.ts';
 export * from './inventory-lots.ts';
 export * from './inventory-quick-add.ts';
 export * from './inventory-reconciliation.ts';

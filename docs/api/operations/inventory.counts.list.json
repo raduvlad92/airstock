@@ -1,0 +1,207 @@
+{
+  "/api/v1/shops/{shopId}/counts": {
+    "get": {
+      "operationId": "inventory.counts.list",
+      "summary": "List count sessions",
+      "description": "Use this to find count sessions: open ones by default, newest first. Page with `before`.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.counts.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": "open",
+            "type": "string",
+            "enum": [
+              "open",
+              "submitted",
+              "cancelled",
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "before",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "counts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "submitted",
+                            "cancelled"
+                          ]
+                        },
+                        "blind": {
+                          "type": "boolean"
+                        },
+                        "quick": {
+                          "type": "boolean"
+                        },
+                        "location": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "locationId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "path": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "locationId",
+                                "path"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "submittedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "operationId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "lines": {
+                              "type": "number"
+                            },
+                            "counted": {
+                              "type": "number"
+                            },
+                            "needsReview": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "lines",
+                            "counted",
+                            "needsReview"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "name",
+                        "status",
+                        "blind",
+                        "quick",
+                        "location",
+                        "note",
+                        "createdAt",
+                        "submittedAt",
+                        "operationId",
+                        "totals"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "next": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "counts",
+                  "next"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

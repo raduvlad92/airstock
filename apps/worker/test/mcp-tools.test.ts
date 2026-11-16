@@ -19,6 +19,7 @@ describe('MCP tools', () => {
     const mcp = await mcpSession(t, shop, ['shop:read']);
     const { tools } = await mcp.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
+      'adjust_stock',
       'describe_catalog',
       'edit_catalog',
       'get_operation_outcome',

@@ -1,0 +1,170 @@
+{
+  "/api/v1/shops/{shopId}/pick-lists/{pickListId}/complete": {
+    "post": {
+      "operationId": "picking.lists.complete",
+      "summary": "Complete a pick list and fulfill what was picked",
+      "description": "Use this when the picker is done: fulfills the picked units of manual and API reservations through the fulfill command (stock goes down now), and records Shopify orders’ picks only, because Shopify reports their fulfillment. Short units stay reserved. Lines still open block completion unless leaveOpen is true, which leaves them reserved and unpicked. fulfill false records the picks without fulfilling anything. Needs inventory.fulfill to fulfill.",
+      "x-permission": "picking.run",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "picking.list.completed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "pickListId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "fulfill": {
+                  "default": true,
+                  "type": "boolean"
+                },
+                "leaveOpen": {
+                  "default": false,
+                  "description": "Complete even with lines still to pick.",
+                  "type": "boolean"
+                },
+                "reference": {
+                  "description": "A shipment or batch reference for the fulfillments.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pickListId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "const": "completed"
+                  },
+                  "fulfilled": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        },
+                        "externalRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reservationId",
+                        "operationId",
+                        "quantity",
+                        "externalRef"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "recordedOnly": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "externalRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reservationId",
+                        "externalRef"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Reservations whose picks were recorded but not fulfilled here, such as Shopify orders."
+                  },
+                  "leftOpen": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Lines that were still to pick and stay reserved."
+                  },
+                  "short": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "pickListId",
+                  "status",
+                  "fulfilled",
+                  "recordedOnly",
+                  "leftOpen",
+                  "short"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

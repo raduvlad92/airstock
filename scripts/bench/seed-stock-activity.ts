@@ -338,7 +338,9 @@ class Shop {
   ) {}
 
   push(table: string, row: Row) {
-    (this.out[table] ??= []).push(row);
+    const rows = this.out[table] ?? [];
+    rows.push(row);
+    this.out[table] = rows;
   }
   key(v: string, l: string, c: string, lot: string | null, s: string | null, t: string | null) {
     return `${v}|${l}|${c}|${lot ?? ''}|${s ?? ''}|${t ?? ''}`;
@@ -1632,7 +1634,8 @@ for (const shopRow of shopRows) {
       updated_at: iso(p.updatedAt),
     };
     if (p.isNew) s.push('positions_new', row);
-    else if (p.bumps > 0 || p.receivedAt !== null) s.push('positions_changed', row);
+    // Unchanged positions keep the row the import wrote (migration 0017 set received_at).
+    else if (p.bumps > 0) s.push('positions_changed', row);
   }
   for (const [variantId, c] of s.costs)
     s.push('variant_costs_final', {
@@ -1977,9 +1980,9 @@ for (const shopRow of shopRows) {
     [JSON.stringify(s.out.positions_changed ?? []), s.id],
   );
   await insert('serial_units', s.out.serial_units);
-  await insert('inventory_entries', s.out.inventory_entries);
   await insert('reservations', s.out.reservations);
   await insert('reservation_allocations', s.out.reservation_allocations);
+  await insert('inventory_entries', s.out.inventory_entries);
   await client.query(
     `delete from variant_cost_history where shop_id = $1 and kind = 'opening' and variant_id = any($2::uuid[])`,
     [s.id, conv],

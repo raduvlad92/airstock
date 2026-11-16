@@ -257,7 +257,7 @@ describe('Shopify connector review findings', () => {
   // delivered first, the reconciler, or the create job's own retries running late), step 3 takes
   // the original quantity as what is still to ship and reserves again the units an edit removed
   // or a refund took back. Nothing corrects it until the order changes again in Shopify.
-  it.fails('F5: a late orders/create does not undo an edit already applied', async () => {
+  it('F5: a late orders/create does not undo an edit already applied', async () => {
     const s = await setup('Late payload', 10);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 3 }]);
     const createBody = s.store.webhookBody(order);
@@ -397,7 +397,7 @@ describe('Shopify connector review findings', () => {
   // quarantine at that mapped location. The unit went back to the other location (a returns
   // center, a 3PL), so Airstock now counts a quarantined unit that is not there. ADR 0035: units
   // at an unmapped location wait for a person to receive them.
-  it.fails('F9: a refund restocked at an unmapped Shopify location is not received here', async () => {
+  it('F9: a refund restocked at an unmapped Shopify location is not received here', async () => {
     const s = await setup('Return elsewhere', 5);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }]);
     await event(s, 'orders/create', s.store.webhookBody(order));

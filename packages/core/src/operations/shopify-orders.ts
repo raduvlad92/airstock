@@ -695,15 +695,16 @@ export const syncShopifyOrder = defineOperation({
       };
     }
     // The order row serializes syncs of one order; it is taken before any stock lock and only
-    // by this command.
-    await ctx.tx.query(
+    // by this command. `inserted`: Airstock had not seen the order before.
+    const [upserted] = await ctx.tx.query<{ inserted: boolean }>(
       `insert into shopify_orders (shop_id, connection_id, shopify_order_id, shopify_created_at,
          shopify_updated_at, cancelled_at)
        values (app_shop_id(), $1, $2, $3, $4, $5)
        on conflict (shop_id, connection_id, shopify_order_id) do update set
          shopify_updated_at = greatest(shopify_orders.shopify_updated_at, excluded.shopify_updated_at),
          cancelled_at = coalesce(excluded.cancelled_at, shopify_orders.cancelled_at),
-         synced_at = now(), version = shopify_orders.version + 1`,
+         synced_at = now(), version = shopify_orders.version + 1
+       returning (xmax = 0) as inserted`,
       [
         connectionId,
         order.orderId,
@@ -717,6 +718,14 @@ export const syncShopifyOrder = defineOperation({
       [connectionId, order.orderId],
     );
     const cancelled = orderRow?.cancelled_at !== null && orderRow?.cancelled_at !== undefined;
+    const firstSeen = upserted?.inserted ?? true;
+    // Only the orders/create payload: lines with their original quantities, nothing about edits,
+    // fulfillments, or refunds. For an order already applied from a fuller state it says nothing
+    // new, so it never changes what a known line holds (a late orders/create after an edit).
+    const payloadOnly = order.fulfillments === undefined && order.refunds === undefined;
+    // A line seen for the first time on a later sync of the order was added by an edit: Shopify
+    // took its units then, not when the order was created.
+    const takenAt = firstSeen ? order.createdAt : (order.updatedAt ?? new Date().toISOString());
     const scopes = await ctx.tx.query<ScopeMap>(
       `select shopify_location_id, scope_id, location_id, receive_location_id
        from shopify_location_maps where connection_id = $1 order by position`,
@@ -805,7 +814,7 @@ export const syncShopifyOrder = defineOperation({
         row.inventory_item_id,
         row.shopify_location_id,
         l.quantity,
-        order.createdAt,
+        takenAt,
       );
       lines.push(row);
     }
@@ -956,6 +965,7 @@ export const syncShopifyOrder = defineOperation({
     }
     for (const line of lines) {
       if (!live(line)) continue;
+      if (payloadOnly && existing.has(line.shopify_line_id)) continue;
       const state = order.lines.find((l) => l.lineId === line.shopify_line_id)!;
       const current = state.currentQuantity ?? state.quantity;
       const r = refunded.get(line.shopify_line_id) ?? { all: 0, unshipped: 0, shipped: 0 };
@@ -1055,7 +1065,9 @@ export const syncShopifyOrder = defineOperation({
             returnId = await startReturn(ctx, acc, order.orderId, line, rl.quantity, {
               reference: `shopify:refund/${r.refundId}`,
               reason: 'Refunded with restock in Shopify',
-              scope: scopeOf(rl.locationId) ?? scopeOf(line.shopify_location_id),
+              // Where Shopify restocked: a location that is not mapped is never guessed, so
+              // the return waits there for a person (ADR 0035).
+              scope: rl.locationId ? scopeOf(rl.locationId) : scopeOf(line.shopify_location_id),
             });
             result.returns.push(returnId);
           }
@@ -1126,7 +1138,7 @@ export const syncShopifyOrder = defineOperation({
                 d.type === 'restocked'
                   ? 'Returned and restocked in Shopify'
                   : 'Returned in Shopify, not restocked',
-              scope: scopeOf(d.locationId) ?? scopeOf(line.shopify_location_id),
+              scope: d.locationId ? scopeOf(d.locationId) : scopeOf(line.shopify_location_id),
             });
             result.returns.push(returnId);
           }

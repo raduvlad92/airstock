@@ -1,4 +1,11 @@
-import { type Caller, ops, reconcileShop, sweepShortages, uuidv7 } from '@airstock/core';
+import {
+  type Caller,
+  ops,
+  reconcileShop,
+  sweepExpiredReservations,
+  sweepShortages,
+  uuidv7,
+} from '@airstock/core';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
@@ -284,5 +291,39 @@ describe('F-SCOPE-ALLOCATION-RULE: a scoped member can widen or rewrite a channe
         (e: { code?: string }) => e.code,
       );
     expect(outcome).toBe('location_out_of_scope');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-SCOPE-ENGINE-EVENTS (minor scope leak). Events the engine adds itself (stock/engine.ts
+// expireClaimsAt: inventory.reservation.expired; background.ts sweepShortages:
+// inventory.shortage.filled) are built with ctx.event and never set location_ids. The activity
+// search shows events with null location_ids to every location-scoped reader (activity/query.ts
+// scopeWhere), so a member limited to one warehouse sees out-of-scope position ids and quantities.
+// ---------------------------------------------------------------------------------------------
+describe('F-SCOPE-ENGINE-EVENTS: expiry events carry no locations and reach every scoped reader', () => {
+  it.fails('hides an out-of-scope reservation expiry from a member limited to another warehouse', async () => {
+    const own = await seedShop(db, sink, 'Review expiry scope');
+    const oh = harness(db, sink, own);
+    const wh = await oh.run(ops.createWarehouse, { name: 'Other' });
+    const other = await createLeafLocation(oh, wh.warehouseId, 'Bay');
+    const variantId = await createVariant(oh);
+    await oh.run(ops.receiveStock, { variantId, locationId: own.locationId, quantity: '4' });
+    const r = await oh.run(ops.reserveStock, { variantId, quantity: '2', expiresInSeconds: 60 });
+    await ownerQuery(
+      `update reservations set expires_at = now() - interval '1 minute' where shop_id = $1 and id = $2`,
+      [own.shopId, r.reservationId],
+    );
+    expect(await sweepExpiredReservations(db, 50, [own.shopId])).toBe(1);
+    const scoped = await addMember(own.shopId, 'viewer', [other]);
+    const page = await oh.run(
+      ops.listActivity,
+      { action: 'inventory.reservation.expired', limit: 100 },
+      { caller: scoped.caller },
+    );
+    const leaked = page.events.filter(
+      (e: { targetId: string | null }) => e.targetId === r.reservationId,
+    );
+    expect(leaked).toEqual([]);
   });
 });

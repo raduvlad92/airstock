@@ -3,6 +3,8 @@ export {
   CATALOG_BULK_QUERY,
   gid,
   httpShopifyAdmin,
+  type ListedProduct,
+  type ListingInput,
   MAX_READ_ITEMS,
   MAX_SET_QUANTITIES,
   parseCatalogJsonl,
@@ -27,6 +29,14 @@ export {
   verifyQueryHmac,
   verifyWebhookHmac,
 } from './crypto.ts';
+export {
+  listingsDue,
+  type MediaReader,
+  PRODUCT_JOB,
+  type PublishOutcome,
+  publishListing,
+  syncProductFromShopify,
+} from './listings.ts';
 export {
   authorizeUrl,
   httpShopifyAuth,
@@ -75,8 +85,10 @@ export {
   ORDER_TOPICS,
   type OrderResult,
   orderIdOf,
+  PRODUCT_TOPICS,
   parseOrderWebhook,
   processOrder,
+  productIdOf,
   receiveWebhook,
   runJob,
   type ShopifyConfig,

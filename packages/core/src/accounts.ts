@@ -79,7 +79,14 @@ export function shopifyConnectorCaller(
         'integrations.sync',
       ]),
     },
-    scopes: new Set(['shop:read', 'catalog:read', 'inventory:read', 'inventory:write']),
+    // Products created or changed in Shopify are picked up into the catalog (D21).
+    scopes: new Set([
+      'shop:read',
+      'catalog:read',
+      'catalog:write',
+      'inventory:read',
+      'inventory:write',
+    ]),
     clientId: 'shopify',
     source: 'shopify',
   };

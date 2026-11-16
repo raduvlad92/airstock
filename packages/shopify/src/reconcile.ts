@@ -1,4 +1,5 @@
 import { levelTargets } from '@airstock/core';
+import { listingsDue, publishListing } from './listings.ts';
 import {
   clearConflict,
   type PushLevel,
@@ -49,6 +50,7 @@ export interface ShopifyReconcileResult {
   pushed: number;
   conflicts: number;
   explained: number;
+  listingsPublished: number;
   failed: number;
 }
 
@@ -66,6 +68,7 @@ const empty = (): ShopifyReconcileResult => ({
   pushed: 0,
   conflicts: 0,
   explained: 0,
+  listingsPublished: 0,
   failed: 0,
 });
 
@@ -247,6 +250,15 @@ export async function reconcileConnection(
     result.conflicts += pushed.filter(
       (p) => p.outcome === 'conflict' && !compared.conflicted.has(key(p)),
     ).length;
+  }
+
+  // 4. Listings (D21): pending or failed ones, and products changed since their last sync.
+  for (const productId of await listingsDue(deps, shopId, connectionId)) {
+    if (now() >= deadline) break;
+    const outcome = await publishListing(deps, shopId, connectionId, productId);
+    if (outcome === 'created' || outcome === 'adopted' || outcome === 'updated') {
+      result.listingsPublished += 1;
+    }
   }
 
   // Conflict alerts whose level no longer has a conflict (a remap cleared it): resolved.

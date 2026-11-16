@@ -88,6 +88,22 @@ const Health = z.object({
     ),
   }),
   unmappedLocations: z.array(z.object({ id: z.string(), name: z.string() })),
+  listings: z.object({
+    count: z.number().int(),
+    pending: z.number().int(),
+    failed: z.array(z.object({ productId: Id, name: z.string(), error: z.string().nullable() })),
+    differences: z.array(
+      z.object({
+        productId: Id,
+        name: z.string(),
+        field: z.string(),
+        airstock: z.unknown(),
+        shopify: z.unknown(),
+        changedBy: z.enum(['shopify', 'airstock']),
+        detectedAt: z.string(),
+      }),
+    ),
+  }),
   mappings: z.object({
     locations: z.array(
       z.object({
@@ -291,6 +307,31 @@ async function connectionHealth(
      where m.connection_id = $1 order by v.sku, m.shopify_variant_id limit $2`,
     [c.id, limit],
   );
+  const [listingCounts] = await tx.query<{ count: number; pending: number }>(
+    `select count(*)::int as count, count(*) filter (where state = 'pending')::int as pending
+     from shopify_listings where connection_id = $1`,
+    [c.id],
+  );
+  const failed = await tx.query<{ product_id: string; name: string; last_error: string | null }>(
+    `select l.product_id, p.name, l.last_error from shopify_listings l
+     join products p on p.shop_id = l.shop_id and p.id = l.product_id
+     where l.connection_id = $1 and l.state = 'failed' order by l.updated_at desc limit $2`,
+    [c.id, limit],
+  );
+  const differences = await tx.query<{
+    product_id: string;
+    name: string;
+    field: string;
+    airstock: unknown;
+    shopify: unknown;
+    changed_by: 'shopify' | 'airstock';
+    detected_at: Date;
+  }>(
+    `select d.product_id, p.name, d.field, d.airstock, d.shopify, d.changed_by, d.detected_at
+     from shopify_listing_differences d join products p on p.shop_id = d.shop_id and p.id = d.product_id
+     where d.connection_id = $1 order by d.detected_at desc limit $2`,
+    [c.id, limit],
+  );
   const mapped = new Set(maps.map((m) => m.shopify_location_id));
   return {
     connectionId: c.id,
@@ -317,6 +358,20 @@ async function connectionHealth(
     unmappedLocations: c.shopify_locations
       .filter((l) => l.active && !mapped.has(l.id))
       .map((l) => ({ id: l.id, name: l.name })),
+    listings: {
+      count: listingCounts?.count ?? 0,
+      pending: listingCounts?.pending ?? 0,
+      failed: failed.map((f) => ({ productId: f.product_id, name: f.name, error: f.last_error })),
+      differences: differences.map((d) => ({
+        productId: d.product_id,
+        name: d.name,
+        field: d.field,
+        airstock: d.airstock,
+        shopify: d.shopify,
+        changedBy: d.changed_by,
+        detectedAt: iso(d.detected_at) as string,
+      })),
+    },
     mappings: {
       locations: maps
         .filter((m) => m.visible)
@@ -343,7 +398,7 @@ export const shopifySyncHealth = defineOperation({
   id: 'shopify.sync.health',
   summary: 'Show whether Shopify is in step with Airstock',
   description:
-    'Use this when someone asks whether Shopify is in sync, why a Shopify quantity looks wrong, or what the Shopify connection needs: per connected store, the last sync and push, pending pushes, quantity conflicts (with what Airstock and Shopify each show), Shopify order shortages, unmapped Shopify variants and locations, and the mappings. Read only. Not for stock levels themselves (use get_stock) or alerts in general (use stock_alerts).',
+    'Use this when someone asks whether Shopify is in sync, why a Shopify quantity or listing looks wrong, or what the Shopify connection needs: per connected store, the last sync and push, pending pushes, quantity conflicts (with what Airstock and Shopify each show), Shopify order shortages, unmapped Shopify variants and locations, listings that failed or differ between the two (title, description, status, prices, pictures), and the mappings. Read only. Not for stock levels themselves (use get_stock) or alerts in general (use stock_alerts).',
   kind: 'read',
   scope: 'shop',
   input: z.object({

@@ -170,28 +170,13 @@ function customField(def: FieldDefinition): QueryField {
 }
 
 /**
- * Warehouses and locations that keep everything inside them out of fulfillment (ADR 0016, as
- * location_fulfillment_eligible()). `path_ids` holds the warehouse, every location above, and the
- * location itself, so one overlap test per position applies the rule. As an uncorrelated scalar the
- * planner computes the list once per query; it is almost always empty.
+ * Sellable stock available at fulfillment-eligible locations in the caller's scope, from the shared
+ * `stock_positions` function (expired claims and lots excluded, as everywhere else).
  */
-const INELIGIBLE_IDS = `(select coalesce(array_agg(x.id), '{}'::uuid[]) from (
-  select id from locations where not fulfillment_eligible
-  union all select id from warehouses where not fulfillment_eligible) x)`;
-
-/** Sellable stock available at fulfillment-eligible locations in the caller's scope. */
 function availableExpr(params: Params, scope: string[] | null): string {
   const s = params.add(scope);
-  return `(select coalesce(sum(ip.on_hand - ip.allocated + coalesce((
-       select sum(a.quantity - a.released - a.fulfilled) from reservation_allocations a
-       join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
-       where a.shop_id = ip.shop_id and a.position_id = ip.id and a.released + a.fulfilled < a.quantity
-         and r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()), 0)), 0)
-     from inventory_positions ip
-     join locations l on l.shop_id = ip.shop_id and l.id = ip.location_id
-     where ip.shop_id = v.shop_id and ip.variant_id = v.id and ip.condition = 'sellable'
-       and l.status = 'active' and not (l.path_ids && ${INELIGIBLE_IDS})
-       and (${s}::uuid[] is null or l.path_ids && ${s}::uuid[]))`;
+  return `(select coalesce(sum(sp.available), 0) from stock_positions(array[v.id]) sp
+     where sp.available > 0 and (${s}::uuid[] is null or sp.path_ids && ${s}::uuid[]))`;
 }
 
 /** Built-in fields, by the name the API uses. */

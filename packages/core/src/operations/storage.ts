@@ -388,7 +388,7 @@ async function lockSubtree(
   locationId: string,
 ): Promise<{ warehouse: LockedWarehouse; location: LockedLocation; subtree: LockedLocation[] }> {
   const [found] = await tx.query<{ warehouse_id: string }>(
-    'select warehouse_id from locations where id = $1',
+    `select warehouse_id from locations where id = $1 and kind = 'storage'`,
     [locationId],
   );
   if (!found) throw errors.notFound('Location');

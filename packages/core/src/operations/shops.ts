@@ -43,8 +43,10 @@ export const createShop = defineOperation({
          insert into memberships (shop_id, id, user_id, role) values ($1, $6, $5, 'owner')),
        wh as (
          insert into warehouses (shop_id, id, name, ownership) values ($1, $7, 'Main stock', 'owned'))
-       insert into locations (shop_id, id, warehouse_id, name, path, path_ids)
-       values ($1, $8, $7, 'Main stock', 'Main stock', array[$7, $8]::uuid[])`,
+       -- The default location, and the system location that holds stock in transit (D1).
+       insert into locations (shop_id, id, warehouse_id, name, path, path_ids, fulfillment_eligible, kind)
+       values ($1, $8, $7, 'Main stock', 'Main stock', array[$7, $8]::uuid[], true, 'storage'),
+         ($1, $9, null, 'In transit', 'In transit', array[$9]::uuid[], false, 'in_transit')`,
       [
         ctx.shopId,
         input.name,
@@ -54,6 +56,7 @@ export const createShop = defineOperation({
         membershipId,
         warehouseId,
         locationId,
+        ctx.newId(),
       ],
     );
     await createSystemFields(ctx);

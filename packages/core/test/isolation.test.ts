@@ -6,6 +6,7 @@ import {
   type Harness,
   harness,
   MemoryAuditSink,
+  ownerQuery,
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
@@ -87,6 +88,64 @@ describe('row-level security for the runtime role', () => {
       tx.query('select * from variants where id = $1', [variantB]),
     );
     expect(leak).toHaveLength(0);
+  });
+
+  it('keeps the stock engine tables to their shop (A13, milestone I1)', async () => {
+    // Shop B gets a row in every new table; shop A's runtime role must see none of them.
+    const op = `select id from inventory_operations where shop_id = $1 limit 1`;
+    const [opRow] = await ownerQuery<{ id: string }>(op, [b.shopId]);
+    await ownerQuery(
+      `with lot as (
+         insert into lots (shop_id, id, variant_id, code, code_normalized, created_operation_id)
+         values ($1, gen_random_uuid(), $2, 'L1', 'L1', $3) returning id),
+       rule as (
+         insert into allocation_rules (shop_id, id, channel) values ($1, gen_random_uuid(), 'default')
+         returning id),
+       rule_loc as (
+         insert into allocation_rule_locations (shop_id, rule_id, position, scope_id)
+         select $1, rule.id, 0, $4 from rule),
+       alert as (
+         insert into alerts (shop_id, id, kind, dedupe_key) values ($1, gen_random_uuid(), 'test', 'test')),
+       rec as (
+         insert into stock_reconciliations (shop_id, id, trigger, problems)
+         values ($1, gen_random_uuid(), 'daily', 0))
+       select 1`,
+      [b.shopId, variantB, opRow!.id, b.locationId],
+    );
+    const tables = [
+      'lots',
+      'allocation_rules',
+      'allocation_rule_locations',
+      'variant_costs',
+      'variant_cost_history',
+      'alerts',
+      'stock_reconciliations',
+      'serial_units',
+    ];
+    for (const table of tables) {
+      const rows = await db.transaction({ shopId: a.shopId, userId: null, readOnly: true }, (tx) =>
+        tx.query<{ shop_id: string }>(`select shop_id from ${table}`),
+      );
+      expect(
+        rows.filter((r) => r.shop_id !== a.shopId),
+        table,
+      ).toEqual([]);
+    }
+    const seenByB = await db.transaction({ shopId: b.shopId, userId: null, readOnly: true }, (tx) =>
+      tx.query<{ n: number }>('select count(*)::int as n from variant_costs'),
+    );
+    expect(seenByB[0]?.n).toBeGreaterThan(0);
+    // Valuation history is written once, never changed.
+    await expect(
+      db.transaction({ shopId: b.shopId, userId: null }, (tx) =>
+        tx.query('update variant_cost_history set quantity_after = 0'),
+      ),
+    ).rejects.toThrow(/permission denied/);
+    // Another shop's stock function results stay out of reach too.
+    const foreign = await db.transaction({ shopId: a.shopId, userId: null, readOnly: true }, (tx) =>
+      tx.query('select * from stock_positions(array[$1::uuid])', [variantB]),
+    );
+    expect(foreign).toHaveLength(0);
   });
 
   it('rejects writes into another shop', async () => {

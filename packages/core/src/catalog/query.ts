@@ -591,13 +591,21 @@ export interface Cursor {
   sort: string;
 }
 
+// Cursors carry the last row's sort value, which can be any text (a product name with "ș" or
+// "€"). btoa only takes Latin-1, so the JSON is encoded as UTF-8 bytes first.
 export function encodeCursor(c: Cursor): string {
-  return btoa(JSON.stringify(c)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  let binary = '';
+  for (const b of new TextEncoder().encode(JSON.stringify(c))) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 export function decodeCursor(text: string, sortKey: string): Cursor {
   try {
-    const c = JSON.parse(atob(text.replace(/-/g, '+').replace(/_/g, '/'))) as Cursor;
+    const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+    const c = JSON.parse(
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes),
+    ) as Cursor;
     if (c.sort !== sortKey || typeof c.id !== 'string' || !/^[0-9a-f-]{36}$/.test(c.id))
       throw new Error();
     return c;

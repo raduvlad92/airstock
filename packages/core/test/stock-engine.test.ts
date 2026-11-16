@@ -759,6 +759,44 @@ describe('bundles (A36, engine half; G7)', () => {
 });
 
 describe('shortages (D6)', () => {
+  it('keeps a shortage limited to a location within that location’s scope (PRD 2.4)', async () => {
+    const variantId = await createVariant(h);
+    const wh = await h.run(ops.createWarehouse, { name: `Short scope ${uuidv7().slice(-4)}` });
+    const own = await createLeafLocation(h, wh.warehouseId, 'Shelf');
+    const scoped = await addMember(shop.shopId, 'manager', [wh.warehouseId]);
+    const as = { caller: scoped.caller };
+    // A channel order limited to the main shelf, with nothing there: all of it is short.
+    const order = await h.run(
+      ops.reserveStock,
+      {
+        variantId,
+        quantity: '2',
+        locationId: shop.locationId,
+        allowShortage: true,
+        purpose: 'external_order',
+      },
+      { caller: await connector(shop) },
+    );
+    const mine = await h.run(
+      ops.reserveStock,
+      { variantId, quantity: '1', locationId: own, allowShortage: true, purpose: 'external_order' },
+      { caller: await connector(shop) },
+    );
+    const listed = await h.run(ops.listShortages, { variantId }, as);
+    expect(listed.shortages.map((r: { reservationId: string }) => r.reservationId)).toEqual([
+      mine.reservationId,
+    ]);
+    const seen = await h.run(ops.listReservations, { variantId }, as);
+    expect(seen.reservations.map((r: { reservationId: string }) => r.reservationId)).toEqual([
+      mine.reservationId,
+    ]);
+    await expect(
+      h.run(ops.releaseReservation, { reservationId: order.reservationId }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    await h.run(ops.releaseReservation, { reservationId: mine.reservationId }, as);
+    await h.run(ops.releaseReservation, { reservationId: order.reservationId });
+  });
+
   it('lets only a connector record a shortage; receipts fill them oldest first; availability stays at zero', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '2' });

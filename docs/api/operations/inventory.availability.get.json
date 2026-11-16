@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.availability.get",
       "summary": "Get stock and availability for a variant",
-      "description": "Use this for \"how many do I have\" questions: on hand, reserved, available, in transit, quarantined, damaged, expired, and shortage for one variant, per location, condition, lot, and serial, with totals. Filter by locationId (with its sub-locations) or warehouseId. Totals cover only the locations you can access; `partial` says when that is a subset. The average cost and value are included with costs.read.",
+      "description": "Use this for \"how many do I have\" questions: on hand, reserved, available, in transit, quarantined, damaged, expired, and shortage for one variant, per location, condition, lot, and serial, with totals. Filter by locationId (with its sub-locations) or warehouseId. Totals cover only the locations you can access; `partial` says when that is a subset. The average cost and value are included with costs.read for members with access to every location.",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.availability.viewed",
@@ -317,7 +317,7 @@
                         "type": "null"
                       }
                     ],
-                    "description": "Shop-wide moving average and value of owned stock; needs costs.read."
+                    "description": "Shop-wide moving average and value of owned stock; needs costs.read and access to every location."
                   }
                 },
                 "required": [

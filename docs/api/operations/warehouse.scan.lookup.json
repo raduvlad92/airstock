@@ -550,7 +550,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "Shop-wide moving average and value of owned stock; needs costs.read."
+                            "description": "Shop-wide moving average and value of owned stock; needs costs.read and access to every location."
                           }
                         },
                         "required": [

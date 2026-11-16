@@ -56,6 +56,28 @@ The scanner has only been tested in browsers on a computer. This run checks the 
    - On the phone, open **Pick**, choose the list, scan the shelf label, scan the item, and tap **Confirm**.
    - On one line, try **Short…**.
    - Tap **Finish and fulfill**. Stock should drop only at the end.
+10. **Count after a short pick.** After the **Short…** in step 9, tap **Count that shelf**. Count should open on that shelf with the item listed at 0 and the missing quantity in the yellow note. Scan the units that are really there, check the quantity, and tap **Confirm count**. If the count leaves fewer units than are reserved, choose **Release** or **Move to other stock** for the order, then **Apply with these choices**.
+11. **Quick count.** In **Count**, scan another shelf's label, then each item on it. Scan a case label once: the line should read "1 × Case (…)". Type a number into one line. Check the list under the lines, then tap **Confirm count**.
+12. **Count session.**
+    - Tap **Count session**, then **New count of …** for the current shelf.
+    - Scan an item, tap **Record**, and tap **None here** on a line that is not on the shelf.
+    - On the laptop, receive one more unit of the recorded item onto that shelf.
+    - On the phone, the line should show under **Moved since counted**. Choose **Keep my count** or **Add the movements**, then **Submit count**.
+13. **Move.** In **Move**, scan a shelf's label, scan an item twice, then scan another shelf's label in the same warehouse. The button should read "Move 2 units to …". Tap it, then check both shelves in **Look up**.
+14. **Receive a purchase order.**
+    - On the laptop, send a purchase order for an item (Purchasing, **Mark as sent** is enough).
+    - On the phone, open **Receive**, tap **Purchase order**, scan the shelf's label, and choose the order. You can also type its number, such as PO-0001.
+    - Scan the item. The line should show ordered, received, and open.
+    - Scan it until it is more than is open. **Receive** should stay greyed out until you tick the over-receipt box.
+15. **Quick add a graded card.** In the installed app from step 8:
+    - Open **Quick add** and scan a shelf's label.
+    - Tap **Take picture**: the camera should open. Take one or two pictures. If only the photo library opens, note it, and use **From library**.
+    - Scan the slab's certificate barcode, or type the number. Choose **Trading cards**, fill condition, grading company, grade, name, and price, and tap **Add 1 unit**.
+    - The pictures should show **Linked**.
+    - When you go back to the scanner, the camera should come back by itself.
+    - Scan the slab in **Look up**: it should show as one of a kind, with one unit on that shelf.
+    - **List on Shopify** stays greyed out until the Shopify connector is ready.
+16. **Unknown code to quick add.** In **Look up**, scan a new slab. Tap **Quick add as a one-of-a-kind item**. The certificate field should already hold the code.
 
 Note anything that fails, and at which step.
 

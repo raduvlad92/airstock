@@ -329,6 +329,7 @@ describe('event-type registry (plan 7.1, webhook settings)', () => {
       'transfer.status_changed',
       'purchase_order.status_changed',
       'return.status_changed',
+      'shopify.sync_conflict',
     ]);
     expect(() => webhookEvent('stock.change', {})).toThrow(/Unknown webhook event type/);
   });
@@ -412,12 +413,12 @@ describe('subscriptions, fan-out, and delivery', () => {
       r.run(ops.createWebhookSubscription, {
         name: 'x',
         url: 'https://hooks.example.com/x',
-        eventTypes: ['shopify.sync_conflict'],
+        eventTypes: ['reservation.shortage'],
       }),
     ).rejects.toMatchObject({
       code: 'validation_failed',
       extra: {
-        errors: [{ path: 'eventTypes.0', message: 'shopify.sync_conflict is not available yet.' }],
+        errors: [{ path: 'eventTypes.0', message: 'reservation.shortage is not available yet.' }],
       },
     });
     await expect(

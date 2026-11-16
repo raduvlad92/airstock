@@ -549,6 +549,38 @@ A return changed state, such as authorized, received, inspecting, or completed: 
 }
 ```
 
+### `shopify.sync_conflict`
+
+Shopify and Airstock disagree on a quantity or field that no order explains; Shopify is left as it is.
+
+- **Needs:** `inventory.read` (held by whoever subscribes)
+- **Filters:** warehouses and locations
+
+```json
+{
+  "id": "0193a1b2-0000-7000-8000-0000000000ff",
+  "type": "shopify.sync_conflict",
+  "created_at": "2026-11-16T09:00:00.000Z",
+  "shop_id": "0193a1b2-0000-7000-8000-000000000001",
+  "api_version": "v1",
+  "data": {
+    "conflict": {
+      "kind": "quantity",
+      "connectionId": "0193a1b2-0000-7000-8000-000000000041",
+      "shopDomain": "example.myshopify.com",
+      "inventoryItemId": "44012345678",
+      "shopifyLocationId": "1001",
+      "variantId": "0193a1b2-0000-7000-8000-000000000011",
+      "sku": "ETB-PRE-01",
+      "locationId": "0193a1b2-0000-7000-8000-000000000021",
+      "expected": 9,
+      "airstock": 9,
+      "shopify": 11
+    }
+  }
+}
+```
+
 ### Coming with later milestones
 
 Registered, listed by the API with `"status": "coming"`, hidden in the dashboard, and refused when subscribing until the milestone that emits them ships. The samples show the planned shape.
@@ -556,7 +588,6 @@ Registered, listed by the API with `"status": "coming"`, hidden in the dashboard
 | Type | Description | Filters |
 | --- | --- | --- |
 | `reservation.shortage` | A connector order was reserved with a shortage it could not cover (I1). | warehouses and locations |
-| `shopify.sync_conflict` | Shopify and Airstock disagree on a quantity or field that no order explains (I6). | warehouses and locations |
 
 <!-- event-catalog:end -->
 

@@ -1,17 +1,14 @@
-import type { ops } from '@airstock/core';
-import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
-import { api, type Out } from '../api.ts';
-import { ErrorNotice, formatDecimal, Loading } from '../components/ui.tsx';
+import { formatDecimal } from '../components/ui.tsx';
 import { type ScanEnv, useScanHandler } from './flows.ts';
-import type { BarcodeMatch, LocationRow, Resolved } from './resolve.ts';
-
-type Availability = Out<typeof ops.getAvailability>;
+import type { Resolved, ScanItem, ScanLocation, ScanStock } from './resolve.ts';
+import { UnknownCode } from './unknown.tsx';
 
 /**
- * Look up (plan 5.12): scan a variant, pack, or location barcode and see the item, its pack, and
- * its stock per location. Each lookup is a read the server logs as one.
+ * Look up (plan 5.12): scan a variant, pack, or location barcode, a serial or certificate
+ * number, or type a SKU, and see the item, its pack, and its stock per location. Each lookup is
+ * a read the server logs as one. An unknown code offers to attach it or create an item.
  */
 export function LookupFlow({ env }: { env: ScanEnv }) {
   const [last, setLast] = useState<Resolved | null>(null);
@@ -26,52 +23,77 @@ export function LookupFlow({ env }: { env: ScanEnv }) {
     return (
       <div className="scan-hint">
         <h2>Look up</h2>
-        <p>Scan a product, a case, or a location label.</p>
+        <p>Scan a product, a case, a certificate, or a location label.</p>
       </div>
     );
   }
-  if (last.kind === 'item') return <ItemCard env={env} match={last.match} />;
+  if (last.kind === 'item') {
+    return <ItemCard env={env} item={last.item} stock={last.stock} />;
+  }
   if (last.kind === 'location') return <LocationCard location={last.location} />;
   return (
-    <div className="scan-card">
-      <h2>Unknown code</h2>
-      <p className="mono scan-code">{last.code}</p>
-      <p className="muted">No product or pack in this shop has this code.</p>
-    </div>
+    <UnknownCode
+      key={last.code}
+      env={env}
+      code={last.code}
+      onDone={(resolved) => setLast(resolved)}
+    />
   );
 }
 
-export function ItemCard({ env, match }: { env: ScanEnv; match: BarcodeMatch }) {
-  const stock = useQuery({
-    queryKey: ['shop', env.shopId, 'availability', match.variantId],
-    queryFn: () =>
-      api<Availability>(`/shops/${env.shopId}/availability`, {
-        query: { variantId: match.variantId },
-      }),
-  });
+export function ItemTitle({ item }: { item: ScanItem }) {
   return (
-    <div className="scan-card">
-      <h2>{match.productName}</h2>
+    <>
+      <h2>
+        {item.productName}
+        {item.variantName ? <span className="muted"> · {item.variantName}</span> : null}
+      </h2>
       <p className="scan-meta">
-        <span className="mono">{match.sku}</span>
-        {match.packName ? (
+        <span className="mono">{item.sku}</span>
+        {item.pack ? (
           <span className="scan-pack">
-            {match.packName} = {formatDecimal(match.baseQuantity)} units
+            {item.pack.name} = {formatDecimal(item.pack.baseQuantity)} units
           </span>
         ) : (
           <span className="scan-pack">Single unit</span>
         )}
+        {item.serial ? <span className="mono">Serial {item.serial.serial}</span> : null}
+        {item.trackingMode !== 'none' ? (
+          <span>{TRACKING[item.trackingMode] ?? item.trackingMode}</span>
+        ) : null}
+        {item.oneOfAKind ? <span>One of a kind</span> : null}
       </p>
-      {stock.isPending ? <Loading label="Loading stock…" /> : null}
-      <ErrorNotice error={stock.error} />
-      {stock.data ? (
-        <StockTable stock={stock.data} here={env.location?.locationId ?? null} />
+    </>
+  );
+}
+
+const TRACKING: Record<string, string> = {
+  lot: 'Tracked by lot',
+  lot_expiry: 'Lots with expiry',
+  serial: 'Tracked by serial',
+};
+
+export function ItemCard({
+  env,
+  item,
+  stock,
+}: {
+  env: ScanEnv;
+  item: ScanItem;
+  stock: ScanStock | null;
+}) {
+  return (
+    <div className="scan-card">
+      <ItemTitle item={item} />
+      {item.serial && item.serial.status !== 'in_stock' ? (
+        <p className="notice">This unit is {item.serial.status.replaceAll('_', ' ')}.</p>
       ) : null}
+      {stock ? <StockTable stock={stock} here={env.location?.locationId ?? null} /> : null}
       <p className="small-text">
         <Link
           to="/shops/$shopId/products"
           params={{ shopId: env.shopId }}
-          search={{ item: match.productId }}
+          search={{ item: item.productId }}
         >
           Open in the dashboard
         </Link>
@@ -80,7 +102,7 @@ export function ItemCard({ env, match }: { env: ScanEnv; match: BarcodeMatch }) 
   );
 }
 
-export function StockTable({ stock, here }: { stock: Availability; here: string | null }) {
+export function StockTable({ stock, here }: { stock: ScanStock; here: string | null }) {
   const t = stock.totals;
   return (
     <>
@@ -101,7 +123,7 @@ export function StockTable({ stock, here }: { stock: Availability; here: string 
       {stock.positions.length === 0 ? (
         <p className="muted">No stock anywhere{stock.partial ? ' you can see' : ''}.</p>
       ) : (
-        <ul className="scan-positions">
+        <ul className="scan-positions" aria-label="Stock per location">
           {stock.positions.map((p) => (
             <li key={p.positionId} className={p.locationId === here ? 'here' : undefined}>
               <span className="scan-position-path">{p.locationPath}</span>
@@ -112,9 +134,7 @@ export function StockTable({ stock, here }: { stock: Availability; here: string 
                   : ''}
                 {p.serial ? `Serial ${p.serial} · ` : ''}
                 {p.inTransit ? 'in transit · ' : ''}
-                {formatDecimal(p.reserved) !== '0'
-                  ? `${formatDecimal(p.reserved)} reserved · `
-                  : ''}
+                {formatDecimal(p.reserved) !== '0' ? `${formatDecimal(p.reserved)} reserved` : ''}
               </span>
               <strong className="scan-position-qty">{formatDecimal(p.onHand)}</strong>
             </li>
@@ -125,7 +145,7 @@ export function StockTable({ stock, here }: { stock: Availability; here: string 
   );
 }
 
-function LocationCard({ location }: { location: LocationRow }) {
+function LocationCard({ location }: { location: ScanLocation }) {
   return (
     <div className="scan-card">
       <h2>{location.path}</h2>
@@ -133,7 +153,11 @@ function LocationCard({ location }: { location: LocationRow }) {
         <span>{location.warehouseName}</span>
         {location.code ? <span className="mono">{location.code}</span> : null}
       </p>
-      <p className="muted">Set as the current location for the next scans.</p>
+      <p className="muted">
+        {location.holdsStock
+          ? 'Set as the current location for the next scans.'
+          : 'This location has sub-locations; scan one of those.'}
+      </p>
     </div>
   );
 }

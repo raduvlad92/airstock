@@ -1,0 +1,550 @@
+{
+  "/api/v1/shops/{shopId}/scan": {
+    "get": {
+      "operationId": "warehouse.scan.lookup",
+      "summary": "Identify a scanned code and show its stock",
+      "description": "Use this when someone scans or types a code in the warehouse and wants to know what it is: a location label (LOC:…), a product or pack barcode, a serial or grading-certificate number, a location code, or a SKU. Returns the location, or the item with its packs and its stock per location (the same figures as get_stock). An unknown code returns kind \"unknown\". Not for searching by name (use search_catalog).",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "warehouse.scan.looked_up",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "code",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The text the scanner read."
+          }
+        },
+        {
+          "name": "includeStock",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Include the item’s stock per location (default true).",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "location",
+                      "item",
+                      "unknown"
+                    ]
+                  },
+                  "location": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "warehouseId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "warehouseName": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "code": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "holdsStock": {
+                            "type": "boolean",
+                            "description": "Stock sits only at locations without children."
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "warehouseId",
+                          "warehouseName",
+                          "path",
+                          "code",
+                          "holdsStock"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "item": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "variantName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sku": {
+                            "type": "string"
+                          },
+                          "trackingMode": {
+                            "type": "string",
+                            "description": "none, lot, lot_expiry, or serial."
+                          },
+                          "oneOfAKind": {
+                            "type": "boolean"
+                          },
+                          "quantityScale": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "matchedBy": {
+                            "type": "string",
+                            "enum": [
+                              "barcode",
+                              "serial",
+                              "sku"
+                            ]
+                          },
+                          "pack": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "packId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "baseQuantity": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "packId",
+                                  "name",
+                                  "baseQuantity"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Set when the code is a pack’s barcode, such as a case."
+                          },
+                          "serial": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "serialId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "serial": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string"
+                                  },
+                                  "locationId": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "locationPath": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "serialId",
+                                  "serial",
+                                  "status",
+                                  "locationId",
+                                  "locationPath"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Set when the code is a serial or certificate number."
+                          },
+                          "packs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "packId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "baseQuantity": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "packId",
+                                "name",
+                                "baseQuantity"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "variantId",
+                          "productId",
+                          "productName",
+                          "variantName",
+                          "sku",
+                          "trackingMode",
+                          "oneOfAKind",
+                          "quantityScale",
+                          "matchedBy",
+                          "pack",
+                          "serial",
+                          "packs"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stock": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "variantId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "sku": {
+                            "type": "string"
+                          },
+                          "trackingMode": {
+                            "type": "string"
+                          },
+                          "partial": {
+                            "type": "boolean"
+                          },
+                          "totals": {
+                            "type": "object",
+                            "properties": {
+                              "onHand": {
+                                "type": "string",
+                                "description": "Physically at locations, in every condition (not in transit)."
+                              },
+                              "sellableOnHand": {
+                                "type": "string"
+                              },
+                              "reserved": {
+                                "type": "string"
+                              },
+                              "available": {
+                                "type": "string",
+                                "description": "Never below zero; shortages are reported separately."
+                              },
+                              "quarantined": {
+                                "type": "string"
+                              },
+                              "damaged": {
+                                "type": "string"
+                              },
+                              "repair": {
+                                "type": "string"
+                              },
+                              "supplierReturn": {
+                                "type": "string"
+                              },
+                              "expired": {
+                                "type": "string",
+                                "description": "On hand in lots past their sellable date."
+                              },
+                              "inTransit": {
+                                "type": "string"
+                              },
+                              "ownedTotal": {
+                                "type": "string",
+                                "description": "On hand plus in transit."
+                              },
+                              "shortage": {
+                                "type": "string",
+                                "description": "Demand from accepted orders that no stock covers yet (whole shop)."
+                              }
+                            },
+                            "required": [
+                              "onHand",
+                              "sellableOnHand",
+                              "reserved",
+                              "available",
+                              "quarantined",
+                              "damaged",
+                              "repair",
+                              "supplierReturn",
+                              "expired",
+                              "inTransit",
+                              "ownedTotal",
+                              "shortage"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "positions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "positionId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "locationId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "locationPath": {
+                                  "type": "string"
+                                },
+                                "warehouseId": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "condition": {
+                                  "type": "string",
+                                  "enum": [
+                                    "sellable",
+                                    "quarantine",
+                                    "damaged",
+                                    "repair",
+                                    "supplier_return"
+                                  ]
+                                },
+                                "lotId": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "lotCode": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "expiresOn": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "lotExpired": {
+                                  "type": "boolean"
+                                },
+                                "serial": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "inTransit": {
+                                  "type": "boolean"
+                                },
+                                "sellable": {
+                                  "type": "boolean"
+                                },
+                                "onHand": {
+                                  "type": "string"
+                                },
+                                "reserved": {
+                                  "type": "string"
+                                },
+                                "available": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "positionId",
+                                "locationId",
+                                "locationPath",
+                                "warehouseId",
+                                "condition",
+                                "lotId",
+                                "lotCode",
+                                "expiresOn",
+                                "lotExpired",
+                                "serial",
+                                "inTransit",
+                                "sellable",
+                                "onHand",
+                                "reserved",
+                                "available"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "costVisible": {
+                            "type": "boolean"
+                          },
+                          "cost": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "averageCost": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "defaultCost": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "ownedQuantity": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "averageCost",
+                                  "defaultCost",
+                                  "ownedQuantity",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Shop-wide moving average and value of owned stock; needs costs.read."
+                          }
+                        },
+                        "required": [
+                          "variantId",
+                          "sku",
+                          "trackingMode",
+                          "partial",
+                          "totals",
+                          "positions",
+                          "costVisible",
+                          "cost"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The item’s stock per location you can see, as get_stock returns it."
+                  }
+                },
+                "required": [
+                  "code",
+                  "kind",
+                  "location",
+                  "item",
+                  "stock"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -98,6 +98,7 @@
                         "inventory.reserve",
                         "inventory.fulfill",
                         "inventory.adjust",
+                        "picking.run",
                         "activity.read",
                         "credentials.manage",
                         "connections.manage",

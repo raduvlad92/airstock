@@ -1,5 +1,6 @@
 import type { FlowDef } from './flows.ts';
 import { LookupFlow } from './lookup.tsx';
+import { ReceiveFlow } from './receive.tsx';
 
 /**
  * Every flow on the scan page, in tab order. A flow that is not built yet shows "coming soon";
@@ -7,13 +8,7 @@ import { LookupFlow } from './lookup.tsx';
  */
 export const FLOWS: FlowDef[] = [
   { id: 'lookup', label: 'Look up', permission: 'inventory.read', Component: LookupFlow },
-  {
-    id: 'receive',
-    label: 'Receive',
-    permission: 'inventory.receive',
-    soon: 'Receiving by scan is coming soon.',
-    Component: LookupFlow,
-  },
+  { id: 'receive', label: 'Receive', permission: 'inventory.receive', Component: ReceiveFlow },
   {
     id: 'pick',
     label: 'Pick',

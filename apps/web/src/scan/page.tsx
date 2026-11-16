@@ -1,8 +1,6 @@
-import type { ops } from '@airstock/core';
-import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, errorMessage, type Out } from '../api.ts';
+import { errorMessage } from '../api.ts';
 import { ErrorNotice, Loading } from '../components/ui.tsx';
 import { can, type ShopContext, useShopContext, useShops } from '../context.tsx';
 import { CameraScanner } from './camera.tsx';
@@ -12,11 +10,11 @@ import {
   type CurrentLocation,
   type FlowId,
   isFlowId,
+  ScanBus,
   ScanBusContext,
   type ScanEnv,
-  type ScanHandler,
 } from './flows.ts';
-import { type LocationRow, resolveScan } from './resolve.ts';
+import { resolveScan } from './resolve.ts';
 import { ScanField } from './scan-field.tsx';
 import { feedback as playFeedback, setSoundEnabled, soundEnabled, unlockAudio } from './sounds.ts';
 import { ScanThrottle } from './throttle.ts';
@@ -169,8 +167,7 @@ function ScanWorkspace({
   shopCount: number;
 }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const bus = useRef<{ current: ScanHandler | null }>({ current: null });
+  const bus = useRef(new ScanBus());
   const throttle = useRef(new ScanThrottle());
   const [paused, setPaused] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
@@ -222,25 +219,13 @@ function ScanWorkspace({
     };
   }, []);
 
-  const locations = useCallback(
-    () =>
-      queryClient
-        .fetchQuery({
-          queryKey: ['shop', shopId, 'locations'],
-          queryFn: () => api<Out<typeof ops.listLocations>>(`/shops/${shopId}/locations`),
-          staleTime: 60_000,
-        })
-        .then((r): LocationRow[] => r.locations),
-    [queryClient, shopId],
-  );
-
   const handle = useCallback(
     async (code: string) => {
       setBusy(true);
       try {
-        const resolved = await resolveScan(shopId, code, locations);
+        const resolved = await resolveScan(shopId, code);
         if (resolved.kind === 'location') {
-          if (!resolved.location.holdsStockAllowed) {
+          if (!resolved.location.holdsStock) {
             feedback('error', `${resolved.location.path} has sub-locations; scan one of those.`);
             return;
           }
@@ -250,9 +235,11 @@ function ScanWorkspace({
             warehouseId: resolved.location.warehouseId,
           });
         }
-        const used = (await bus.current.current?.(resolved)) === true;
-        if (resolved.kind === 'location' && !used) {
-          feedback('ok', `Location: ${resolved.location.path}`);
+        const used = await bus.current.dispatch(resolved);
+        if (!used) {
+          if (resolved.kind === 'location') feedback('ok', `Location: ${resolved.location.path}`);
+          else if (resolved.kind === 'item') feedback('notice', `${resolved.item.productName}`);
+          else feedback('error', `Unknown code ${resolved.code}`);
         }
       } catch (error) {
         feedback('error', errorMessage(error));
@@ -260,7 +247,7 @@ function ScanWorkspace({
         setBusy(false);
       }
     },
-    [shopId, locations, feedback, setLocation],
+    [shopId, feedback, setLocation],
   );
 
   const onCamera = useCallback(

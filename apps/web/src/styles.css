@@ -1849,3 +1849,32 @@ button.danger {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+.scan-results,
+.scan-serials {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.scan-serials li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.scan-cost {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+
+.scan-cost select {
+  width: auto;
+}

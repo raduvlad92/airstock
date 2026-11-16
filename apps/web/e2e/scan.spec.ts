@@ -44,7 +44,7 @@ test('the scan page looks codes up from a keyboard-wedge scanner and the scan fi
   const shopId = new URL(page.url()).pathname.split('/')[3]!;
   const call = api(page, shopId);
 
-  await call('/items', {
+  const created = await call<{ variantId: string }>('/items', {
     name: 'Booster box',
     sku: 'BOX-1',
     price: '120',
@@ -89,6 +89,30 @@ test('the scan page looks codes up from a keyboard-wedge scanner and the scan fi
   await page.keyboard.type('4006381333931', { delay: 4 });
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Booster box' })).toBeVisible();
+
+  // Receive: the location stays set; scanning the item twice makes it 2, shown before the commit.
+  await page.getByRole('button', { name: 'Receive', exact: true }).click();
+  await expect(
+    page.getByText('Scan the item or its case to receive into Main stock/A-01.'),
+  ).toBeVisible();
+  await wedge(page, '4006381333931');
+  await expect(page.getByText('1 unit → Main stock/A-01')).toBeVisible();
+  await wedge(page, '4006381333931');
+  await expect(page.getByText('2 units → Main stock/A-01')).toBeVisible();
+  await page.getByRole('button', { name: 'Receive 2' }).click();
+  await expect(page.getByRole('status')).toHaveText('Received 2 × BOX-1 into Main stock/A-01.');
+  const stock = await call<{ totals: { onHand: string } }>(
+    `/availability?variantId=${created.variantId}`,
+  );
+  expect(stock.totals.onHand).toBe('2.000000');
+
+  // An unknown code is created as a new item from the phone.
+  await page.getByRole('button', { name: 'Look up' }).click();
+  await wedge(page, 'NEW-ITEM-77');
+  await page.getByRole('button', { name: 'Create new item' }).click();
+  await page.getByRole('textbox', { name: 'Name' }).fill('Sleeves');
+  await page.getByRole('button', { name: 'Create with this code' }).click();
+  await expect(page.getByRole('heading', { name: 'Sleeves' })).toBeVisible();
 
   // Flows not built yet say so.
   await page.getByRole('button', { name: 'Count' }).click();

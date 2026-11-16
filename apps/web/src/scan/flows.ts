@@ -51,24 +51,37 @@ export interface FlowDef {
   Component: ComponentType<{ env: ScanEnv }>;
 }
 
-interface ScanBus {
-  current: ScanHandler | null;
+/**
+ * Scan handlers registered by the mounted flow components. The most recently mounted one (an
+ * open form inside a flow) is asked first; when it returns anything but true, the next one is.
+ */
+export class ScanBus {
+  private handlers: ScanHandler[] = [];
+
+  add(handler: ScanHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      this.handlers = this.handlers.filter((h) => h !== handler);
+    };
+  }
+
+  /** True when a flow used the scan. */
+  async dispatch(scan: Resolved): Promise<boolean> {
+    for (const handler of [...this.handlers].reverse()) {
+      if ((await handler(scan)) === true) return true;
+    }
+    return false;
+  }
 }
 
-export const ScanBusContext = createContext<ScanBus>({ current: null });
+export const ScanBusContext = createContext<ScanBus>(new ScanBus());
 
-/** Registers the active flow's scan handler; the latest render's closure always receives scans. */
+/** Registers a scan handler; the latest render's closure always receives the scans. */
 export function useScanHandler(handler: ScanHandler) {
   const bus = useContext(ScanBusContext);
   const latest = useRef(handler);
   latest.current = handler;
-  useEffect(() => {
-    const fn: ScanHandler = (scan) => latest.current(scan);
-    bus.current = fn;
-    return () => {
-      if (bus.current === fn) bus.current = null;
-    };
-  }, [bus]);
+  useEffect(() => bus.add((scan) => latest.current(scan)), [bus]);
 }
 
 export function isFlowId(value: unknown): value is FlowId {

@@ -22,6 +22,8 @@ export const PERMISSIONS = [
   'inventory.fulfill',
   /** Correct stock with an audited adjustment, such as the repair of a stock check problem. */
   'inventory.adjust',
+  /** Build pick lists and record picks; picks never change stock (PRD 6.10). */
+  'picking.run',
   'activity.read',
   'credentials.manage',
   'connections.manage',
@@ -63,6 +65,7 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'inventory.reserve',
     'inventory.fulfill',
     'inventory.adjust',
+    'picking.run',
   ]),
   viewer: new Set(READ),
 };

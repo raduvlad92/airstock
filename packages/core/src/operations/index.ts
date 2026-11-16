@@ -38,6 +38,7 @@ import { reorderOperations } from './reorder.ts';
 import { reportsOperations } from './reports.ts';
 import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
+import { shopifyListingCallbacks, shopifyListingOperations } from './shopify-listings.ts';
 import { shopifyMappingOperations } from './shopify-mapping.ts';
 import { shopifyOnboardingCallbacks, shopifyOnboardingOperations } from './shopify-onboarding.ts';
 import { shopifyOrderCallbacks } from './shopify-orders.ts';
@@ -84,6 +85,7 @@ export const operations: readonly AnyOperation[] = [
   ...shopifyMappingOperations,
   ...shopifyOnboardingOperations,
   ...shopifySyncOperations,
+  ...shopifyListingOperations,
   ...shopsOperations,
   ...storageOperations,
   ...suppliersOperations,
@@ -103,6 +105,7 @@ export const integrationCallbacks: readonly AnyOperation[] = [
   ...shopifyIntegrationCallbacks,
   ...shopifyOnboardingCallbacks,
   ...shopifyOrderCallbacks,
+  ...shopifyListingCallbacks,
 ];
 
 export * from './access.ts';
@@ -136,6 +139,7 @@ export * from './reorder.ts';
 export * from './reports.ts';
 export * from './returns.ts';
 export * from './shopify.ts';
+export * from './shopify-listings.ts';
 export * from './shopify-mapping.ts';
 export * from './shopify-onboarding.ts';
 export * from './shopify-orders.ts';

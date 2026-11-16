@@ -763,3 +763,149 @@ describe('F-PICK-COMPLETE-EXPIRED: one expired reservation blocks completing the
     expect(outcome).toBe('succeeded');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-RETURN-SKIPS-INSPECTION (unsellable units sold). ADR 0029: inspection is how a return's units
+// leave quarantine; only units released to sellable increase availability (PRD 6.5). changeCondition
+// (inventory-adjustments.ts) moves any quarantined units, including a return's uninspected ones,
+// to sellable with no inspection record; the return then cannot be inspected (quarantine_short)
+// or completed (inspection_pending).
+// ---------------------------------------------------------------------------------------------
+describe('F-RETURN-SKIPS-INSPECTION: a return’s quarantined units can be made sellable uninspected', () => {
+  it.fails('refuses to move a return’s uninspected units out of quarantine', async () => {
+    const orderRef = `ORD-${uuidv7().slice(-6)}`;
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '5' });
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '2', externalRef: orderRef });
+    await h.run(ops.fulfillReservation, { reservationId: r.reservationId });
+    const created = await h.run(ops.createReturn, {
+      lines: [{ variantId, quantity: '2' }],
+      orderRef,
+      reason: 'Changed mind',
+    });
+    await h.run(ops.authorizeReturn, { returnId: created.return.returnId });
+    await h.run(ops.receiveReturn, { returnId: created.return.returnId, locationId: store });
+    const released = await outcomeOf(
+      h.run(ops.changeCondition, {
+        locationId: store,
+        fromCondition: 'quarantine',
+        toCondition: 'sellable',
+        items: [{ variantId, quantity: '2' }],
+      }),
+    );
+    expect(released).not.toBe('succeeded');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-PICK-BUNDLE-SPLIT-LINE (stock shipped, reservation kept). completePickList fulfills a bundle
+// only when every component line has picked === quantity. A component line picked partly and
+// partly from another lot (the rest moved to a new line) has picked < quantity, so the bundle goes
+// to recordedOnly, yet every line is marked done and the list completes: the goods leave while the
+// bundle stays reserved, so the stock is never decremented and stays promised.
+// ---------------------------------------------------------------------------------------------
+describe('F-PICK-BUNDLE-SPLIT-LINE: a bundle whose line was split by a lot rescan is never fulfilled', () => {
+  it.fails('fulfills the bundle when its picks cover every component', async () => {
+    const a = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId: a, trackingMode: 'lot' });
+    await h.run(ops.receiveStock, {
+      variantId: a,
+      locationId: shop.locationId,
+      quantity: '2',
+      lotCode: 'K',
+    });
+    await h.run(ops.receiveStock, {
+      variantId: a,
+      locationId: shop.locationId,
+      quantity: '2',
+      lotCode: 'L',
+    });
+    const b = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId: b, locationId: shop.locationId, quantity: '1' });
+    const bundle = await createVariant(h);
+    await h.run(ops.setBundle, {
+      variantId: bundle,
+      bundleVersion: 0,
+      components: [
+        { variantId: a, quantity: '2' },
+        { variantId: b, quantity: '1' },
+      ],
+    });
+    const r = await h.run(ops.reserveStock, { variantId: bundle, quantity: '1' });
+    const list = await h.run(ops.createPickList, { reservationIds: [r.reservationId] });
+    const lineA = list.pickLines.find((l: { variantId: string }) => l.variantId === a);
+    const lineB = list.pickLines.find((l: { variantId: string }) => l.variantId === b);
+    // One unit of lot K as listed, the second one from lot L.
+    await h.run(ops.recordPick, {
+      pickListId: list.pickListId,
+      lineId: lineA.lineId,
+      quantity: '1',
+    });
+    await h.run(ops.recordPick, {
+      pickListId: list.pickListId,
+      lineId: lineA.lineId,
+      quantity: '1',
+      lotCode: 'L',
+    });
+    await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: lineB.lineId });
+    const done = await h.run(ops.completePickList, { pickListId: list.pickListId });
+    const [res] = await ownerQuery<{ status: string }>(
+      'select status from reservations where shop_id = $1 and id = $2',
+      [shop.shopId, r.reservationId],
+    );
+    expect({ status: done.status, reservation: res!.status }).toEqual({
+      status: 'completed',
+      reservation: 'fulfilled',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-TRANSFER-DEST-UNLOCKED (stock stranded). stock/transfers.ts loadLocation (used by
+// destinationLeaf for receiveTransfer and moveStock) reads the destination without FOR SHARE.
+// Every other command that brings stock in takes FOR SHARE on the location, and archiving a
+// location or warehouse locks it FOR UPDATE and then checks it holds no stock (storage.ts). A
+// transfer receipt never waits for that lock, so an archive can pass its no-stock check while the
+// receipt lands: stock ends up at an archived location, unsellable and refused by counts.
+// ---------------------------------------------------------------------------------------------
+describe('F-TRANSFER-DEST-UNLOCKED: a transfer receipt can land stock at a location being archived', () => {
+  it.fails('never leaves stock at an archived location', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '3' });
+    const wh = await h.run(ops.createWarehouse, { name: `Closing ${uuidv7().slice(-4)}` });
+    const dest = await createLeafLocation(h, wh.warehouseId, 'Only shelf');
+    const { transfer } = await h.run(ops.createTransfer, {
+      fromLocationId: shop.locationId,
+      toLocationId: dest,
+      lines: [{ variantId, quantity: '3' }],
+      ready: true,
+    });
+    await h.run(ops.dispatchTransfer, { transferId: transfer.transferId });
+    // The archive: lock the location, see it holds no stock, archive it.
+    const archive = await rawClient();
+    try {
+      await archive.query('begin');
+      await archive.query('select id from locations where id = $1 for update', [dest]);
+      const { rows } = await archive.query(
+        'select 1 from inventory_positions where location_id = $1 and on_hand > 0',
+        [dest],
+      );
+      expect(rows).toEqual([]);
+      const receipt = outcomeOf(h.run(ops.receiveTransfer, { transferId: transfer.transferId }));
+      // With the location locked the receipt should wait; give it time to finish if it does not.
+      await Promise.race([receipt, new Promise((r) => setTimeout(r, 1500))]);
+      await archive.query(`update locations set status = 'archived' where id = $1`, [dest]);
+      await archive.query('commit');
+      await receipt;
+    } finally {
+      await archive.end();
+    }
+    const [stranded] = await ownerQuery<{ units: string | null }>(
+      `select sum(p.on_hand)::text as units from inventory_positions p
+       join locations l on l.shop_id = p.shop_id and l.id = p.location_id
+       where p.shop_id = $1 and l.id = $2 and l.status = 'archived'`,
+      [shop.shopId, dest],
+    );
+    expect(stranded!.units ?? '0').toBe('0');
+  });
+});

@@ -88,5 +88,6 @@ export const ACTION_GROUPS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'shopify.*', label: 'Shopify' },
   { value: 'webhook.*,webhooks.*', label: 'Webhooks' },
   { value: 'activity.*', label: 'Activity history: views and exports' },
+  { value: 'reports.*', label: 'Reports: runs, saved reports, and exports' },
   { value: 'client.*', label: 'Interface events reported by the dashboard' },
 ];

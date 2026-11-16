@@ -1,12 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { formatApiToken, uuidv7 } from '@airstock/core';
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMember, ownerQuery, type SeededShop } from '../../../test/helpers.ts';
 import type { WorkosUser } from '../src/workos.ts';
+import { mcpSession } from './mcp-client.ts';
 import {
   apiToken,
-  GRANT_CLAIM,
   json,
   PUBLIC_URL,
   shopWithStock,
@@ -67,38 +66,10 @@ function rest(token: string, path: string, body?: unknown, shopId = shop.shopId)
 }
 
 async function mcpFor(membershipId: string, userId: string, scopes: string[]) {
-  const [user] = await ownerQuery<{ workos_user_id: string }>(
-    'select workos_user_id from users where id = $1',
-    [userId],
-  );
-  const grantId = uuidv7();
-  await ownerQuery(
-    `insert into connection_grants
-       (shop_id, id, membership_id, client_id, client_name, scopes, token_subject, bound_at)
-     values ($1, $2, $3, 'chatgpt-test', 'ChatGPT', $4, $5, now())`,
-    [shop.shopId, grantId, membershipId, scopes, user!.workos_user_id],
-  );
-  const client = new Client({ name: 'storage-test', version: '1.0.0' });
-  const bearer = await t.sign({
-    sub: user!.workos_user_id,
-    client_id: 'chatgpt-test',
-    [GRANT_CLAIM]: grantId,
-  });
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL('http://airstock.test/mcp'), {
-      fetch: async (url, init) => t.app.fetch(new Request(url, init)),
-      requestInit: { headers: { authorization: `Bearer ${bearer}` } },
-    }),
-  );
+  const mcp = await mcpSession(t, shop, scopes, { membershipId, userId });
   return {
-    client,
-    async call(args: Record<string, unknown>) {
-      const res = (await client.callTool({ name: 'manage_storage', arguments: args })) as {
-        isError?: boolean;
-        content: Array<{ text: string }>;
-      };
-      return { error: res.isError === true, body: JSON.parse(res.content[0]!.text) };
-    },
+    client: mcp.client,
+    call: (args: Record<string, unknown>) => mcp.call('manage_storage', args),
   };
 }
 

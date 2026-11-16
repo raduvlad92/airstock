@@ -22,6 +22,11 @@
 | HTTP API from Workers | Yes | Plain `fetch`, idempotency keys, tags. |
 | Deliverability tooling | Yes | DKIM, SPF, and DMARC guidance per domain; bounce and complaint webhooks; automatic suppression of hard bounces and complaints. Webhooks are not wired yet (Phase 2, with alert and report emails). |
 
+## Update, 16 November 2026 (Phase 2, milestone I3)
+
+- **What sends:** also purchase orders to suppliers, with the PDF attached and the sending member as reply-to ([ADR 0026](0026-purchase-orders.md)), and alert emails to subscribed members.
+- **Staging recipients.** `EMAIL_RECIPIENTS=members` (a Worker variable, set on staging) limits email to addresses of the shop's own members, so suppliers with made-up addresses in test shops never receive anything; such a send is logged as `suppressed`. Unset or `any` sends to any address, as production will.
+
 ## Revisit when
 
 - Before production: a customer or the owner requires EU-stored email data (C20). Candidates that store in the EU: Scaleway Transactional Email, Brevo, Mailjet, or Amazon SES in `eu-central-1`. Cloudflare Email Service fits the stack but needs the same data-location check.

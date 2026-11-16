@@ -22,12 +22,39 @@ export interface ShopifyOrderLine {
   lineId: string;
   variantId: string | null;
   quantity: number;
+  /** The quantity after edits and refunds; absent when only the orders/create payload is known. */
+  currentQuantity?: number;
+  /** Where Shopify committed the units (its fulfillment orders), when read. */
+  locationId?: string | null;
 }
 
+/**
+ * An order's state as Airstock follows it: lines, fulfillments, refunds, and cancellation. The
+ * orders/create payload carries the lines only; reads from the Admin API carry everything.
+ */
 export interface ShopifyOrder {
   orderId: string;
   createdAt: string;
+  updatedAt?: string | null;
+  cancelledAt?: string | null;
   lines: ShopifyOrderLine[];
+  fulfillments?: Array<{
+    fulfillmentId: string;
+    status: 'success' | 'cancelled' | 'error' | 'failure' | 'open' | 'pending';
+    locationId: string | null;
+    createdAt: string;
+    lines: Array<{ lineId: string; quantity: number }>;
+  }>;
+  refunds?: Array<{
+    refundId: string;
+    createdAt: string;
+    lines: Array<{
+      lineId: string;
+      quantity: number;
+      restockType: 'cancel' | 'return' | 'no_restock' | 'legacy_restock';
+      locationId: string | null;
+    }>;
+  }>;
 }
 
 export interface WebhookStatus {
@@ -53,8 +80,17 @@ export interface ShopifyAdmin {
     idempotencyKey: string;
     reference: string;
   }): Promise<SetResult>;
-  /** Orders created at or after `since`, newest first, with their line items. */
+  /** Orders created at or after `since`, newest first, with their whole state. */
   ordersSince(since: string): Promise<ShopifyOrder[]>;
+  /** One order's whole state, or null when Shopify no longer has it. */
+  order(orderId: string): Promise<ShopifyOrder | null>;
+  /** Orders Shopify changed at or after `since`, oldest first, a page at a time. */
+  ordersUpdatedSince(
+    since: string,
+    after?: string | null,
+  ): Promise<{ orders: ShopifyOrder[]; next: string | null }>;
+  /** Where Shopify committed each line (its fulfillment orders' assigned locations). */
+  lineLocations(orderId: string): Promise<Map<string, string>>;
   ensureWebhooks(uri: string, topics: string[]): Promise<WebhookStatus[]>;
   /** Starts the onboarding read of the whole catalog as a bulk operation; returns its ID. */
   startCatalogRead(): Promise<string>;
@@ -106,9 +142,36 @@ const QUERIES = {
       userErrors { code field message }
     }
   }`,
-  orders: `query($query: String!) {
-    orders(first: 50, sortKey: CREATED_AT, reverse: true, query: $query) {
-      nodes { id createdAt lineItems(first: 100) { nodes { id quantity variant { id } } } }
+  orderIds: `query($query: String!, $after: String, $sort: OrderSortKeys!, $reverse: Boolean!) {
+    orders(first: 25, sortKey: $sort, reverse: $reverse, query: $query, after: $after) {
+      nodes { id }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`,
+  // Requested cost stays under Shopify's 1,000 per query: an order with more than 100 lines, or
+  // 10 fulfillments or refunds of 30 lines, is read in part (logged).
+  order: `query($id: ID!) {
+    order(id: $id) {
+      id createdAt updatedAt cancelledAt
+      lineItems(first: 100) { nodes { id quantity currentQuantity variant { id } } }
+      fulfillments(first: 10) {
+        id status createdAt location { id }
+        fulfillmentLineItems(first: 30) { nodes { lineItem { id } quantity } }
+      }
+      refunds(first: 10) {
+        id createdAt
+        refundLineItems(first: 30) { nodes { lineItem { id } quantity restockType location { id } } }
+      }
+    }
+  }`,
+  lineLocations: `query($id: ID!) {
+    order(id: $id) {
+      fulfillmentOrders(first: 20) {
+        nodes {
+          assignedLocation { location { id } }
+          lineItems(first: 50) { nodes { lineItem { id } } }
+        }
+      }
     }
   }`,
   webhooks: `query { webhookSubscriptions(first: 50) { nodes { id topic uri } } }`,
@@ -238,8 +301,93 @@ export function parseCatalogJsonl(text: string): CatalogProduct[] {
  * fields are requested (PRD 8.5).
  */
 export const WEBHOOK_FIELDS: Record<string, string[] | undefined> = {
-  ORDERS_CREATE: ['id', 'created_at', 'line_items'],
+  ORDERS_CREATE: ['id', 'admin_graphql_api_id', 'created_at', 'line_items'],
+  ORDERS_EDITED: ['order_edit'],
+  ORDERS_CANCELLED: ['id', 'admin_graphql_api_id'],
+  FULFILLMENTS_CREATE: ['id', 'order_id', 'status'],
+  FULFILLMENTS_UPDATE: ['id', 'order_id', 'status'],
+  REFUNDS_CREATE: ['id', 'order_id'],
 };
+
+interface RawOrder {
+  id: string;
+  createdAt: string;
+  updatedAt: string | null;
+  cancelledAt: string | null;
+  lineItems: {
+    nodes: Array<{ id: string; quantity: number; currentQuantity: number; variant: { id: string } | null }>;
+  };
+  fulfillments: Array<{
+    id: string;
+    status: string;
+    createdAt: string;
+    location: { id: string } | null;
+    fulfillmentLineItems: { nodes: Array<{ lineItem: { id: string }; quantity: number }> };
+  }>;
+  refunds: Array<{
+    id: string;
+    createdAt: string;
+    refundLineItems: {
+      nodes: Array<{
+        lineItem: { id: string };
+        quantity: number;
+        restockType: string;
+        location: { id: string } | null;
+      }>;
+    };
+  }>;
+}
+
+const FULFILLMENT_STATUSES = ['success', 'cancelled', 'error', 'failure', 'open', 'pending'] as const;
+const RESTOCK_TYPES = ['cancel', 'return', 'no_restock', 'legacy_restock'] as const;
+
+/** An Admin API order as the state the order sync applies. No customer fields are read. */
+export function parseOrder(o: RawOrder): ShopifyOrder {
+  const status = (s: string) => {
+    const v = s.toLowerCase();
+    return (FULFILLMENT_STATUSES as readonly string[]).includes(v)
+      ? (v as (typeof FULFILLMENT_STATUSES)[number])
+      : 'pending';
+  };
+  const restock = (s: string) => {
+    const v = s.toLowerCase();
+    return (RESTOCK_TYPES as readonly string[]).includes(v)
+      ? (v as (typeof RESTOCK_TYPES)[number])
+      : 'no_restock';
+  };
+  return {
+    orderId: numeric(o.id),
+    createdAt: o.createdAt,
+    updatedAt: o.updatedAt,
+    cancelledAt: o.cancelledAt,
+    lines: o.lineItems.nodes.map((l) => ({
+      lineId: numeric(l.id),
+      variantId: l.variant ? numeric(l.variant.id) : null,
+      quantity: l.quantity,
+      currentQuantity: l.currentQuantity,
+    })),
+    fulfillments: o.fulfillments.map((f) => ({
+      fulfillmentId: numeric(f.id),
+      status: status(f.status),
+      locationId: f.location ? numeric(f.location.id) : null,
+      createdAt: f.createdAt,
+      lines: f.fulfillmentLineItems.nodes.map((l) => ({
+        lineId: numeric(l.lineItem.id),
+        quantity: l.quantity,
+      })),
+    })),
+    refunds: o.refunds.map((r) => ({
+      refundId: numeric(r.id),
+      createdAt: r.createdAt,
+      lines: r.refundLineItems.nodes.map((l) => ({
+        lineId: numeric(l.lineItem.id),
+        quantity: l.quantity,
+        restockType: restock(l.restockType),
+        locationId: l.location ? numeric(l.location.id) : null,
+      })),
+    })),
+  };
+}
 
 interface CostExtension {
   requestedQueryCost?: number;
@@ -307,6 +455,29 @@ export function httpShopifyAdmin(
       }
       return body.data as T;
     }
+  }
+
+  async function orderIds(
+    query: string,
+    sort: 'CREATED_AT' | 'UPDATED_AT',
+    reverse: boolean,
+    after: string | null,
+  ): Promise<{ ids: string[]; next: string | null }> {
+    const data = await call<{
+      orders: {
+        nodes: Array<{ id: string }>;
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+    }>(QUERIES.orderIds, { query, after, sort, reverse });
+    return {
+      ids: data.orders.nodes.map((o) => o.id),
+      next: data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null,
+    };
+  }
+
+  async function readOrder(id: string): Promise<ShopifyOrder | null> {
+    const data = await call<{ order: RawOrder | null }>(QUERIES.order, { id });
+    return data.order ? parseOrder(data.order) : null;
   }
 
   return {
@@ -402,26 +573,43 @@ export function httpShopifyAdmin(
     },
 
     async ordersSince(since) {
+      const ids = await orderIds(`created_at:>='${since}'`, 'CREATED_AT', true, null);
+      const orders = await Promise.all(ids.ids.map((id) => readOrder(id)));
+      return orders.filter((o): o is ShopifyOrder => o !== null);
+    },
+
+    order: (orderId) => readOrder(gid('Order', orderId)),
+
+    async ordersUpdatedSince(since, after = null) {
+      const ids = await orderIds(`updated_at:>='${since}'`, 'UPDATED_AT', false, after);
+      const orders: ShopifyOrder[] = [];
+      for (const id of ids.ids) {
+        const order = await readOrder(id);
+        if (order) orders.push(order);
+      }
+      return { orders, next: ids.next };
+    },
+
+    async lineLocations(orderId) {
       const data = await call<{
-        orders: {
-          nodes: Array<{
-            id: string;
-            createdAt: string;
-            lineItems: {
-              nodes: Array<{ id: string; quantity: number; variant: { id: string } | null }>;
-            };
-          }>;
-        };
-      }>(QUERIES.orders, { query: `created_at:>='${since}'` });
-      return data.orders.nodes.map((o) => ({
-        orderId: numeric(o.id),
-        createdAt: o.createdAt,
-        lines: o.lineItems.nodes.map((l) => ({
-          lineId: numeric(l.id),
-          variantId: l.variant ? numeric(l.variant.id) : null,
-          quantity: l.quantity,
-        })),
-      }));
+        order: {
+          fulfillmentOrders: {
+            nodes: Array<{
+              assignedLocation: { location: { id: string } | null } | null;
+              lineItems: { nodes: Array<{ lineItem: { id: string } }> };
+            }>;
+          };
+        } | null;
+      }>(QUERIES.lineLocations, { id: gid('Order', orderId) });
+      const out = new Map<string, string>();
+      for (const fo of data.order?.fulfillmentOrders.nodes ?? []) {
+        const location = fo.assignedLocation?.location?.id;
+        if (!location) continue;
+        for (const li of fo.lineItems.nodes) {
+          if (!out.has(numeric(li.lineItem.id))) out.set(numeric(li.lineItem.id), numeric(location));
+        }
+      }
+      return out;
     },
 
     async startCatalogRead() {

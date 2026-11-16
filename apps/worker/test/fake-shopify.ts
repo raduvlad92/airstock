@@ -184,21 +184,139 @@ export class FakeStore implements ShopifyAdmin {
 
   /** A checkout: Shopify commits the units right away and returns the order. */
   placeOrder(lines: Array<{ variant: ShopifyVariant; quantity: number }>, location = '1001') {
+    const now = new Date().toISOString();
     const order: ShopifyOrder = {
       orderId: String(this.nextId++),
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      cancelledAt: null,
       lines: lines.map((l) => ({
         lineId: String(this.nextId++),
         variantId: l.variant.variantId,
         quantity: l.quantity,
+        currentQuantity: l.quantity,
+        locationId: location,
+      })),
+      fulfillments: [],
+      refunds: [],
+    };
+    for (const l of lines) this.take(l.variant.variantId, location, l.quantity);
+    this.orders.push(order);
+    return order;
+  }
+
+  private itemOf(variantId: string | null): string | undefined {
+    return this.variants.find((v) => v.variantId === variantId)?.inventoryItemId;
+  }
+
+  /** Shopify's own change of `available` (an order takes, a restock gives back). */
+  private take(variantId: string | null, location: string, quantity: number) {
+    const item = this.itemOf(variantId);
+    if (!item) return;
+    const k = this.key(item, location);
+    this.levels.set(k, (this.levels.get(k) ?? 0) - quantity);
+  }
+
+  private touch(order: ShopifyOrder) {
+    order.updatedAt = new Date(Date.now() + 1).toISOString();
+  }
+
+  /** An order edit: a new quantity for a line; removed units are restocked, as Shopify's default. */
+  editLine(order: ShopifyOrder, lineId: string, quantity: number) {
+    const line = order.lines.find((l) => l.lineId === lineId)!;
+    const before = line.currentQuantity ?? line.quantity;
+    line.currentQuantity = quantity;
+    if (quantity > line.quantity) line.quantity = quantity;
+    this.take(line.variantId, line.locationId ?? '1001', quantity - before);
+    this.touch(order);
+  }
+
+  addLine(order: ShopifyOrder, variant: ShopifyVariant, quantity: number, location = '1001') {
+    const line = {
+      lineId: String(this.nextId++),
+      variantId: variant.variantId,
+      quantity,
+      currentQuantity: quantity,
+      locationId: location,
+    };
+    order.lines.push(line);
+    this.take(variant.variantId, location, quantity);
+    this.touch(order);
+    return line;
+  }
+
+  fulfill(
+    order: ShopifyOrder,
+    lines: Array<{ lineId: string; quantity: number }> | null = null,
+    location = '1001',
+  ) {
+    const fulfillment = {
+      fulfillmentId: String(this.nextId++),
+      status: 'success' as const,
+      locationId: location,
+      createdAt: new Date().toISOString(),
+      lines:
+        lines ??
+        order.lines.map((l) => ({ lineId: l.lineId, quantity: l.currentQuantity ?? l.quantity })),
+    };
+    order.fulfillments!.push(fulfillment);
+    this.touch(order);
+    return fulfillment;
+  }
+
+  cancelFulfillment(order: ShopifyOrder, fulfillmentId: string) {
+    order.fulfillments!.find((f) => f.fulfillmentId === fulfillmentId)!.status = 'cancelled';
+    this.touch(order);
+  }
+
+  /** A refund; a restock gives the units back to Shopify's available at its location. */
+  refund(
+    order: ShopifyOrder,
+    lines: Array<{
+      lineId: string;
+      quantity: number;
+      restockType: 'cancel' | 'return' | 'no_restock';
+      location?: string;
+    }>,
+  ) {
+    const refund = {
+      refundId: String(this.nextId++),
+      createdAt: new Date().toISOString(),
+      lines: lines.map((l) => ({
+        lineId: l.lineId,
+        quantity: l.quantity,
+        restockType: l.restockType,
+        locationId: l.restockType === 'no_restock' ? null : (l.location ?? '1001'),
       })),
     };
     for (const l of lines) {
-      const k = this.key(l.variant.inventoryItemId, location);
-      this.levels.set(k, (this.levels.get(k) ?? 0) - l.quantity);
+      const line = order.lines.find((x) => x.lineId === l.lineId)!;
+      line.currentQuantity = (line.currentQuantity ?? line.quantity) - l.quantity;
+      if (l.restockType !== 'no_restock') this.take(line.variantId, l.location ?? '1001', -l.quantity);
     }
-    this.orders.push(order);
-    return order;
+    order.refunds!.push(refund);
+    this.touch(order);
+    return refund;
+  }
+
+  /** Cancels an order: unfulfilled units are refunded with restock (Shopify's default). */
+  cancel(order: ShopifyOrder) {
+    const fulfilled = new Map<string, number>();
+    for (const f of order.fulfillments ?? []) {
+      if (f.status !== 'success') continue;
+      for (const l of f.lines) fulfilled.set(l.lineId, (fulfilled.get(l.lineId) ?? 0) + l.quantity);
+    }
+    const lines = order.lines
+      .map((l) => ({
+        lineId: l.lineId,
+        quantity: (l.currentQuantity ?? l.quantity) - (fulfilled.get(l.lineId) ?? 0),
+        restockType: 'cancel' as const,
+        location: l.locationId ?? '1001',
+      }))
+      .filter((l) => l.quantity > 0);
+    if (lines.length > 0) this.refund(order, lines);
+    order.cancelledAt = new Date().toISOString();
+    this.touch(order);
   }
 
   /** The orders/create webhook body Shopify would send for an order. */
@@ -213,6 +331,20 @@ export class FakeStore implements ShopifyAdmin {
         quantity: l.quantity,
       })),
     });
+  }
+
+  /** The (limited) body of another order topic: the IDs that name the order. */
+  topicBody(topic: string, order: ShopifyOrder, id = '1'): string {
+    if (topic === 'orders/edited') {
+      return JSON.stringify({ order_edit: { id: Number(id), order_id: Number(order.orderId) } });
+    }
+    if (topic.startsWith('orders/')) {
+      return JSON.stringify({
+        id: Number(order.orderId),
+        admin_graphql_api_id: `gid://shopify/Order/${order.orderId}`,
+      });
+    }
+    return JSON.stringify({ id: Number(id), order_id: Number(order.orderId), status: 'success' });
   }
 
   available(variant: ShopifyVariant, location = '1001'): number | undefined {
@@ -255,7 +387,21 @@ export class FakeStore implements ShopifyAdmin {
     return { kind: 'set' as const };
   }
   async ordersSince(since: string) {
-    return this.orders.filter((o) => o.createdAt >= since).reverse();
+    return structuredClone(this.orders.filter((o) => o.createdAt >= since).reverse());
+  }
+  async order(orderId: string) {
+    const order = this.orders.find((o) => o.orderId === orderId);
+    return order ? structuredClone(order) : null;
+  }
+  async ordersUpdatedSince(since: string) {
+    const orders = this.orders
+      .filter((o) => (o.updatedAt ?? o.createdAt) >= since)
+      .sort((a, b) => ((a.updatedAt ?? '') < (b.updatedAt ?? '') ? -1 : 1));
+    return { orders: structuredClone(orders), next: null };
+  }
+  async lineLocations(orderId: string) {
+    const order = this.orders.find((o) => o.orderId === orderId);
+    return new Map((order?.lines ?? []).map((l) => [l.lineId, l.locationId ?? '1001']));
   }
   async ensureWebhooks(uri: string, topics: string[]): Promise<WebhookStatus[]> {
     return topics.map((topic) => {

@@ -8,8 +8,6 @@ import {
   normalizeSku,
   ops,
   type PipelineDeps,
-  salesMaps,
-  shopifyChannel,
   shopifyConnectorCaller,
 } from '@airstock/core';
 import type { Tx } from '@airstock/db';
@@ -42,7 +40,24 @@ export interface SyncDeps extends PipelineDeps {
 }
 
 export const ORDER_JOB = 'shopify.order_created';
-export const WEBHOOK_TOPICS = ['ORDERS_CREATE', 'APP_UNINSTALLED'];
+/** Order topics bring a job that syncs the order's state (orders/create carries its lines). */
+export const ORDER_TOPICS = [
+  'orders/create',
+  'orders/edited',
+  'orders/cancelled',
+  'fulfillments/create',
+  'fulfillments/update',
+  'refunds/create',
+];
+export const WEBHOOK_TOPICS = [
+  'ORDERS_CREATE',
+  'ORDERS_EDITED',
+  'ORDERS_CANCELLED',
+  'FULFILLMENTS_CREATE',
+  'FULFILLMENTS_UPDATE',
+  'REFUNDS_CREATE',
+  'APP_UNINSTALLED',
+];
 /** Refresh the one-hour access token when less than this is left. */
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
@@ -250,6 +265,27 @@ export function parseOrderWebhook(body: string): ShopifyOrder {
   return { orderId, createdAt: raw.created_at, lines };
 }
 
+/** The order a webhook is about; its state is then read from the Admin API. */
+export function orderIdOf(topic: string, body: string): string | null {
+  const raw = JSON.parse(body) as {
+    id?: unknown;
+    admin_graphql_api_id?: unknown;
+    order_id?: unknown;
+    order_edit?: { order_id?: unknown };
+  };
+  const value =
+    topic === 'orders/edited'
+      ? raw.order_edit?.order_id
+      : topic.startsWith('orders/')
+        ? (raw.admin_graphql_api_id ?? raw.id)
+        : raw.order_id;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
+  if (typeof value === 'string' && /^(gid:\/\/shopify\/Order\/)?\d+$/.test(value)) {
+    return value.slice(value.lastIndexOf('/') + 1);
+  }
+  return null;
+}
+
 export type WebhookOutcome =
   | { status: 'unknown_store' }
   | { status: 'recorded'; shopId: string; jobId: string | null; duplicate: boolean };
@@ -287,10 +323,13 @@ export async function receiveWebhook(
     connectionId,
     connection.installed_by_membership_id,
   );
-  const job =
-    input.topic === 'orders/create'
-      ? { kind: ORDER_JOB, payload: { connectionId, order: parseOrderWebhook(input.body) } }
-      : null;
+  let job: { kind: string; payload: unknown } | null = null;
+  if (input.topic === 'orders/create') {
+    job = { kind: ORDER_JOB, payload: { connectionId, order: parseOrderWebhook(input.body) } };
+  } else if (ORDER_TOPICS.includes(input.topic)) {
+    const orderId = orderIdOf(input.topic, input.body);
+    if (orderId) job = { kind: ORDER_JOB, payload: { connectionId, orderId } };
+  }
   const triggeredAt =
     input.triggeredAt && !Number.isNaN(Date.parse(input.triggeredAt)) ? input.triggeredAt : null;
   const recorded = await execute(deps, ops.recordShopifyWebhook, {
@@ -340,7 +379,7 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
   const [job] = await deps.db.transaction({ shopId, userId: null }, (tx) =>
     tx.query<{
       kind: string;
-      payload: { connectionId: string; order: ShopifyOrder };
+      payload: { connectionId: string; order?: ShopifyOrder; orderId?: string };
       attempts: number;
     }>(
       `update jobs set status = 'running', attempts = attempts + 1, updated_at = now()
@@ -353,7 +392,14 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
   if (!job) return { status: 'missing' };
   try {
     if (job.kind !== ORDER_JOB) throw new Error(`Unknown job kind ${job.kind}.`);
-    const result = await processOrder(deps, shopId, job.payload.connectionId, job.payload.order);
+    let order = job.payload.order ?? null;
+    if (!order && job.payload.orderId) {
+      const store = await connectedStore(deps, shopId, job.payload.connectionId);
+      order = await store.admin.order(job.payload.orderId);
+    }
+    const result = order
+      ? await processOrder(deps, shopId, job.payload.connectionId, order)
+      : { deleted: true };
     await deps.db.transaction({ shopId, userId: null }, (tx) =>
       tx.query(
         `update jobs set status = 'succeeded', last_error = null, updated_at = now(),
@@ -387,16 +433,20 @@ export interface OrderResult {
   shortage: number;
   unmapped: number;
   alreadyProcessed: number;
+  released?: number;
+  fulfilled?: number;
+  fulfillmentsReversed?: number;
+  returns?: string[];
+  skipped?: string | null;
 }
 
 /**
- * Turns an order's lines into reservations as the Shopify connector (ADR 0008). A line of a pack
- * reserves pack × quantity base units; a line of a bundle reserves its components. Lines are
- * allocated by the connection's allocation rule (its mapped warehouses and locations, D3), and
- * what is short is recorded as a shortage: Shopify already accepted the order (D6). The
- * idempotency key comes from the connection and the line, so a repeated webhook, job, or catch-up
- * reserves once. Each line also lowers Airstock's record of Shopify's quantity for its item once,
- * because Shopify lowered its own quantity when it accepted the order.
+ * Applies an order's state as the Shopify connector, in one transaction (core's
+ * `shopify.orders.sync`): reservations per line by the connection's allocation rule with
+ * shortages, edits, cancellation, fulfillments, and refunds (PRD 8.5). The rows it keeps make a
+ * repeated webhook, job, reconciler run, or catch-up change nothing (A30). With several mapped
+ * Shopify locations, the lines' locations are read first, so the right record of Shopify's
+ * quantity is lowered.
  */
 export async function processOrder(
   deps: SyncDeps,
@@ -404,24 +454,16 @@ export async function processOrder(
   connectionId: string,
   order: ShopifyOrder,
 ): Promise<OrderResult> {
-  const lineIds = order.lines.map((l) => l.lineId);
-  const variantIds = order.lines.flatMap((l) => (l.variantId ? [l.variantId] : []));
   const state = await deps.db.transaction({ shopId, userId: null, readOnly: true }, async (tx) => {
     const [connection] = await tx.query<{ status: string; installed_by_membership_id: string }>(
       'select status, installed_by_membership_id from shopify_connections where id = $1',
       [connectionId],
     );
-    const locationMaps = await tx.query<{ shopify_location_id: string }>(
-      'select shopify_location_id from shopify_location_maps where connection_id = $1',
+    const [maps] = await tx.query<{ count: number }>(
+      'select count(*)::int as count from shopify_location_maps where connection_id = $1',
       [connectionId],
     );
-    const maps = await salesMaps(tx, connectionId, variantIds);
-    const done = await tx.query<{ shopify_line_id: string }>(
-      `select shopify_line_id from shopify_order_lines
-       where connection_id = $1 and shopify_line_id = any($2::text[])`,
-      [connectionId, lineIds],
-    );
-    return { connection, locationMaps, maps, done };
+    return { connection, locationMaps: maps?.count ?? 0 };
   });
   if (state.connection?.status !== 'active') throw new NotConnectedError();
   const caller = shopifyConnectorCaller(
@@ -429,88 +471,21 @@ export async function processOrder(
     connectionId,
     state.connection.installed_by_membership_id,
   );
-  const done = new Set(state.done.map((d) => d.shopify_line_id));
-  const result: OrderResult = { reserved: 0, shortage: 0, unmapped: 0, alreadyProcessed: 0 };
-  // With one mapped Shopify location, that is where Shopify committed the units.
-  const lineLocation =
-    state.locationMaps.length === 1 ? state.locationMaps[0]!.shopify_location_id : null;
-
-  for (const line of order.lines) {
-    if (done.has(line.lineId)) {
-      result.alreadyProcessed++;
-      continue;
-    }
-    const map = line.variantId ? state.maps.get(line.variantId) : undefined;
-    let outcome: 'reserved' | 'shortage' | 'unmapped' = 'unmapped';
-    let reservationId: string | null = null;
-    if (map && state.locationMaps.length > 0 && line.quantity > 0) {
-      const reserved = await execute(deps, ops.reserveStock, {
-        caller,
-        shopId,
-        idempotencyKey: `shopify:${connectionId}:line:${line.lineId}`,
-        input: {
-          variantId: map.variantId,
-          quantity: map.bundle ? String(line.quantity) : multiplyUnits(line.quantity, map.perItem),
-          purpose: 'external_order',
-          externalRef: `shopify:order/${order.orderId}/line/${line.lineId}`,
-          channel: shopifyChannel(connectionId),
-          allowShortage: true,
-        },
-      });
-      const r = reserved.result as {
-        reservationId: string;
-        shortage: string;
-        bundle: { components: Array<{ shortage: string }> } | null;
-      };
-      reservationId = r.reservationId;
-      const short = r.bundle
-        ? r.bundle.components.some((c) => Number(c.shortage) > 0)
-        : Number(r.shortage) > 0;
-      outcome = short ? 'shortage' : 'reserved';
-    }
-    const [inserted] = await deps.db.transaction({ shopId, userId: null }, (tx) =>
-      tx.query<{ inserted: boolean }>(
-        `with line as (
-           insert into shopify_order_lines (shop_id, connection_id, shopify_order_id, shopify_line_id,
-             shopify_variant_id, quantity, outcome, reservation_id)
-           values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7)
-           on conflict do nothing
-           returning 1),
-         level as (
-           update shopify_inventory_levels set expected_available = expected_available - $5,
-             updated_at = now()
-           where connection_id = $1 and shopify_inventory_item_id = $8 and shopify_location_id = $9
-             and expected_available is not null and expected_as_of < $10::timestamptz
-             and exists (select 1 from line))
-         select exists (select 1 from line) as inserted`,
-        [
-          connectionId,
-          order.orderId,
-          line.lineId,
-          line.variantId,
-          line.quantity,
-          outcome,
-          reservationId,
-          map?.inventoryItemId ?? null,
-          outcome === 'unmapped' ? null : lineLocation,
-          order.createdAt,
-        ],
-      ),
-    );
-    if (inserted?.inserted) result[outcome]++;
-    else result.alreadyProcessed++;
+  let withLocations = order;
+  if (state.locationMaps > 1 && order.lines.some((l) => !l.locationId)) {
+    const store = await connectedStore(deps, shopId, connectionId);
+    const at = await store.admin.lineLocations(order.orderId);
+    withLocations = {
+      ...order,
+      lines: order.lines.map((l) => ({ ...l, locationId: l.locationId ?? at.get(l.lineId) ?? null })),
+    };
   }
-  return result;
-}
-
-/** Shopify items times base units per item, exactly (a pack of 6 sold twice reserves 12). */
-function multiplyUnits(quantity: number, perItem: string): string {
-  const [whole, fraction = ''] = perItem.split('.');
-  const digits = fraction.replace(/0+$/, '');
-  const scaled = BigInt(`${whole}${digits}`) * BigInt(quantity);
-  if (!digits) return scaled.toString();
-  const text = scaled.toString().padStart(digits.length + 1, '0');
-  return `${text.slice(0, -digits.length)}.${text.slice(-digits.length)}`;
+  const synced = await execute(deps, ops.syncShopifyOrder, {
+    caller,
+    shopId,
+    input: { connectionId, order: withLocations },
+  });
+  return synced.result as OrderResult;
 }
 
 /** Processes orders Shopify created since `since` that Airstock has not seen. */

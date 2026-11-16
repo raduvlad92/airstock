@@ -8,8 +8,9 @@ import {
   normalizeBarcode,
   type Symbology,
 } from './barcodes.ts';
-import { decimalScale, isDecimal, normalize } from './decimal.ts';
+import { compare, decimalScale, isDecimal, normalize } from './decimal.ts';
 import { encodeValue, type FieldDefinition } from './fields.ts';
+import { PACK_LIMITS, resolvePacks } from './packs.ts';
 import { builtin, encodeDimensions, encodePrice, encodeTags } from './records.ts';
 import type { StoredField } from './store.ts';
 
@@ -21,7 +22,10 @@ import type { StoredField } from './store.ts';
 
 export const IMPORT_LIMITS = { bytes: 20 * 1024 * 1024, rows: 50_000, chunkRows: 200 } as const;
 
-/** Columns a file can map to, besides field:<key>, option:<name>, and stock:<locationId>. */
+/**
+ * Columns a file can map to, besides field:<key>, option:<name>, pack:<name>, pack_barcode:<name>,
+ * and stock:<locationId>.
+ */
 export const BUILTIN_TARGETS = [
   'product',
   'name',
@@ -31,6 +35,8 @@ export const BUILTIN_TARGETS = [
   'tags',
   'sku',
   'barcode',
+  'supplier',
+  'supplier_sku',
   'price',
   'weight',
   'dimensions',
@@ -59,6 +65,19 @@ export interface RowData {
   options: Array<{ name: string; value: string }>;
   relations: Array<{ fieldId: string; record: 'product' | 'variant'; targets: string[] }>;
   stock: Array<{ locationId: string; quantity: string }>;
+  /**
+   * Top-level packs of the variant, by name (ADR 0018): a quantity of base units to create the pack
+   * with or change it to, and a barcode to add to it. Rows previewed before packs existed lack it.
+   */
+  packs?: ImportPack[];
+  /** The variant's supplier item for an existing supplier, and its supplier SKU when given. */
+  supplier?: { id: string; name: string; sku?: string };
+}
+
+export interface ImportPack {
+  name: string;
+  quantity?: string;
+  barcode?: { code: string; normalized: string; symbology: Symbology };
 }
 
 export interface PreviewRow {
@@ -82,27 +101,68 @@ export interface PreviewContext {
 }
 
 const BARCODE_HEADERS = ['ean', 'ean13', 'ean-13', 'upc', 'gtin', 'barcode number'];
+/** Headers compared after lower-casing and turning `_`, `-`, and `.` into spaces. */
+const SUPPLIER_HEADERS = ['supplier', 'vendor', 'supplier name', 'vendor name'];
+const SUPPLIER_SKU_HEADERS = [
+  'supplier sku',
+  'vendor sku',
+  'supplier code',
+  'vendor code',
+  'supplier item code',
+  'supplier item number',
+  'supplier part number',
+  'vendor part number',
+];
+/** Words that make a header such as "Case qty" or "Carton EAN" a pack column. */
+const PACK_WORDS = /\b(case|carton|box|inner|outer|pack|pallet|tray|crate|master|display|sleeve)\b/;
 
-/** Suggested mapping: headers that name a built-in, a field key or label, or option:/stock: columns. */
+/** "case qty" → pack:Case, "units per carton" → pack:Carton, "case gtin" → pack_barcode:Case. */
+function suggestPack(words: string): string | null {
+  const capital = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+  const per =
+    /^(?:units|qty|quantity|pcs|pieces|items) (?:per|in) (?:a |an |one |each )?(.+)$/.exec(words);
+  const quantity = per?.[1] ?? /^(.+) (?:qty|quantity|units|pcs|count|pack)$/.exec(words)?.[1];
+  if (quantity && PACK_WORDS.test(quantity)) return `pack:${capital(quantity)}`;
+  const barcode = /^(.+) (?:barcode|ean|ean13|upc|gtin)$/.exec(words)?.[1];
+  if (barcode && PACK_WORDS.test(barcode)) return `pack_barcode:${capital(barcode)}`;
+  return null;
+}
+
+/**
+ * Suggested mapping: headers that name a built-in, a field key or label, a supplier or pack
+ * column, or option:/pack:/pack_barcode:/stock: columns.
+ */
 export function suggestMapping(header: string[], fields: FieldDefinition[]): Mapping {
   const out: Mapping = {};
   for (const h of header) {
     const t = h.trim();
     const lower = t.toLowerCase();
+    const words = lower.replace(/[\s_.-]+/g, ' ').trim();
     const byBuiltin = (BUILTIN_TARGETS as readonly string[]).find(
       (b) =>
         b === lower ||
         (b === 'product' && lower === 'product_id') ||
-        (b === 'barcode' && BARCODE_HEADERS.includes(lower)),
+        (b === 'barcode' && BARCODE_HEADERS.includes(lower)) ||
+        (b === 'supplier' && SUPPLIER_HEADERS.includes(words)) ||
+        (b === 'supplier_sku' && SUPPLIER_SKU_HEADERS.includes(words)),
     );
     const field = fields.find((f) => f.key === lower || f.label.toLowerCase() === lower);
     if (byBuiltin) out[t] = byBuiltin;
     else if (field) out[t] = `field:${field.key}`;
     else if (/^option:/i.test(t)) out[t] = `option:${t.slice(7).trim()}`;
+    else if (/^pack:/i.test(t)) out[t] = `pack:${t.slice(5).trim()}`;
+    else if (/^pack_barcode:/i.test(t)) out[t] = `pack_barcode:${t.slice(13).trim()}`;
     else if (/^stock:/i.test(t)) out[t] = `stock:${t.slice(6).trim()}`;
-    else out[t] = 'ignore';
+    else out[t] = suggestPack(words) ?? 'ignore';
   }
   return out;
+}
+
+/** The pack a pack:<name> or pack_barcode:<name> target names, or null for other targets. */
+export function packTarget(target: string): { kind: 'quantity' | 'barcode'; name: string } | null {
+  if (target.startsWith('pack:')) return { kind: 'quantity', name: target.slice(5).trim() };
+  if (target.startsWith('pack_barcode:')) return { kind: 'barcode', name: target.slice(13).trim() };
+  return null;
 }
 
 export function readFile(
@@ -133,6 +193,7 @@ export async function previewRows(
   const target = (t: string) => columns.find((c) => c.target === t);
   const skuColumn = target('sku');
   if (!skuColumn) throw new Error('Map a column to sku: every row needs a SKU.');
+  const once = new Map<string, string>();
   for (const c of columns) {
     if (c.target.startsWith('field:') && !fieldByKey.has(c.target.slice(6))) {
       throw new Error(`Column "${c.header}" maps to an unknown field ${c.target.slice(6)}.`);
@@ -140,7 +201,33 @@ export async function previewRows(
     if (c.target.startsWith('stock:') && !ctx.locations.has(c.target.slice(6))) {
       throw new Error(`Column "${c.header}" maps to a location you cannot receive into.`);
     }
+    const pack = packTarget(c.target);
+    if (pack && (pack.name === '' || pack.name.length > 100)) {
+      throw new Error(`Column "${c.header}" needs a pack name of 1 to 100 characters.`);
+    }
+    // One column per supplier, supplier SKU, and pack value.
+    const key = pack ? `${pack.kind}:${pack.name.toLowerCase()}` : c.target;
+    if (pack || c.target === 'supplier' || c.target === 'supplier_sku') {
+      if (once.has(key))
+        throw new Error(`Columns "${once.get(key)}" and "${c.header}" map to ${c.target}.`);
+      once.set(key, c.header);
+    }
   }
+  if (target('supplier_sku') && !target('supplier')) {
+    throw new Error('Map a column to supplier too: a supplier SKU belongs to a supplier.');
+  }
+  const packNames = new Set(columns.flatMap((c) => packTarget(c.target)?.name.toLowerCase() ?? []));
+  if (packNames.size > PACK_LIMITS.perVariant) {
+    throw new Error(`A variant has at most ${PACK_LIMITS.perVariant} packs.`);
+  }
+  // Active suppliers of this shop, matched by name (any case) or ID; never created from a file.
+  const suppliers = target('supplier')
+    ? await ctx.tx.query<{ id: string; name: string }>(
+        `select id, name from suppliers where status = 'active'`,
+      )
+    : [];
+  const supplierByName = new Map(suppliers.map((x) => [x.name.toLowerCase(), x]));
+  const supplierById = new Map(suppliers.map((x) => [x.id, x]));
   // Existing SKUs in one query.
   const skus = rows.map((r) => normalizeSku(r[skuColumn.index] ?? ''));
   const existing = new Map(
@@ -158,6 +245,7 @@ export async function previewRows(
   );
   const seen = new Map<string, number>();
   const seenBarcodes = new Map<string, number>();
+  const seenSupplierSkus = new Map<string, number>();
   const out: PreviewRow[] = [];
   for (const [i, cells] of rows.entries()) {
     const rowNumber = i + 2; // the header is line 1
@@ -172,7 +260,15 @@ export async function previewRows(
       options: [],
       relations: [],
       stock: [],
+      packs: [],
     };
+    const packFor = (name: string) => {
+      let pack = data.packs!.find((p) => p.name.toLowerCase() === name.toLowerCase());
+      if (!pack) data.packs!.push((pack = { name }));
+      return pack;
+    };
+    let supplierSku: string | null = null;
+    let supplierFailed = false;
     if (!sku) errors.push('The SKU is empty.');
     else if (seen.has(skuNorm)) errors.push(`The SKU repeats row ${seen.get(skuNorm)}.`);
     else seen.set(skuNorm, rowNumber);
@@ -204,19 +300,44 @@ export async function previewRows(
         const r = encodeTags(value);
         if (r.ok) data.product.tags = r.value as string[];
         else fail(r.message);
-      } else if (t === 'barcode') {
+      } else if (t === 'barcode' || t.startsWith('pack_barcode:')) {
         const checked = checkBarcode(value, inferSymbology(value));
         if (!checked.ok) fail(checked.message);
         else if (seenBarcodes.has(checked.normalized))
           fail(`The barcode repeats row ${seenBarcodes.get(checked.normalized)}.`);
         else {
           seenBarcodes.set(checked.normalized, rowNumber);
-          data.variant.barcode = {
+          const barcode = {
             code: checked.code,
             normalized: checked.normalized,
             symbology: inferSymbology(value),
           };
+          if (t === 'barcode') data.variant.barcode = barcode;
+          else packFor(packTarget(t)!.name).barcode = barcode;
         }
+      } else if (t.startsWith('pack:')) {
+        // Base units in one pack, exact; the same checks as set_packs for a pack of base units.
+        const name = packTarget(t)!.name;
+        const q = value.replace(',', '.');
+        if (!isDecimal(q) || compare(q, '0') <= 0) fail('Use a quantity of base units such as 12.');
+        else {
+          const resolved = resolvePacks(
+            [{ key: name, name, quantity: q, inner: null }],
+            match?.quantity_scale ?? 0,
+          );
+          if (!resolved.ok) fail(resolved.message);
+          else packFor(name).quantity = normalize(q);
+        }
+      } else if (t === 'supplier') {
+        const supplier = supplierByName.get(value.toLowerCase()) ?? supplierById.get(value);
+        if (supplier) data.supplier = { id: supplier.id, name: supplier.name };
+        else {
+          supplierFailed = true;
+          fail(`No supplier "${value}". Add it under Suppliers first.`);
+        }
+      } else if (t === 'supplier_sku') {
+        if (value.length > 100) fail('At most 100 characters.');
+        else supplierSku = value;
       } else if (t === 'price') {
         const r = encodePrice(value);
         if (r.ok) data.variant.price = r.value as string | null;
@@ -260,6 +381,18 @@ export async function previewRows(
         else data.product.attributes[def.id] = r.value;
       }
     }
+    if (supplierSku !== null && data.supplier) {
+      // A supplier SKU is unique per supplier (ADR 0019).
+      const key = `${data.supplier.id}\u0000${normalizeSku(supplierSku)}`;
+      if (seenSupplierSkus.has(key))
+        errors.push(`supplier_sku: The supplier SKU repeats row ${seenSupplierSkus.get(key)}.`);
+      else {
+        seenSupplierSkus.set(key, rowNumber);
+        data.supplier.sku = supplierSku;
+      }
+    } else if (supplierSku !== null && !supplierFailed) {
+      errors.push('supplier_sku: Give the supplier in the same row.');
+    }
     const productKey =
       (target('product') ? cell(target('product')!) : '') || data.product.name || sku;
     const groupKey = match ? `update:${match.product_id}` : `create:${productKey.toLowerCase()}`;
@@ -274,9 +407,154 @@ export async function previewRows(
       variantId: match?.id ?? null,
     });
   }
+  await checkPacks(ctx, out);
   await checkBarcodeOwners(ctx, out);
+  await checkSupplierSkus(ctx, out);
   await checkGroups(ctx, out);
   return out;
+}
+
+function rowError(r: PreviewRow, message: string) {
+  r.errors.push(message);
+  r.action = 'error';
+  r.data = null;
+}
+
+export interface ExistingPack {
+  variant_id: string;
+  id: string;
+  name: string;
+  quantity: string;
+  inner_pack_id: string | null;
+  inner_name: string | null;
+  base_quantity: string;
+  /** Other active packs are made of this one. */
+  is_inner: boolean;
+  /** The SKU of an active bundle whose definition uses this pack. */
+  bundle_sku: string | null;
+  uses: string[];
+  dimensions: unknown;
+  weight: unknown;
+  price: string | null;
+  position: number;
+  version: number;
+}
+
+/** The active packs of these variants, with what makes a quantity change unsafe. */
+export async function loadExistingPacks(tx: Tx, variantIds: string[]): Promise<ExistingPack[]> {
+  if (variantIds.length === 0) return [];
+  return tx.query<ExistingPack>(
+    `select p.variant_id, p.id, p.name, p.quantity::text as quantity, p.inner_pack_id,
+       i.name as inner_name, p.base_quantity::text as base_quantity,
+       exists (select 1 from packs o where o.shop_id = p.shop_id and o.inner_pack_id = p.id
+         and o.status = 'active') as is_inner,
+       (select v.sku from bundle_components c
+          join bundle_versions bv on bv.shop_id = c.shop_id and bv.id = c.bundle_version_id
+          join bundles b on b.shop_id = bv.shop_id and b.id = bv.bundle_id and b.version = bv.version
+          join variants v on v.shop_id = b.shop_id and v.id = b.variant_id
+          where c.shop_id = p.shop_id and c.pack_id = p.id and b.active limit 1) as bundle_sku,
+       p.uses, p.dimensions, p.weight, p.price::text as price, p.position, p.version
+     from packs p
+     left join packs i on i.shop_id = p.shop_id and i.id = p.inner_pack_id
+     where p.variant_id = any($1::uuid[]) and p.status = 'active'
+     order by p.variant_id, p.position, p.id`,
+    [variantIds],
+  );
+}
+
+/**
+ * What a pack column does to one variant's packs (ADR 0018): create a top-level pack, change the
+ * quantity of one (a new pack version), or nothing. Nested packs stay out of CSV: a nested pack's
+ * column must match its base quantity, and a pack other packs are made of keeps its quantity.
+ * Returns the problem, or null. Used by the preview and again by the commit.
+ */
+export function planPack(
+  pack: ImportPack,
+  existing: ExistingPack | undefined,
+): { action: 'create' | 'change' | 'none' } | { problem: string } {
+  if (pack.quantity === undefined) {
+    if (existing) return { action: 'none' };
+    return {
+      problem: `pack_barcode:${pack.name}: The variant has no pack ${pack.name}. Map its quantity too (pack:${pack.name}).`,
+    };
+  }
+  if (!existing) return { action: 'create' };
+  const same = compare(pack.quantity, existing.base_quantity) === 0;
+  if (existing.inner_pack_id) {
+    return same
+      ? { action: 'none' }
+      : {
+          problem: `pack:${pack.name}: ${existing.name} is made of ${existing.inner_name ?? 'other packs'}; change it in the dashboard.`,
+        };
+  }
+  if (same) return { action: 'none' };
+  if (existing.is_inner)
+    return {
+      problem: `pack:${pack.name}: Other packs are made of ${existing.name}; change its quantity in the dashboard.`,
+    };
+  if (existing.bundle_sku)
+    return {
+      problem: `pack:${pack.name}: ${existing.name} is used by a bundle (${existing.bundle_sku}). Change the bundle first.`,
+    };
+  return { action: 'change' };
+}
+
+/** Pack columns checked against the packs the matched variants already have. */
+async function checkPacks(ctx: PreviewContext, rows: PreviewRow[]) {
+  const packed = rows.filter((r) => r.data?.packs?.length);
+  const existing = await loadExistingPacks(
+    ctx.tx,
+    packed.flatMap((r) => (r.variantId ? [r.variantId] : [])),
+  );
+  for (const r of packed) {
+    const own = existing.filter((p) => p.variant_id === r.variantId);
+    let added = 0;
+    for (const pack of r.data!.packs!) {
+      const plan = planPack(
+        pack,
+        own.find((p) => p.name.toLowerCase() === pack.name.toLowerCase()),
+      );
+      if ('problem' in plan) r.errors.push(plan.problem);
+      else if (plan.action === 'create') added++;
+    }
+    if (own.length + added > PACK_LIMITS.perVariant)
+      r.errors.push(`A variant has at most ${PACK_LIMITS.perVariant} packs.`);
+    if (r.errors.length) {
+      r.action = 'error';
+      r.data = null;
+    }
+  }
+}
+
+/** A supplier SKU another variant has with the same supplier is an error, as in save_item. */
+async function checkSupplierSkus(ctx: PreviewContext, rows: PreviewRow[]) {
+  const skus = rows.filter((r) => r.data?.supplier?.sku);
+  if (skus.length === 0) return;
+  const owners = await ctx.tx.query<{
+    supplier_id: string;
+    supplier_sku_normalized: string;
+    variant_id: string;
+    sku: string;
+  }>(
+    `select i.supplier_id, i.supplier_sku_normalized, i.variant_id, v.sku
+     from supplier_items i
+     join unnest($1::uuid[], $2::text[]) as x(supplier_id, n)
+       on x.supplier_id = i.supplier_id and x.n = i.supplier_sku_normalized
+     join variants v on v.shop_id = i.shop_id and v.id = i.variant_id
+     where i.status = 'active'`,
+    [skus.map((r) => r.data!.supplier!.id), skus.map((r) => normalizeSku(r.data!.supplier!.sku!))],
+  );
+  for (const r of skus) {
+    const supplier = r.data!.supplier!;
+    const owner = owners.find(
+      (o) =>
+        o.supplier_id === supplier.id &&
+        o.supplier_sku_normalized === normalizeSku(supplier.sku!) &&
+        o.variant_id !== r.variantId,
+    );
+    if (owner)
+      rowError(r, `supplier_sku: ${supplier.name} already uses ${supplier.sku} for ${owner.sku}.`);
+  }
 }
 
 /**
@@ -284,29 +562,49 @@ export async function previewRows(
  * variant already has needs no change.
  */
 async function checkBarcodeOwners(ctx: PreviewContext, rows: PreviewRow[]) {
-  const coded = rows.filter((r) => r.data?.variant.barcode);
+  const codes = (r: PreviewRow) => [
+    ...(r.data?.variant.barcode
+      ? [{ column: 'barcode', pack: null, barcode: r.data.variant.barcode }]
+      : []),
+    ...(r.data?.packs ?? []).flatMap((p) =>
+      p.barcode ? [{ column: `pack_barcode:${p.name}`, pack: p, barcode: p.barcode }] : [],
+    ),
+  ];
+  const coded = rows.filter((r) => codes(r).length > 0);
   if (coded.length === 0) return;
   const owners = new Map(
     (
       await findBarcodeOwners(
         ctx.tx,
-        coded.map((r) => r.data!.variant.barcode!.normalized),
+        coded.flatMap((r) => codes(r).map((c) => c.barcode.normalized)),
       )
     ).map((o) => [normalizeBarcode(o.code), o]),
   );
   for (const r of coded) {
-    const barcode = r.data!.variant.barcode!;
-    const owner = owners.get(barcode.normalized);
-    if (!owner) continue;
-    if (owner.variantId === r.variantId && owner.packId === null) {
-      delete r.data!.variant.barcode;
-      continue;
+    const problems: string[] = [];
+    for (const { column, pack, barcode } of codes(r)) {
+      const owner = owners.get(barcode.normalized);
+      if (!owner) continue;
+      // The record the column is for already has it: nothing to add.
+      const own =
+        owner.variantId === r.variantId &&
+        (pack === null
+          ? owner.packId === null
+          : owner.packName?.toLowerCase() === pack.name.toLowerCase());
+      if (own) {
+        if (pack) delete pack.barcode;
+        else delete r.data!.variant.barcode;
+        continue;
+      }
+      problems.push(
+        `${column}: ${barcode.code} already belongs to ${owner.sku}${owner.packName ? ` (${owner.packName})` : ''}.`,
+      );
     }
-    r.errors.push(
-      `barcode: ${barcode.code} already belongs to ${owner.sku}${owner.packName ? ` (${owner.packName})` : ''}.`,
-    );
-    r.action = 'error';
-    r.data = null;
+    for (const p of problems) r.errors.push(p);
+    if (problems.length) {
+      r.action = 'error';
+      r.data = null;
+    }
   }
 }
 

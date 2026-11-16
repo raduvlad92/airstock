@@ -1,29 +1,45 @@
 import { LABEL_LAYOUTS, type LabelLayout, type LabelLayoutKey } from '@airstock/core/labels';
+import fontkit from '@pdf-lib/fontkit';
 import {
   concatTransformationMatrix,
+  degrees,
   drawObject,
+  drawText,
   PDFDocument,
   type PDFFont,
+  type PDFHexString,
   type PDFName,
+  type PDFOperator,
   type PDFPage,
   type PDFRef,
   popGraphicsState,
   pushGraphicsState,
   rgb,
-  StandardFonts,
+  setLineWidth,
+  setStrokingColor,
+  setTextRenderingMode,
+  TextRenderingMode,
 } from 'pdf-lib';
 import { type BarcodeBitmap, barcodeBitmap } from './barcode.ts';
 import type { PrintJob, PrintLabel } from './content.ts';
+import {
+  FontLibrary,
+  fetchFont,
+  type LabelFonts,
+  type LabelText,
+  SYNTHETIC_BOLD,
+} from './fonts.ts';
 
 /**
  * Label PDFs (D9, ADR 0019), drawn in the browser. The labels page loads this module with a
- * dynamic import, so bwip-js and pdf-lib stay out of the main bundle.
+ * dynamic import, so bwip-js, pdf-lib, and fontkit stay out of the main bundle.
  *
  * Each barcode is one grey image XObject made by the rasterizer, embedded once and placed on
- * every copy. Text uses the standard Helvetica fonts, so nothing is downloaded or embedded.
+ * every copy. Text uses self-hosted Noto fonts (fonts.ts), embedded as subsets.
  */
 
-export { barcodeBitmap };
+export type { LabelFonts };
+export { barcodeBitmap, FontLibrary };
 
 /** PDF user space is 1/72 inch. */
 export const PT_PER_MM = 72 / 25.4;
@@ -37,10 +53,10 @@ const MIN_FONT = 5;
 const GAP_MM = 1;
 
 export interface Metrics {
-  /** Width in points of text in Helvetica (or Helvetica Bold) at a size. */
+  /** Width in points of one line of text at a size, as the label fonts draw it. */
   width(text: string, size: number, bold: boolean): number;
-  /** Replaces characters the standard fonts cannot draw. */
-  clean(text: string): string;
+  /** The text as it prints, with "?" for characters no label font has. */
+  clean(text: string, bold: boolean): string;
 }
 
 /** Positions are label-local points from the label's top-left corner. */
@@ -73,16 +89,25 @@ interface Line {
 }
 
 const ELLIPSIS = '…';
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const words = new Intl.Segmenter(undefined, { granularity: 'word' });
+/** Scripts written without spaces between words. */
+const NO_SPACES = /[\p{scx=Hani}\p{scx=Hira}\p{scx=Kana}\p{scx=Thai}\p{scx=Laoo}\p{scx=Khmr}]/u;
 
 /** Shortens text to fit `fits`, from the end or (for paths) from the start. */
 function ellipsize(text: string, fits: (s: string) => boolean, keepEnd: boolean): string {
   if (fits(text)) return text;
+  // Cut between user-perceived characters, never inside one.
+  const chars = Array.from(graphemes.segment(text), (s) => s.segment);
   let lo = 0;
-  let hi = text.length;
+  let hi = chars.length;
   const cut = (n: number) =>
     keepEnd
-      ? `${ELLIPSIS}${text.slice(text.length - n).trimStart()}`
-      : `${text.slice(0, n).trimEnd()}${ELLIPSIS}`;
+      ? `${ELLIPSIS}${chars
+          .slice(chars.length - n)
+          .join('')
+          .trimStart()}`
+      : `${chars.slice(0, n).join('').trimEnd()}${ELLIPSIS}`;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
     if (fits(cut(mid))) lo = mid;
@@ -91,9 +116,27 @@ function ellipsize(text: string, fits: (s: string) => boolean, keepEnd: boolean)
   return lo === 0 ? '' : cut(lo);
 }
 
-/** Greedy line breaks after spaces and slashes; lines keep their spacing so they join back. */
+/** Where a line may break: after spaces and slashes, and between words of scripts without spaces. */
+function breakable(text: string): string[] {
+  const parts: string[] = [];
+  for (const part of text.split(/(?<=[\s/])/)) {
+    if (!NO_SPACES.test(part)) {
+      parts.push(part);
+      continue;
+    }
+    const start = parts.length;
+    for (const { segment, isWordLike } of words.segment(part)) {
+      // Punctuation and spaces stay with the word before them.
+      if (!isWordLike && parts.length > start) parts[parts.length - 1] += segment;
+      else parts.push(segment);
+    }
+  }
+  return parts;
+}
+
+/** Greedy line breaks; lines keep their spacing so they join back. */
 function breakLines(text: string, fits: (s: string) => boolean, fromEnd: boolean): string[] {
-  const parts = text.split(/(?<=[\s/])/);
+  const parts = breakable(text);
   const seq = fromEnd ? [...parts].reverse() : parts;
   const out: string[] = [];
   let current = '';
@@ -136,12 +179,12 @@ function textLines(label: PrintLabel, size: number, width: number, m: Metrics): 
   if (label.title) {
     const titleSize = size * 1.15;
     const fits = (s: string) => m.width(s, titleSize, true) <= width;
-    for (const text of wrapText(m.clean(label.title), 2, fits, label.keepEnd))
+    for (const text of wrapText(m.clean(label.title, true), 2, fits, label.keepEnd))
       lines.push({ text, size: titleSize, bold: true });
   }
   for (const line of label.lines) {
     const bold = Boolean(line.strong);
-    const text = m.clean(line.text);
+    const text = m.clean(line.text, bold);
     // A long line shrinks a little before it is cut.
     let s = size;
     while (m.width(text, s, bold) > width && s > Math.max(MIN_FONT, size * 0.85)) s -= 0.25;
@@ -199,7 +242,7 @@ export function planLabel(label: PrintLabel, layout: LabelLayout, m: Metrics): L
   // The code in plain text under the symbol, when it fits whole.
   const readable = (code: string, x: number, symbolWidth: number) => {
     const size = Math.max(MIN_FONT, base * 0.8);
-    const text = m.clean(code);
+    const text = m.clean(code, false);
     const w = m.width(text, size, false);
     return w <= symbolWidth ? { text, size, x: x + (symbolWidth - w) / 2 } : null;
   };
@@ -293,39 +336,63 @@ export function planLabel(label: PrintLabel, layout: LabelLayout, m: Metrics): L
   return { ops, dense, failed };
 }
 
-function fontMetrics(regular: PDFFont, bold: PDFFont): Metrics {
-  const sets = [regular, bold].map((f) => new Set(f.getCharacterSet()));
-  const drawable = (ch: string) => sets.every((s) => s.has(ch.codePointAt(0)!));
-  return {
-    width: (text, size, b) => (b ? bold : regular).widthOfTextAtSize(text, size),
-    clean(text) {
-      let out = '';
-      for (const ch of text.replace(/\s+/g, ' ')) {
-        if (drawable(ch)) {
-          out += ch;
-          continue;
-        }
-        // "ș" prints as "s"; what has no Latin form prints as "?".
-        const plain = ch.normalize('NFD').replace(/\p{M}/gu, '');
-        out += plain && [...plain].every(drawable) ? plain : '?';
-      }
-      return out;
-    },
-  };
+let browserFonts: FontLibrary | null = null;
+const defaultFonts = () => (browserFonts ??= new FontLibrary(fetchFont));
+
+/** Everything a set of labels prints as text, with its weight. */
+export function labelTexts(labels: PrintLabel[]): LabelText[] {
+  const texts: LabelText[] = [];
+  for (const label of labels) {
+    if (label.title) texts.push({ text: label.title, bold: true });
+    for (const line of label.lines) texts.push({ text: line.text, bold: Boolean(line.strong) });
+    if (label.barcode) texts.push({ text: label.barcode.code, bold: false });
+  }
+  return texts;
 }
 
-let previewMetrics: Promise<Metrics> | null = null;
+/**
+ * The fonts these labels need, loaded, as metrics: for the on-screen preview. Its `missing` lists
+ * the characters no label font has.
+ */
+export function labelMetrics(labels: PrintLabel[], fonts = defaultFonts()): Promise<LabelFonts> {
+  return fonts.fontsFor(labelTexts(labels));
+}
 
-/** Font metrics without building a PDF, for the on-screen preview. */
-export function labelMetrics(): Promise<Metrics> {
-  previewMetrics ??= (async () => {
-    const doc = await PDFDocument.create();
-    return fontMetrics(
-      await doc.embedFont(StandardFonts.Helvetica),
-      await doc.embedFont(StandardFonts.HelveticaBold),
-    );
-  })();
-  return previewMetrics;
+/** Draws a planned label on a canvas in points, glyph by glyph, as the PDF draws it. */
+export function paintLabel(ctx: CanvasRenderingContext2D, plan: LabelPlan, fonts: LabelFonts) {
+  for (const op of plan.ops) {
+    if (op.kind === 'text') {
+      for (const run of fonts.line(op.text, op.bold).runs) {
+        const scale = op.size / run.face.font.unitsPerEm;
+        let x = op.x + run.x * op.size;
+        for (const glyph of run.glyphs) {
+          ctx.save();
+          ctx.translate(x, op.baseline);
+          ctx.scale(scale, -scale);
+          ctx.beginPath();
+          glyph.path.toFunction()(ctx);
+          ctx.fill();
+          if (run.face.synthetic) {
+            ctx.lineWidth = SYNTHETIC_BOLD * run.face.font.unitsPerEm;
+            ctx.stroke();
+          }
+          ctx.restore();
+          x += glyph.advanceWidth * scale;
+        }
+      }
+      continue;
+    }
+    const image = new ImageData(op.bitmap.width, op.bitmap.height);
+    op.bitmap.pixels.forEach((v, i) => {
+      image.data.set([v, v, v, 255], i * 4);
+    });
+    const tile = document.createElement('canvas');
+    tile.width = op.bitmap.width;
+    tile.height = op.bitmap.height;
+    tile.getContext('2d')?.putImageData(image, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tile, op.x, op.top, op.width, op.height);
+  }
 }
 
 export interface LabelPdf {
@@ -336,24 +403,48 @@ export interface LabelPdf {
   dense: number;
   /** Codes that could not be drawn in their symbology. */
   failed: string[];
+  /** Characters no label font has; they print as "?". */
+  missing: string[];
 }
 
 /** Lays the labels out on sheets (or one per page for thermal rolls) and returns the PDF. */
-export async function buildLabelPdf(job: PrintJob): Promise<LabelPdf> {
+export async function buildLabelPdf(job: PrintJob, fonts = defaultFonts()): Promise<LabelPdf> {
   const layout = LABEL_LAYOUTS[job.layout satisfies LabelLayoutKey];
+  const metrics = await fonts.fontsFor(labelTexts(job.labels));
+  const plans = job.labels.map((label) => planLabel(label, layout, metrics));
   const doc = await PDFDocument.create();
   doc.setTitle('Labels');
   doc.setCreator('Airstock');
   doc.setProducer('Airstock');
-  const regular = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const metrics = fontMetrics(regular, bold);
+  doc.registerFontkit(fontkit);
+  // Only the font files the plans draw with, each embedded once as a subset of its glyphs.
+  const files = new Map<string, Uint8Array>();
+  for (const plan of plans)
+    for (const op of plan.ops)
+      if (op.kind === 'text')
+        for (const run of metrics.line(op.text, op.bold).runs)
+          files.set(run.face.file, run.face.bytes);
+  const embedded = new Map<string, PDFFont>();
+  for (const [file, bytes] of files)
+    embedded.set(file, await doc.embedFont(bytes, { subset: true }));
+  const encoded = new Map<string, PDFHexString>();
+  const encode = (font: PDFFont, file: string, text: string) => {
+    const key = `${file}\u0000${text}`;
+    let hex = encoded.get(key);
+    if (!hex) {
+      hex = font.encodeText(text);
+      encoded.set(key, hex);
+    }
+    return hex;
+  };
+
   const pt = PT_PER_MM;
   const pageWidth = layout.page.width * pt;
   const pageHeight = layout.page.height * pt;
   const perPage = layout.columns * layout.rows;
   const images = new Map<string, PDFRef>();
   const black = rgb(0, 0, 0);
+  const upright = degrees(0);
 
   let page: PDFPage | null = null;
   let names = new Map<PDFRef, PDFName>();
@@ -363,8 +454,8 @@ export async function buildLabelPdf(job: PrintJob): Promise<LabelPdf> {
   let dense = 0;
   const failed = new Set<string>();
 
-  for (const label of job.labels) {
-    const plan = planLabel(label, layout, metrics);
+  for (const [index, label] of job.labels.entries()) {
+    const plan = plans[index]!;
     if (plan.failed && label.barcode) failed.add(label.barcode.code);
     for (let copy = 0; copy < label.copies; copy++) {
       if (!page || slot === perPage) {
@@ -379,13 +470,36 @@ export async function buildLabelPdf(job: PrintJob): Promise<LabelPdf> {
       const y0 = (layout.marginTop + row * (layout.labelHeight + layout.gapY)) * pt;
       for (const op of plan.ops) {
         if (op.kind === 'text') {
-          page.drawText(op.text, {
-            x: x0 + op.x,
-            y: pageHeight - (y0 + op.baseline),
-            size: op.size,
-            font: op.bold ? bold : regular,
-            color: black,
-          });
+          for (const run of metrics.line(op.text, op.bold).runs) {
+            const font = embedded.get(run.face.file)!;
+            const ref = font.ref;
+            let name = names.get(ref);
+            if (!name) {
+              name = page.node.newFontDictionary(font.name, ref);
+              names.set(ref, name);
+            }
+            const text = drawText(encode(font, run.face.file, run.text), {
+              x: x0 + op.x + run.x * op.size,
+              y: pageHeight - (y0 + op.baseline),
+              size: op.size,
+              font: name,
+              color: black,
+              rotate: upright,
+              xSkew: upright,
+              ySkew: upright,
+            });
+            const operators: PDFOperator[] = run.face.synthetic
+              ? [
+                  pushGraphicsState(),
+                  setTextRenderingMode(TextRenderingMode.FillAndOutline),
+                  setLineWidth(op.size * SYNTHETIC_BOLD),
+                  setStrokingColor(black),
+                  ...text,
+                  popGraphicsState(),
+                ]
+              : text;
+            page.pushOperators(...operators);
+          }
           continue;
         }
         let ref = images.get(op.key);
@@ -429,5 +543,12 @@ export async function buildLabelPdf(job: PrintJob): Promise<LabelPdf> {
     }
   }
   if (count === 0) throw new Error('There are no labels to print.');
-  return { bytes: await doc.save(), labels: count, pages, dense, failed: [...failed] };
+  return {
+    bytes: await doc.save(),
+    labels: count,
+    pages,
+    dense,
+    failed: [...failed],
+    missing: metrics.missing,
+  };
 }

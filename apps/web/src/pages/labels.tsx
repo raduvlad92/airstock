@@ -39,7 +39,7 @@ type Template = Templates['templates'][number];
 type QueryResult = Out<typeof ops.queryItems>;
 type LabelsModule = typeof import('../labels/pdf.ts');
 
-/** bwip-js and pdf-lib load only here, on demand, so no other page downloads them. */
+/** bwip-js, pdf-lib, and fontkit load only here, on demand, so no other page downloads them. */
 let pdfModule: Promise<LabelsModule> | null = null;
 const loadPdf = () => {
   pdfModule ??= import('../labels/pdf.ts');
@@ -263,7 +263,7 @@ function LabelsForm({
     },
     onSuccess: (result) =>
       setDone(
-        `Downloaded ${result.name}: ${result.labels} ${result.labels === 1 ? 'label' : 'labels'} on ${result.pages} ${result.pages === 1 ? 'page' : 'pages'}.${result.failed.length ? ` Could not draw ${result.failed.join(', ')}.` : ''}`,
+        `Downloaded ${result.name}: ${result.labels} ${result.labels === 1 ? 'label' : 'labels'} on ${result.pages} ${result.pages === 1 ? 'page' : 'pages'}.${result.failed.length ? ` Could not draw ${result.failed.join(', ')}.` : ''}${result.missing.length ? ` Printed “?” for ${result.missing.join(' ')}.` : ''}`,
       ),
   });
 
@@ -786,22 +786,27 @@ function LabelPreview({ labels, layout }: { labels: PrintLabel[]; layout: LabelL
     void (async () => {
       try {
         const pdf = await loadPdf();
-        const metrics = await pdf.labelMetrics();
+        const metrics = await pdf.labelMetrics(labels);
         if (cancelled) return;
         const spec = LABEL_LAYOUTS[layout];
         const plans = labels.map((l) => pdf.planLabel(l, spec, metrics));
         const dense = plans.filter((p) => p.dense).length;
         const failed = plans.filter((p) => p.failed).length;
+        const missing = metrics.missing;
         setWarning(
           [
             dense
               ? `${dense} ${dense === 1 ? 'barcode is' : 'barcodes are'} too long to scan reliably at this size; choose a larger label.`
               : '',
             failed ? `${failed} ${failed === 1 ? 'barcode' : 'barcodes'} cannot be drawn.` : '',
+            missing.length
+              ? `No label font has ${missing.length === 1 ? 'this character' : 'these characters'}, so ${missing.length === 1 ? 'it prints' : 'they print'} as “?”: ${missing.join(' ')}`
+              : '',
           ]
             .filter(Boolean)
             .join(' ') || null,
         );
+        setError(null);
         const c = canvas.current;
         const ctx = c?.getContext('2d');
         if (!c || !ctx || !plans[0]) return;
@@ -815,23 +820,8 @@ function LabelPreview({ labels, layout }: { labels: PrintLabel[]; layout: LabelL
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, w, h);
         ctx.fillStyle = '#000';
-        for (const op of plans[0].ops) {
-          if (op.kind === 'text') {
-            ctx.font = `${op.bold ? 'bold ' : ''}${op.size}px Helvetica, Arial, sans-serif`;
-            ctx.fillText(op.text, op.x, op.baseline);
-            continue;
-          }
-          const image = new ImageData(op.bitmap.width, op.bitmap.height);
-          op.bitmap.pixels.forEach((v, i) => {
-            image.data.set([v, v, v, 255], i * 4);
-          });
-          const tile = document.createElement('canvas');
-          tile.width = op.bitmap.width;
-          tile.height = op.bitmap.height;
-          tile.getContext('2d')?.putImageData(image, 0, 0);
-          ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(tile, op.x, op.top, op.width, op.height);
-        }
+        ctx.strokeStyle = '#000';
+        pdf.paintLabel(ctx, plans[0], metrics);
       } catch (e) {
         if (!cancelled) setError(e);
       }

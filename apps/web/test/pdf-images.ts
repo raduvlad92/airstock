@@ -11,8 +11,9 @@ import {
 } from 'pdf-lib';
 
 /**
- * Reads a label PDF back (F8, A33): every image XObject's pixels, and where each page draws
- * them. Used by the unit test and by the end-to-end test on the file the browser downloaded.
+ * Reads a label PDF back (F8, A33): every image XObject's pixels and where each page draws
+ * them, and every embedded font and the text drawn with it. Used by the unit test and by the
+ * end-to-end test on the file the browser downloaded.
  */
 
 export interface PdfImage {
@@ -40,7 +41,45 @@ function streamBytes(stream: PDFRawStream): Uint8Array {
   return flate ? new Uint8Array(inflateSync(stream.contents)) : stream.contents;
 }
 
+export interface PdfFont {
+  ref: string;
+  baseFont: string;
+  /** The embedded TrueType subset (FontFile2). */
+  program: Uint8Array;
+  /** Glyph ID to the characters it stands for, from the font's ToUnicode map. */
+  unicode: Map<number, string>;
+}
+
+export interface PdfText {
+  page: number;
+  font: string;
+  size: number;
+  x: number;
+  y: number;
+  glyphs: number[];
+  /** The glyphs' characters, left to right as drawn. */
+  text: string;
+}
+
 const num = (dict: PDFDict, key: string) => (dict.get(PDFName.of(key)) as PDFNumber).asNumber();
+
+function readFont(doc: PDFDocument, ref: PDFRef, dict: PDFDict): PdfFont {
+  const unicode = new Map<number, string>();
+  const cmap = doc.context.lookup(dict.get(PDFName.of('ToUnicode'))) as PDFRawStream;
+  const cmapText = new TextDecoder('latin1').decode(streamBytes(cmap));
+  for (const block of cmapText.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const m of block[1]!.matchAll(/<([0-9a-fA-F]+)> <([0-9a-fA-F]+)>/g)) {
+      const units = m[2]!.match(/.{4}/g)!.map((h) => Number.parseInt(h, 16));
+      unicode.set(Number.parseInt(m[1]!, 16), String.fromCharCode(...units));
+    }
+  }
+  const descendants = dict.lookup(PDFName.of('DescendantFonts'), PDFArray);
+  const cid = descendants.lookup(0, PDFDict);
+  const descriptor = cid.lookup(PDFName.of('FontDescriptor'), PDFDict);
+  const program = streamBytes(descriptor.lookup(PDFName.of('FontFile2')) as PDFRawStream);
+  const baseFont = (dict.get(PDFName.of('BaseFont')) as PDFName).decodeText();
+  return { ref: ref.toString(), baseFont, program, unicode };
+}
 
 export async function readLabelPdf(bytes: Uint8Array) {
   const doc = await PDFDocument.load(bytes);
@@ -58,13 +97,26 @@ export async function readLabelPdf(bytes: Uint8Array) {
     images.set(ref.toString(), { ref: ref.toString(), width, height, pixels });
   }
 
+  const fonts = new Map<string, PdfFont>();
+  for (const [ref, object] of doc.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFDict) || object instanceof PDFRawStream) continue;
+    if (object.get(PDFName.of('Subtype')) !== PDFName.of('Type0')) continue;
+    fonts.set(ref.toString(), readFont(doc, ref, object));
+  }
+
   const placements: Placement[] = [];
+  const texts: PdfText[] = [];
   doc.getPages().forEach((page, index) => {
     const resources = page.node.Resources();
     const xobjects = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
     const refs = new Map<string, string>();
     for (const [name, value] of xobjects?.entries() ?? []) {
       if (value instanceof PDFRef) refs.set(name.asString(), value.toString());
+    }
+    const fontNames = new Map<string, string>();
+    for (const [name, value] of resources?.lookupMaybe(PDFName.of('Font'), PDFDict)?.entries() ??
+      []) {
+      if (value instanceof PDFRef) fontNames.set(name.asString(), value.toString());
     }
     const contents = page.node.Contents();
     const streams: PDFObject[] =
@@ -89,6 +141,30 @@ export async function readLabelPdf(bytes: Uint8Array) {
         y: Number(m[4]),
       });
     }
+    // pdf-lib writes each run of text as: BT, colour, /Name size Tf, 1 0 0 1 x y Tm, <ids> Tj, ET.
+    for (const m of text.matchAll(
+      /(\/\S+) ([\d.]+) Tf\s+1 0 0 1 ([-\d.]+) ([-\d.]+) Tm\s+<([0-9A-Fa-f]*)> Tj/g,
+    )) {
+      const ref = fontNames.get(m[1]!);
+      const font = ref ? fonts.get(ref) : undefined;
+      if (!font) throw new Error(`Unknown font ${m[1]}`);
+      const glyphs = (m[5]!.match(/.{4}/g) ?? []).map((h) => Number.parseInt(h, 16));
+      texts.push({
+        page: index,
+        font: font.ref,
+        size: Number(m[2]),
+        x: Number(m[3]),
+        y: Number(m[4]),
+        glyphs,
+        text: glyphs.map((g) => font.unicode.get(g) ?? '\uFFFD').join(''),
+      });
+    }
   });
-  return { pages: doc.getPageCount(), images: [...images.values()], placements };
+  return {
+    pages: doc.getPageCount(),
+    images: [...images.values()],
+    placements,
+    fonts: [...fonts.values()],
+    texts,
+  };
 }

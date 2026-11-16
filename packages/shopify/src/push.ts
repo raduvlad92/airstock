@@ -319,6 +319,8 @@ async function pushBatch(
   const refused = new Map<string, number>();
   // The quantities each level was last refused with: sent unchanged, they would be refused again.
   const refusedWith = new Map<string, { from: number; to: number }>();
+  // Levels refused again after new orders were applied: orders Shopify changed are read next.
+  let changedRead = false;
   let ordersCaughtUp = 0;
   let pending = batch;
   for (let attempt = 0; attempt < 4 && pending.length > 0; attempt++) {
@@ -525,17 +527,36 @@ async function pushBatch(
       }
     }
 
-    if (step.unexplained.length > 0) {
+    let decide = step.unexplained;
+    if (decide.length > 0 && !changedRead) {
+      // New orders did not explain these levels: the orders Shopify changed since the record
+      // (a cancellation, an edit, a refund with restock) are applied, and if that changed
+      // anything they are tried again.
+      changedRead = true;
+      const caught = await catchUpOrders(deps, store, sinceRecord(store, decide), {
+        changed: true,
+      });
+      ordersCaughtUp += caught.applied;
+      if (!caught.complete || caught.applied > 0) {
+        for (const w of decide) {
+          // More orders changed than one catch-up reads: decided later, by the reconciler.
+          if (!caught.complete) outcomes.set(levelKey(w.level), 'deferred');
+          else refusedWith.delete(levelKey(w.level));
+        }
+        decide = [];
+      }
+    }
+    if (decide.length > 0) {
       // Shopify is read: a level that already shows Airstock's number is recorded as pushed (the
       // write whose response was lost, F7); one that shows the record is tried again; the rest
       // are conflicts.
       const readAt = new Date();
       const actual = await readShopify(
         store,
-        step.unexplained.map((w) => w.level),
+        decide.map((w) => w.level),
       );
       const confirmed: Write[] = [];
-      for (const w of step.unexplained) {
+      for (const w of decide) {
         const k = levelKey(w.level);
         const shopify = actual.get(k);
         if (shopify === w.to) confirmed.push(w);
@@ -557,27 +578,26 @@ async function pushBatch(
     }
 
     if (step.stale.length > 0) {
-      // Apply the orders Shopify created or changed since the record (P1); the next attempt
-      // sends what changed, and finds the rest unexplained.
+      // Apply the orders Shopify created since the record (P1); the next attempt sends what
+      // changed, and finds the rest unexplained.
       for (const w of step.stale) {
         const k = levelKey(w.level);
         refused.set(k, (refused.get(k) ?? 0) + 1);
         refusedWith.set(k, { from: w.from, to: w.to });
       }
-      const asOf = Math.min(...step.stale.map((w) => (w.asOf ? new Date(w.asOf).getTime() : 0)));
-      const since = new Date(Math.max(store.createdAt.getTime(), asOf - 60_000));
-      const caught = await catchUpOrders(deps, store, since);
-      ordersCaughtUp += caught.applied;
-      if (!caught.complete) {
-        // More orders than one catch-up reads: decided later, by the reconciler.
-        for (const w of step.stale) outcomes.set(levelKey(w.level), 'deferred');
-      }
+      ordersCaughtUp += (await catchUpOrders(deps, store, sinceRecord(store, step.stale))).applied;
     }
     pending = pending.filter((l) => !outcomes.has(levelKey(l)));
   }
-  // Still refused after three rounds of new orders: left for the reconciler.
+  // Still refused after the rounds above: left for the reconciler.
   for (const l of pending) outcomes.set(levelKey(l), 'deferred');
   return outcomes;
+}
+
+/** Orders that may explain these writes: Shopify's, from a minute before the oldest record. */
+function sinceRecord(store: ConnectedStore, writes: Write[]): Date {
+  const asOf = Math.min(...writes.map((w) => (w.asOf ? new Date(w.asOf).getTime() : 0)));
+  return new Date(Math.max(store.createdAt.getTime(), asOf - 60_000));
 }
 
 /**

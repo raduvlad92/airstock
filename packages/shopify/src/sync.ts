@@ -582,17 +582,33 @@ export const changesOf = (r: OrderResult) =>
   (r.returns?.length ?? 0);
 
 /**
- * Applies orders Shopify created or changed since `since` that Airstock may not have seen: new
- * orders, and the edits, cancellations, fulfillments, refunds, and returns of older ones (their
- * restocks raise Shopify's quantity). Orders changed before the reconciler's cursor are already
+ * Applies orders Shopify created since `since` that Airstock may not have seen (the newest page),
+ * and with `changed`, also the orders Shopify changed since then: edits, cancellations,
+ * fulfillments, refunds, and returns of older orders (their restocks raise Shopify's quantity),
+ * a page at a time up to `maxOrders`. Orders changed before the reconciler's cursor are already
  * applied, so changes are read from there at the earliest.
  */
 export async function catchUpOrders(
   deps: SyncDeps,
   store: ConnectedStore,
   since: Date,
-  maxOrders = CATCH_UP_ORDERS,
+  opts: { changed?: boolean; maxOrders?: number } = {},
 ): Promise<CatchUp> {
+  const out: CatchUp = { orders: 0, applied: 0, complete: true };
+  const seen = new Set<string>();
+  const apply = async (order: ShopifyOrder) => {
+    if (seen.has(order.orderId)) return;
+    seen.add(order.orderId);
+    if (Date.parse(order.createdAt) < store.createdAt.getTime()) return;
+    const result = await processOrder(deps, store.shopId, store.connectionId, order);
+    out.orders += 1;
+    out.applied += changesOf(result);
+  };
+  // New orders, oldest first: Shopify's search by update time can trail a new order.
+  for (const order of [...(await store.admin.ordersSince(since.toISOString()))].reverse()) {
+    await apply(order);
+  }
+  if (!opts.changed) return out;
   const [conn] = await deps.db.transaction(
     { shopId: store.shopId, userId: null, readOnly: true },
     (tx) =>
@@ -604,21 +620,8 @@ export async function catchUpOrders(
   const cursor = conn?.orders_synced_through
     ? new Date(conn.orders_synced_through).getTime() - CURSOR_OVERLAP_MS
     : 0;
-  const out: CatchUp = { orders: 0, applied: 0, complete: true };
-  const seen = new Set<string>();
-  const apply = async (order: ShopifyOrder) => {
-    if (seen.has(order.orderId)) return;
-    seen.add(order.orderId);
-    if (Date.parse(order.createdAt) < store.createdAt.getTime()) return;
-    const result = await processOrder(deps, store.shopId, store.connectionId, order);
-    out.orders += 1;
-    out.applied += changesOf(result);
-  };
-  // New orders first, oldest first: Shopify's search by update time can trail a new order.
-  for (const order of [...(await store.admin.ordersSince(since.toISOString()))].reverse()) {
-    await apply(order);
-  }
   const changedSince = new Date(Math.max(since.getTime(), cursor)).toISOString();
+  const maxOrders = opts.maxOrders ?? CATCH_UP_ORDERS;
   let after: string | null = null;
   do {
     const page = await store.admin.ordersUpdatedSince(changedSince, after);

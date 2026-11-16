@@ -213,6 +213,24 @@ describe('Shopify connector fixes', () => {
     expect(await shopifyAlerts(s.m.shopId)).toEqual([{ status: 'open' }]);
   });
 
+  it('F3: a cancellation of an older order explains a refused push', async () => {
+    const s = await setup('Old cancel', [6]);
+    const [only] = s.items as [Setup['items'][0]];
+    const order = s.store.placeOrder([{ variant: only.shopify, quantity: 4 }]);
+    await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(order));
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    // The order is older than the record: only Shopify's search by update time lists it.
+    s.store.ordersSince = async () => [];
+    s.store.cancel(order);
+    await h.receive(s.m, only.variantId, 1);
+    const outcomes = await h.flushTogether(s.m.shopId);
+    expect(outcomes.map((o) => o.outcome)).toEqual(['pushed']);
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
+    expect(await h.available(s.m, only.variantId)).toBe('7.000000');
+    expect(s.store.available(only.shopify)).toBe(7);
+  });
+
   it('F3: the catch-up says when more orders changed than it reads', async () => {
     const s = await setup('Many changes', [10]);
     const [only] = s.items as [Setup['items'][0]];
@@ -222,11 +240,13 @@ describe('Shopify connector fixes', () => {
     // ordersSince lists new orders in one page; changed ones are read a page at a time.
     store.admin.ordersSince = async () => [];
     const since = new Date(Date.now() - 60_000);
-    expect(await catchUpOrders(h.deps(), store, since, 2)).toMatchObject({
+    expect(
+      await catchUpOrders(h.deps(), store, since, { changed: true, maxOrders: 2 }),
+    ).toMatchObject({
       orders: 2,
       complete: false,
     });
-    expect(await catchUpOrders(h.deps(), store, since)).toMatchObject({
+    expect(await catchUpOrders(h.deps(), store, since, { changed: true })).toMatchObject({
       orders: 3,
       complete: true,
     });

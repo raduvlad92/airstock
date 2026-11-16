@@ -415,19 +415,15 @@ async function compareLevels(
     }
     if (differing.length === 0) break;
     if (round === 0) {
-      // Orders Shopify created or changed after the record and not applied yet explain the
-      // difference (a sale lowers Shopify's quantity, a cancellation or restock raises it).
+      // Orders Shopify accepted after the record and not applied yet explain the difference
+      // (every change an order sync applies counts, cancellations and restocks too).
       const asOf = Math.min(...differing.map((d) => (d.asOf ? new Date(d.asOf).getTime() : 0)));
       const since = new Date(Math.max(store.createdAt.getTime(), asOf - 60_000));
+      // (Orders changed since the cursor were applied in step 1; new ones may trail its search.)
       const caught = await catchUpOrders(deps, store, since);
       if (caught.applied > 0) {
         suspects = differing.map((d) => d.level);
         continue;
-      }
-      if (!caught.complete) {
-        // More orders changed than one catch-up reads: compared again on the next run.
-        for (const d of differing) out.conflicted.add(key(d.level));
-        break;
       }
     }
     const targets = await deps.db.transaction({ shopId, userId: null, readOnly: true }, (tx) =>

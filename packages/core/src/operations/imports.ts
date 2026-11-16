@@ -2,15 +2,20 @@ import type { Database, Tx } from '@airstock/db';
 import { z } from 'zod';
 import { type AuditEvent, type AuditSink, auditEvent, INSERT_AUDIT_EVENTS_SQL } from '../audit.ts';
 import type { Caller, Membership } from '../caller.ts';
+import { normalize } from '../catalog/decimal.ts';
 import { displayValue } from '../catalog/fields.ts';
 import {
   IMPORT_LIMITS,
+  isVendorHeader,
+  loadExistingPacks,
   type Mapping,
+  planPack,
   previewRows,
   type RowData,
   readFile,
   suggestMapping,
 } from '../catalog/imports.ts';
+import { PACK_LIMITS, type PackUse, resolvePacks } from '../catalog/packs.ts';
 import { loadFields, shopSettings, visible } from '../catalog/store.ts';
 import { CsvError, csvLine } from '../csv.ts';
 import { AppError, errors } from '../errors.ts';
@@ -192,11 +197,45 @@ const ProblemRow = z.object({
   warnings: z.array(z.string()),
 });
 
+/**
+ * Shopify's product CSV calls the brand "Vendor". A vendor column is suggested as the supplier
+ * only when one of its values names an active supplier; otherwise a Shopify file would open with
+ * every row in error. A supplier SKU column needs a supplier column, so it follows.
+ */
+async function checkVendorColumn(
+  tx: Tx,
+  parsed: { header: string[]; rows: string[][] },
+  suggested: Mapping,
+): Promise<Mapping> {
+  const column = parsed.header.findIndex(
+    (h) => suggested[h.trim()] === 'supplier' && isVendorHeader(h),
+  );
+  if (column < 0) return suggested;
+  const values = [
+    ...new Set(parsed.rows.map((r) => (r[column] ?? '').trim().toLowerCase()).filter(Boolean)),
+  ].slice(0, 1000);
+  const [match] =
+    values.length > 0
+      ? await tx.query(
+          `select 1 from suppliers where status = 'active'
+           and (lower(name) = any($1::text[]) or id::text = any($1::text[])) limit 1`,
+          [values],
+        )
+      : [];
+  if (match) return suggested;
+  const out: Mapping = { ...suggested, [parsed.header[column]!.trim()]: 'ignore' };
+  if (!Object.values(out).includes('supplier')) {
+    for (const [header, target] of Object.entries(out))
+      if (target === 'supplier_sku') out[header] = 'ignore';
+  }
+  return out;
+}
+
 export const previewImport = defineOperation({
   id: 'imports.preview',
   summary: 'Map an import’s columns and validate every row',
   description:
-    'Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, barcode, price, weight, dimensions, field:<key>, option:<name>, stock:<locationId>, ignore.',
+    'Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, barcode, supplier, supplier_sku, price, weight, dimensions, field:<key>, option:<name>, pack:<name>, pack_barcode:<name>, stock:<locationId>, ignore. supplier names an existing supplier (by name, any case); supplier_sku needs a supplier in the same row and sets that supplier item’s SKU, never its cost. pack:<name> is the quantity of base units in a top-level pack of that name, created or changed; pack_barcode:<name> adds a barcode to it.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -207,6 +246,9 @@ export const previewImport = defineOperation({
   output: z.object({
     import: ImportOut,
     suggestedMapping: z.record(z.string(), z.string()),
+    packNames: z
+      .array(z.string())
+      .describe('Pack names the shop uses, for pack:<name> and pack_barcode:<name> targets.'),
     problems: z.array(ProblemRow).describe('The first 100 rows with errors or warnings.'),
   }),
   permission: 'imports.run',
@@ -244,7 +286,17 @@ export const previewImport = defineOperation({
       );
     }
     const fields = visible(await loadFields(ctx.tx), ctx.membership);
-    const suggested = suggestMapping(parsed.header, fields);
+    const suggested = await checkVendorColumn(
+      ctx.tx,
+      parsed,
+      suggestMapping(parsed.header, fields),
+    );
+    const packNames = (
+      await ctx.tx.query<{ name: string }>(
+        `select min(name) as name from packs where status = 'active'
+         group by lower(name) order by lower(name) limit 100`,
+      )
+    ).map((p) => p.name);
     if (!input.mapping) {
       await ctx.tx.query(
         `update import_jobs set header = $2, delimiter = $3, row_count = $4, updated_at = now() where id = $1`,
@@ -254,6 +306,7 @@ export const previewImport = defineOperation({
         result: {
           import: importOut({ ...job, header: parsed.header, row_count: parsed.rows.length }),
           suggestedMapping: suggested,
+          packNames,
           problems: [],
         },
         audit: {
@@ -326,6 +379,8 @@ export const previewImport = defineOperation({
       warnings: rows.filter((r) => r.warnings.length > 0).length,
       newProducts: new Set(rows.filter((r) => r.action === 'create').map((r) => r.groupKey)).size,
       stockRows: rows.filter((r) => r.data?.stock.length).length,
+      packRows: rows.filter((r) => r.data?.packs?.length).length,
+      supplierRows: rows.filter((r) => r.data?.supplier).length,
     };
     await ctx.tx.query(
       `update import_jobs set status = 'previewed', header = $2, mapping = $3, delimiter = $4, row_count = $5, counts = $6,
@@ -344,6 +399,7 @@ export const previewImport = defineOperation({
       result: {
         import: importOut(updated),
         suggestedMapping: suggested,
+        packNames,
         problems: rows
           .filter((r) => r.errors.length || r.warnings.length)
           .slice(0, 100)
@@ -367,7 +423,7 @@ export const commitImport = defineOperation({
   id: 'imports.commit',
   summary: 'Commit a previewed import',
   description:
-    'Writes the valid rows of the last preview in chunks, as a job; rows with errors are skipped. Opening stock is received with the reason "opening stock". Follow progress with get_import.',
+    'Writes the valid rows of the last preview in chunks, as a job; rows with errors are skipped. Opening stock is received with the reason "opening stock". Packs, barcodes, and supplier items are checked again as each chunk is written. Needs catalog.write, which saving packs and supplier items needs too. Follow progress with get_import.',
   kind: 'command',
   scope: 'shop',
   input: z.object({ importId: Id }),
@@ -611,6 +667,17 @@ export async function runImportJob(
     await finish(deps, shopId, importId, 'failed', (error as Error).message);
     return 'done';
   }
+  // Records, packs, and supplier items need catalog.write, checked again as the job runs.
+  if (!hasPermission(caller.membership!, 'catalog.write')) {
+    await finish(
+      deps,
+      shopId,
+      importId,
+      'failed',
+      'The member who committed this import can no longer edit the catalog.',
+    );
+    return 'done';
+  }
   const requestId = uuidv7();
   const base = { shopId, caller, requestId, attemptId: null, idempotencyKey: null };
   let chunk = 0;
@@ -831,6 +898,7 @@ async function commitChunk(
           sku: r.data.variant.sku,
           price: r.data.variant.price ?? null,
           options: r.data.options,
+          ...(r.data.variant.barcode ? { barcode: r.data.variant.barcode.code } : {}),
         },
       });
     }
@@ -987,44 +1055,19 @@ async function commitChunk(
     'id, field_id, source_type, source_id, target_type, target_id, position',
     'id uuid, field_id uuid, source_type text, source_id uuid, target_type text, target_id uuid, position int',
   );
-  // Barcodes from a barcode column, for the variants this chunk created or updated. The preview
-  // refused codes another record holds; one taken since then is skipped, not moved.
+  // Packs, barcodes, and supplier items of the variants this chunk created or updated. A change
+  // that became unsafe after the preview is left out, and the row says why.
   const variantOf = new Map(
-    outcomes.filter((o) => o.status === 'done').map((o) => [o.row_number, o.variant_id]),
+    outcomes.filter((o) => o.status === 'done').map((o) => [o.row_number, o.variant_id!]),
   );
-  const barcodes = rows.flatMap((r) => {
-    const b = r.data.variant.barcode;
-    const variantId = variantOf.get(r.row_number);
-    return b && variantId
-      ? [
-          {
-            id: uuidv7(),
-            variant_id: variantId,
-            symbology: b.symbology,
-            code: b.code,
-            normalized: b.normalized,
-          },
-        ]
-      : [];
-  });
-  if (barcodes.length > 0) {
-    await tx.query(
-      `with x as (
-         select * from jsonb_to_recordset($1::jsonb)
-           as x(id uuid, variant_id uuid, symbology text, code text, normalized text)),
-       added as (
-         insert into barcodes (shop_id, id, variant_id, symbology, code, code_normalized, position)
-         select app_shop_id(), x.id, x.variant_id, x.symbology, x.code, x.normalized,
-           coalesce((select max(b.position) + 1 from barcodes b where b.variant_id = x.variant_id), 0)
-         from x
-         on conflict (shop_id, code_normalized) do nothing
-         returning variant_id)
-       insert into variant_packaging (shop_id, variant_id, barcodes_version)
-       select app_shop_id(), variant_id, 1 from added group by variant_id
-       on conflict (shop_id, variant_id)
-       do update set barcodes_version = variant_packaging.barcodes_version + 1`,
-      [JSON.stringify(barcodes)],
-    );
+  const problems = new Map<number, string[]>();
+  const problem: Problem = (row, message) =>
+    problems.set(row, [...(problems.get(row) ?? []), message]);
+  for (const e of await writePackaging(tx, importId, rows, variantOf, problem)) event(e);
+  for (const e of await writeSupplierItems(tx, importId, rows, variantOf, problem)) event(e);
+  for (const o of outcomes) {
+    const found = problems.get(o.row_number);
+    if (found) o.errors = [...(o.errors ?? []), ...found];
   }
   const received = await receiveOpeningStock(tx, receipts, base, importId);
   for (const e of received.events) events.push(e);
@@ -1051,6 +1094,414 @@ async function commitChunk(
       [JSON.stringify(received.outbox)],
     );
   }
+}
+
+type Problem = (row: number, message: string) => void;
+type EventFields = Partial<AuditEvent> & Pick<AuditEvent, 'action'>;
+
+/** What set_packs gives a pack when the caller names no uses. */
+const IMPORTED_PACK_USES: PackUse[] = ['purchasing', 'counting', 'transfer'];
+
+/**
+ * Packs from pack:<name> columns and barcodes from barcode and pack_barcode:<name> columns
+ * (ADR 0018, ADR 0019), set-based for the chunk. Under each variant's packaging lock, as set_packs
+ * takes it, the pack columns are planned again against the packs as they are now: a top-level pack
+ * is created or gets a new version with its new quantity. Barcodes another record took since the
+ * preview are skipped, not moved. One event per variant whose packs or pack barcodes changed.
+ */
+async function writePackaging(
+  tx: Tx,
+  importId: string,
+  rows: PendingRow[],
+  variantOf: Map<number, string>,
+  problem: Problem,
+): Promise<EventFields[]> {
+  const packed = rows.filter((r) => variantOf.has(r.row_number) && r.data.packs?.length);
+  const variantIds = [...new Set(packed.map((r) => variantOf.get(r.row_number)!))].sort();
+  const packKey = (variantId: string, name: string) => `${variantId}\u0000${name.toLowerCase()}`;
+  const packIdOf = new Map<string, string>();
+  const changes = new Map<
+    string,
+    {
+      row: number;
+      added: unknown[];
+      changed: unknown[];
+      barcodes: unknown[];
+      packsVersion?: number;
+    }
+  >();
+  if (variantIds.length > 0) {
+    const scales = new Map(
+      (
+        await tx.query<{ id: string; quantity_scale: number }>(
+          `with v as (select id, quantity_scale from variants where id = any($1::uuid[]) order by id),
+           lock as (
+             insert into variant_packaging (shop_id, variant_id)
+             select app_shop_id(), id from v
+             on conflict (shop_id, variant_id)
+             do update set packs_version = variant_packaging.packs_version
+             returning variant_id)
+           select v.id, v.quantity_scale from v join lock on lock.variant_id = v.id`,
+          [variantIds],
+        )
+      ).map((v) => [v.id, v.quantity_scale]),
+    );
+    const existing = await loadExistingPacks(tx, variantIds);
+    const writes: unknown[] = [];
+    for (const r of packed) {
+      const variantId = variantOf.get(r.row_number)!;
+      const own = existing.filter((p) => p.variant_id === variantId);
+      for (const p of own) packIdOf.set(packKey(variantId, p.name), p.id);
+      let position = Math.max(-1, ...own.map((p) => p.position)) + 1;
+      let count = own.length;
+      const change = { row: r.row_number, added: [] as unknown[], changed: [] as unknown[] };
+      for (const pack of r.data.packs!) {
+        const before = own.find((p) => p.name.toLowerCase() === pack.name.toLowerCase());
+        const plan = planPack(pack, before);
+        if ('problem' in plan) {
+          problem(r.row_number, plan.problem);
+          continue;
+        }
+        if (plan.action === 'none') continue;
+        const quantity = pack.quantity!;
+        const resolved = resolvePacks(
+          [{ key: pack.name, name: pack.name, quantity, inner: null }],
+          scales.get(variantId) ?? 0,
+        );
+        if (!resolved.ok) {
+          problem(r.row_number, `pack:${pack.name}: ${resolved.message}`);
+          continue;
+        }
+        if (plan.action === 'create') {
+          if (count >= PACK_LIMITS.perVariant) {
+            problem(
+              r.row_number,
+              `pack:${pack.name}: A variant has at most ${PACK_LIMITS.perVariant} packs.`,
+            );
+            continue;
+          }
+          count++;
+          const id = uuidv7();
+          packIdOf.set(packKey(variantId, pack.name), id);
+          writes.push({
+            id,
+            variant_id: variantId,
+            name: pack.name,
+            quantity,
+            base_quantity: quantity,
+            uses: IMPORTED_PACK_USES,
+            dimensions: null,
+            weight: null,
+            price: null,
+            position: position++,
+            version: 1,
+            version_id: uuidv7(),
+          });
+          change.added.push({ id, name: pack.name, quantity, baseQuantity: quantity });
+        } else {
+          const b = before!;
+          writes.push({
+            id: b.id,
+            variant_id: variantId,
+            name: b.name,
+            quantity,
+            base_quantity: quantity,
+            uses: b.uses,
+            dimensions: b.dimensions,
+            weight: b.weight,
+            price: b.price,
+            position: b.position,
+            version: b.version + 1,
+            version_id: uuidv7(),
+          });
+          change.changed.push({
+            id: b.id,
+            name: b.name,
+            from: { quantity: normalize(b.quantity), baseQuantity: normalize(b.base_quantity) },
+            to: { quantity, baseQuantity: quantity },
+            version: b.version + 1,
+          });
+        }
+      }
+      if (change.added.length || change.changed.length)
+        changes.set(variantId, { ...change, barcodes: [] });
+    }
+    if (writes.length > 0) {
+      // Each pack and its version row, as set_packs writes them, and the list's new version.
+      const versions = await tx.query<{ variant_id: string; packs_version: number }>(
+        `with x as (
+           select * from jsonb_to_recordset($1::jsonb) as x(id uuid, variant_id uuid, name text,
+             quantity numeric, base_quantity numeric, uses text[], dimensions jsonb, weight jsonb,
+             price numeric, position integer, version integer, version_id uuid)),
+         written as (
+           insert into packs (shop_id, id, variant_id, name, quantity, base_quantity, uses, position,
+             version)
+           select app_shop_id(), id, variant_id, name, quantity, base_quantity, uses, position, version
+           from x
+           on conflict (shop_id, id) do update set quantity = excluded.quantity,
+             base_quantity = excluded.base_quantity, version = excluded.version, updated_at = now()
+           returning id),
+         history as (
+           insert into pack_versions (shop_id, id, pack_id, version, name, quantity, inner_pack_id,
+             base_quantity, uses, dimensions, weight, price, status)
+           select app_shop_id(), x.version_id, x.id, x.version, x.name, x.quantity, null,
+             x.base_quantity, x.uses, x.dimensions, x.weight, x.price, 'active'
+           from x join written w on w.id = x.id)
+         update variant_packaging vp set packs_version = vp.packs_version + 1
+         from (select distinct variant_id from x) c where vp.variant_id = c.variant_id
+         returning vp.variant_id, vp.packs_version`,
+        [JSON.stringify(writes)],
+      );
+      for (const v of versions) changes.get(v.variant_id)!.packsVersion = v.packs_version;
+    }
+  }
+
+  // Barcodes of variants and their packs. The preview refused codes another record holds.
+  const barcodes = rows.flatMap((r) => {
+    const variantId = variantOf.get(r.row_number);
+    if (!variantId) return [];
+    const list = [
+      ...(r.data.variant.barcode
+        ? [{ column: 'barcode', pack_id: null as string | null, ...r.data.variant.barcode }]
+        : []),
+      ...(r.data.packs ?? []).flatMap((p) => {
+        const packId = packIdOf.get(packKey(variantId, p.name));
+        // Without a pack ID the pack was refused above, and the row already says why.
+        return p.barcode && packId
+          ? [{ column: `pack_barcode:${p.name}`, pack_id: packId, ...p.barcode }]
+          : [];
+      }),
+    ];
+    return list.map((b, i) => ({
+      ...b,
+      id: uuidv7(),
+      row: r.row_number,
+      variant_id: variantId,
+      offset: i,
+    }));
+  });
+  if (barcodes.length > 0) {
+    const added = new Set(
+      (
+        await tx.query<{ id: string }>(
+          `with x as (
+             select * from jsonb_to_recordset($1::jsonb)
+               as x(id uuid, variant_id uuid, pack_id uuid, symbology text, code text,
+                 normalized text, "offset" integer)),
+           added as (
+             insert into barcodes (shop_id, id, variant_id, pack_id, symbology, code, code_normalized,
+               position)
+             select app_shop_id(), x.id, x.variant_id, x.pack_id, x.symbology, x.code, x.normalized,
+               coalesce((select max(b.position) + 1 from barcodes b where b.variant_id = x.variant_id), 0)
+                 + x."offset"
+             from x
+             on conflict (shop_id, code_normalized) do nothing
+             returning id, variant_id),
+           versions as (
+             insert into variant_packaging (shop_id, variant_id, barcodes_version)
+             select app_shop_id(), variant_id, 1 from added group by variant_id
+             on conflict (shop_id, variant_id)
+             do update set barcodes_version = variant_packaging.barcodes_version + 1)
+           select id from added`,
+          [JSON.stringify(barcodes)],
+        )
+      ).map((b) => b.id),
+    );
+    for (const b of barcodes) {
+      if (!added.has(b.id)) {
+        problem(
+          b.row,
+          `${b.column}: ${b.code} was not added; another record took it after the preview.`,
+        );
+      } else if (b.pack_id) {
+        const change = changes.get(b.variant_id) ?? {
+          row: b.row,
+          added: [],
+          changed: [],
+          barcodes: [],
+        };
+        change.barcodes.push({ code: b.code, symbology: b.symbology, packId: b.pack_id });
+        changes.set(b.variant_id, change);
+      }
+    }
+  }
+  return [...changes.entries()].map(([variantId, c]) => ({
+    action: 'catalog.packs.set',
+    target_type: 'variant',
+    target_id: variantId,
+    changes: {
+      importId,
+      row: c.row,
+      packs: { added: c.added, changed: c.changed },
+      barcodes: { added: c.barcodes },
+      ...(c.packsVersion !== undefined ? { packsVersion: c.packsVersion } : {}),
+    },
+  }));
+}
+
+/**
+ * Supplier items from supplier and supplier_sku columns (ADR 0018), set-based for the chunk. The
+ * row's variant gets an item for that supplier, or its existing one (the one with this supplier
+ * SKU, else the one in base units, else the preferred one) gets the SKU. Costs are never read or
+ * written. With no preferred item yet, the imported one becomes preferred, so an export (which
+ * writes the preferred supplier) reads back the same.
+ */
+async function writeSupplierItems(
+  tx: Tx,
+  importId: string,
+  rows: PendingRow[],
+  variantOf: Map<number, string>,
+  problem: Problem,
+): Promise<EventFields[]> {
+  const supplied = rows.filter((r) => r.data.supplier && variantOf.has(r.row_number));
+  if (supplied.length === 0) return [];
+  const active = new Set(
+    (
+      await tx.query<{ id: string }>(
+        `select id from suppliers where id = any($1::uuid[]) and status = 'active'`,
+        [[...new Set(supplied.map((r) => r.data.supplier!.id))]],
+      )
+    ).map((s) => s.id),
+  );
+  const withSku = supplied.filter((r) => r.data.supplier!.sku);
+  const items = await tx.query<{
+    id: string;
+    supplier_id: string;
+    variant_id: string;
+    pack_id: string | null;
+    supplier_sku: string | null;
+    supplier_sku_normalized: string | null;
+    preferred: boolean;
+    version: number;
+  }>(
+    `select id, supplier_id, variant_id, pack_id, supplier_sku, supplier_sku_normalized, preferred,
+       version
+     from supplier_items
+     where status = 'active' and (variant_id = any($1::uuid[])
+       or (supplier_id, supplier_sku_normalized) in (select * from unnest($2::uuid[], $3::text[])))
+     order by id for update`,
+    [
+      supplied.map((r) => variantOf.get(r.row_number)!),
+      withSku.map((r) => r.data.supplier!.id),
+      withSku.map((r) => normalizeSku(r.data.supplier!.sku!)),
+    ],
+  );
+  const writes: Array<{
+    id: string;
+    supplier_id: string;
+    variant_id: string;
+    supplier_sku: string | null;
+    supplier_sku_normalized: string | null;
+    preferred: boolean;
+    version: number | null;
+    row: number;
+    before: { supplierSku: string | null; preferred: boolean } | null;
+  }> = [];
+  for (const r of supplied) {
+    const supplier = r.data.supplier!;
+    const variantId = variantOf.get(r.row_number)!;
+    if (!active.has(supplier.id)) {
+      problem(r.row_number, `supplier: ${supplier.name} was archived after the preview.`);
+      continue;
+    }
+    const wanted = supplier.sku ? normalizeSku(supplier.sku) : null;
+    const target = items
+      .filter((i) => i.supplier_id === supplier.id && i.variant_id === variantId)
+      .sort(
+        (a, b) =>
+          Number(b.supplier_sku_normalized === wanted && wanted !== null) -
+            Number(a.supplier_sku_normalized === wanted && wanted !== null) ||
+          Number(b.pack_id === null) - Number(a.pack_id === null) ||
+          Number(b.preferred) - Number(a.preferred),
+      )[0];
+    if (wanted) {
+      const clash = items.find(
+        (i) =>
+          i.supplier_id === supplier.id &&
+          i.supplier_sku_normalized === wanted &&
+          i.id !== target?.id,
+      );
+      if (clash) {
+        problem(
+          r.row_number,
+          `supplier_sku: ${supplier.name} gave ${supplier.sku} to another item after the preview.`,
+        );
+        continue;
+      }
+    }
+    const hasPreferred = items.some((i) => i.variant_id === variantId && i.preferred);
+    const supplierSku = supplier.sku ?? target?.supplier_sku ?? null;
+    const preferred = target?.preferred || !hasPreferred;
+    if (target && target.supplier_sku === supplierSku && target.preferred === preferred) continue;
+    writes.push({
+      id: target?.id ?? uuidv7(),
+      supplier_id: supplier.id,
+      variant_id: variantId,
+      supplier_sku: supplierSku,
+      supplier_sku_normalized: supplierSku ? normalizeSku(supplierSku) : null,
+      preferred,
+      version: target?.version ?? null,
+      row: r.row_number,
+      before: target ? { supplierSku: target.supplier_sku, preferred: target.preferred } : null,
+    });
+  }
+  if (writes.length === 0) return [];
+  const saved = new Map(
+    (
+      await tx.query<{ id: string; version: number }>(
+        `with x as (
+           select * from jsonb_to_recordset($1::jsonb) as x(id uuid, supplier_id uuid,
+             variant_id uuid, supplier_sku text, supplier_sku_normalized text, preferred boolean,
+             version integer)),
+         created as (
+           insert into supplier_items (shop_id, id, supplier_id, variant_id, supplier_sku,
+             supplier_sku_normalized, preferred)
+           select app_shop_id(), id, supplier_id, variant_id, supplier_sku, supplier_sku_normalized,
+             preferred
+           from x where x.version is null
+           on conflict do nothing
+           returning id, version),
+         changed as (
+           update supplier_items i set supplier_sku = x.supplier_sku,
+             supplier_sku_normalized = x.supplier_sku_normalized, preferred = x.preferred,
+             version = i.version + 1, updated_at = now()
+           from x where x.version is not null and i.id = x.id and i.version = x.version
+             and i.status = 'active'
+           returning i.id, i.version)
+         select id, version from created union all select id, version from changed`,
+        [JSON.stringify(writes.map(({ row: _row, before: _before, ...w }) => w))],
+      )
+    ).map((x) => [x.id, x.version]),
+  );
+  const events: EventFields[] = [];
+  for (const w of writes) {
+    const version = saved.get(w.id);
+    if (version === undefined) {
+      problem(w.row, 'supplier: The supplier item changed after the preview and was not saved.');
+      continue;
+    }
+    const after = { supplierSku: w.supplier_sku, preferred: w.preferred };
+    const fields: Record<string, { from: unknown; to: unknown }> = {};
+    for (const key of ['supplierSku', 'preferred'] as const) {
+      if (!w.before || w.before[key] !== after[key])
+        fields[key] = { from: w.before?.[key] ?? null, to: after[key] };
+    }
+    events.push({
+      action: 'supplier_item.saved',
+      target_type: 'supplier_item',
+      target_id: w.id,
+      changes: {
+        importId,
+        row: w.row,
+        created: !w.before,
+        supplierId: w.supplier_id,
+        variantId: w.variant_id,
+        fields,
+        version,
+      },
+    });
+  }
+  return events;
 }
 
 /**
@@ -1371,11 +1822,22 @@ export async function runExportJob(
     const membership = caller.membership!;
     const locationScope = membership.allLocations ? null : membership.locationScopeIds;
     const mode = job.query.mode ?? 'variants';
-    const lines: string[] = [];
+    // Rows are kept until the end: a later page can add option and pack columns, and every line
+    // must have the header's cells.
+    const lines: Array<{
+      head: string[];
+      options: Map<string, string>;
+      packs: Map<string, { quantity: string; barcode: string }>;
+      tail: string[];
+    }> = [];
     let count = 0;
     let cursor: string | undefined;
-    let columns: { fields: Awaited<ReturnType<typeof loadFields>>; options: string[] } | null =
-      null;
+    let columns: {
+      fields: Awaited<ReturnType<typeof loadFields>>;
+      options: string[];
+      /** Pack names by lower case, as first seen. */
+      packs: Map<string, string>;
+    } | null = null;
     do {
       const page = await deps.db.transaction(
         { shopId, userId: caller.userId, readOnly: true },
@@ -1446,33 +1908,65 @@ export async function runExportJob(
                 )
               : [];
           // The preferred supplier and its SKU, without costs (they need costs.read, ADR 0019).
+          // Archived suppliers are left out: an import matches active suppliers only.
           const suppliers =
             mode === 'variants'
               ? await tx.query<{ variant_id: string; name: string; supplier_sku: string | null }>(
                   `select distinct on (si.variant_id) si.variant_id, s.name, si.supplier_sku
                    from supplier_items si join suppliers s on s.shop_id = si.shop_id and s.id = si.supplier_id
-                   where si.variant_id = any($1::uuid[]) and si.status = 'active'
+                   where si.variant_id = any($1::uuid[]) and si.status = 'active' and s.status = 'active'
                    order by si.variant_id, si.preferred desc, si.id`,
                   [result.rows.map((r) => r.variantId)],
                 )
               : [];
-          return { result, wanted, options, families, variantOptions, barcodes, suppliers };
+          // Active packs in base units (a nested pack too) and each pack's first barcode, so the
+          // file imports back unchanged (ADR 0018).
+          const packs =
+            mode === 'variants'
+              ? await tx.query<{
+                  variant_id: string;
+                  name: string;
+                  base_quantity: string;
+                  barcode: string | null;
+                }>(
+                  `select p.variant_id, p.name, p.base_quantity::text as base_quantity,
+                     (select b.code from barcodes b where b.shop_id = p.shop_id and b.pack_id = p.id
+                      order by b.position, b.id limit 1) as barcode
+                   from packs p where p.variant_id = any($1::uuid[]) and p.status = 'active'
+                   order by p.variant_id, p.position, p.id`,
+                  [result.rows.map((r) => r.variantId)],
+                )
+              : [];
+          return { result, wanted, options, families, variantOptions, barcodes, suppliers, packs };
         },
       );
       if (!columns) {
-        columns = { fields: page.wanted, options: [] };
+        columns = { fields: page.wanted, options: [], packs: new Map() };
       }
       for (const o of page.options)
         if (!columns.options.includes(o.name)) columns.options.push(o.name);
+      for (const p of page.packs)
+        if (!columns.packs.has(p.name.toLowerCase()))
+          columns.packs.set(p.name.toLowerCase(), p.name);
       for (const r of page.result.rows) {
         const vo = page.variantOptions.find((v) => v.id === r.variantId)?.option_value_ids ?? [];
-        const optionCells = columns.options.map((name) => {
-          const option = page.options.find((o) => o.product_id === r.productId && o.name === name);
-          return option?.values.find((v) => vo.includes(v.id))?.label ?? '';
-        });
+        const options = new Map<string, string>();
+        for (const o of page.options) {
+          if (o.product_id !== r.productId) continue;
+          const label = o.values.find((v) => vo.includes(v.id))?.label;
+          if (label !== undefined) options.set(o.name, label);
+        }
+        const packs = new Map(
+          page.packs
+            .filter((p) => p.variant_id === r.variantId)
+            .map((p) => [
+              p.name.toLowerCase(),
+              { quantity: normalize(p.base_quantity), barcode: p.barcode ?? '' },
+            ]),
+        );
         const weight = r.values.weight?.value as { value: string; unit: string } | null | undefined;
-        lines.push(
-          csvLine([
+        lines.push({
+          head: [
             r.productId,
             r.name,
             r.sku ?? '',
@@ -1484,7 +1978,10 @@ export async function runExportJob(
             page.families.find((f) => f.id === r.familyId)?.name ?? '',
             r.tags.join(', '),
             weight && r.values.weight?.source === 'own' ? `${weight.value} ${weight.unit}` : '',
-            ...optionCells,
+          ],
+          options,
+          packs,
+          tail: [
             ...columns.fields.map((f) =>
               exportCell(
                 f,
@@ -1492,8 +1989,8 @@ export async function runExportJob(
               ),
             ),
             r.available ?? '',
-          ]),
-        );
+          ],
+        });
         count++;
       }
       cursor = page.result.nextCursor ?? undefined;
@@ -1511,13 +2008,23 @@ export async function runExportJob(
       'tags',
       'weight',
       ...(columns?.options ?? []).map((o) => `option:${o}`),
+      ...[...(columns?.packs.values() ?? [])].flatMap((p) => [`pack:${p}`, `pack_barcode:${p}`]),
       ...(columns?.fields ?? []).map((f) => f.key),
       'available',
     ]);
+    const packKeys = [...(columns?.packs.keys() ?? [])];
+    const body = lines.map((l) =>
+      csvLine([
+        ...l.head,
+        ...(columns?.options ?? []).map((o) => l.options.get(o) ?? ''),
+        ...packKeys.flatMap((k) => [l.packs.get(k)?.quantity ?? '', l.packs.get(k)?.barcode ?? '']),
+        ...l.tail,
+      ]),
+    );
     // Byte-order mark: spreadsheets then read the file as UTF-8.
     await deps.files.put(
       exportFileKey(shopId, exportId),
-      `﻿${[header, ...lines].join('\r\n')}\r\n`,
+      `﻿${[header, ...body].join('\r\n')}\r\n`,
       'text/csv; charset=utf-8',
     );
     await deps.db.transaction({ shopId, userId: null }, (tx) =>

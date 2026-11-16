@@ -111,4 +111,4 @@
   - Catalog search matches a barcode (normalized, so a scanner's leading zero still finds an EAN-13) and an active supplier SKU exactly, and ranks those matches with exact SKUs.
   - CSV imports take a `barcode` column, suggested for headers such as `EAN`, `UPC`, or `GTIN`. The preview refuses a code that repeats in the file or that another record holds. A code the row's variant already has is a no-op.
   - Exports write each variant's first barcode, so an export imports back unchanged.
-  - Pack and supplier-SKU columns in CSV are left for later.
+  - CSV imports also take `supplier`, `supplier_sku`, `pack:<name>`, and `pack_barcode:<name>` columns (ADR 0018). They create top-level packs or give them a new version, with the rules of `set_packs`. Nested packs are edited in the dashboard only.

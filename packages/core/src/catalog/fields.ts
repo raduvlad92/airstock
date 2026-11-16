@@ -105,6 +105,8 @@ export const RESERVED_KEYS = new Set([
   'has_picture',
   'has_shipping_package',
   'has_barcode',
+  // CSV columns (ADR 0018).
+  'supplier',
   'supplier_sku',
   'packs',
   'media',

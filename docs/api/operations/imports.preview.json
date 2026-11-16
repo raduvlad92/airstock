@@ -3,7 +3,7 @@
     "post": {
       "operationId": "imports.preview",
       "summary": "Map an import’s columns and validate every row",
-      "description": "Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, barcode, price, weight, dimensions, field:<key>, option:<name>, stock:<locationId>, ignore.",
+      "description": "Without a mapping, returns the columns and a suggested mapping. With one, validates every row without writing: creates (new SKUs), updates (matched by SKU), errors, and likely duplicates. Targets: product, name, description, status, family, tags, sku, barcode, supplier, supplier_sku, price, weight, dimensions, field:<key>, option:<name>, pack:<name>, pack_barcode:<name>, stock:<locationId>, ignore. supplier names an existing supplier (by name, any case); supplier_sku needs a supplier in the same row and sets that supplier item’s SKU, never its cost. pack:<name> is the quantity of base units in a top-level pack of that name, created or changed; pack_barcode:<name> adds a barcode to it.",
       "x-permission": "imports.run",
       "x-connection-scope": "catalog:write",
       "x-audit-action": "catalog.import.previewed",
@@ -175,6 +175,13 @@
                       "type": "string"
                     }
                   },
+                  "packNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Pack names the shop uses, for pack:<name> and pack_barcode:<name> targets."
+                  },
                   "problems": {
                     "type": "array",
                     "items": {
@@ -213,6 +220,7 @@
                 "required": [
                   "import",
                   "suggestedMapping",
+                  "packNames",
                   "problems"
                 ],
                 "additionalProperties": false

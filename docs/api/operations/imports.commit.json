@@ -3,7 +3,7 @@
     "post": {
       "operationId": "imports.commit",
       "summary": "Commit a previewed import",
-      "description": "Writes the valid rows of the last preview in chunks, as a job; rows with errors are skipped. Opening stock is received with the reason \"opening stock\". Follow progress with get_import.",
+      "description": "Writes the valid rows of the last preview in chunks, as a job; rows with errors are skipped. Opening stock is received with the reason \"opening stock\". Packs, barcodes, and supplier items are checked again as each chunk is written. Needs catalog.write, which saving packs and supplier items needs too. Follow progress with get_import.",
       "x-permission": "imports.run",
       "x-connection-scope": "catalog:write",
       "x-audit-action": "catalog.import.committed",

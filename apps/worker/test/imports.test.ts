@@ -52,7 +52,7 @@ describe('import and export over REST', () => {
         key: true,
       }),
     );
-    const csv = 'name,sku,price\nDesk lamp,REST-L1,30\nFloor lamp,REST-L2,90\n';
+    const csv = 'name,sku,price,Case qty\nDesk lamp,REST-L1,30,4\nFloor lamp,REST-L2,90,\n';
     const upload = await call(`/imports/${created.importId}/file`, {
       method: 'PUT',
       body: csv,
@@ -62,11 +62,15 @@ describe('import and export over REST', () => {
     const preview = await json(
       await call(`/imports/${created.importId}/preview`, {
         method: 'POST',
-        body: JSON.stringify({ mapping: { name: 'name', sku: 'sku', price: 'price' } }),
+        body: JSON.stringify({
+          mapping: { name: 'name', sku: 'sku', price: 'price', 'Case qty': 'pack:Case' },
+        }),
         key: true,
       }),
     );
-    expect(preview.import.counts).toMatchObject({ creates: 2, errors: 0 });
+    expect(preview.import.counts).toMatchObject({ creates: 2, errors: 0, packRows: 1 });
+    expect(preview.suggestedMapping['Case qty']).toBe('pack:Case');
+    expect(preview.packNames).toEqual([]);
     expect(
       (await call(`/imports/${created.importId}/commit`, { method: 'POST', body: '{}', key: true }))
         .status,
@@ -93,6 +97,8 @@ describe('import and export over REST', () => {
     const text = await file.text();
     expect(text).toContain('REST-L1');
     expect(text).toContain('REST-L2');
+    // The pack the import created exports in its own column, ready to import back.
+    expect(text.split('\r\n')[0]).toContain('pack:Case,pack_barcode:Case');
     const downloads = await ownerQuery(
       `select 1 from audit_events where target_id = $1 and action = 'catalog.export.downloaded' and outcome = 'succeeded'`,
       [exp.export.exportId],

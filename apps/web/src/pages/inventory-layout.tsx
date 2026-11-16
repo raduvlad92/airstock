@@ -15,6 +15,7 @@ export function InventoryLayout() {
           [
             ['/shops/$shopId/inventory', 'Stock'],
             ['/shops/$shopId/inventory/transfers', 'Transfers'],
+            ['/shops/$shopId/inventory/returns', 'Returns'],
           ] as const
         ).map(([to, label]) => (
           <Link

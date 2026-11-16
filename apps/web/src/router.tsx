@@ -16,6 +16,7 @@ import { LabelsPage } from './pages/labels.tsx';
 import { PickingPage } from './pages/picking.tsx';
 import { ProductsPage } from './pages/products.tsx';
 import { PurchasingPage } from './pages/purchasing.tsx';
+import { ReturnsPage } from './pages/returns.tsx';
 import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.tsx';
 import { ShopsPage } from './pages/shops.tsx';
 import { StockCheckPage } from './pages/stock-check.tsx';
@@ -84,6 +85,15 @@ const inventoryIndexRoute = createRoute({
   getParentRoute: () => inventoryRoute,
   path: '/',
   component: InventoryPage,
+});
+const returnsRoute = createRoute({
+  getParentRoute: () => inventoryRoute,
+  path: '/returns',
+  component: ReturnsPage,
+  validateSearch: (search: Record<string, unknown>): { return?: string } =>
+    typeof search.return === 'string' && /^[0-9a-f-]{36}$/.test(search.return)
+      ? { return: search.return }
+      : {},
 });
 const transfersRoute = createRoute({
   getParentRoute: () => inventoryRoute,
@@ -212,7 +222,7 @@ export const routeTree = rootRoute.addChildren([
     shopIndexRoute,
     productsRoute,
     importsRoute,
-    inventoryRoute.addChildren([inventoryIndexRoute, transfersRoute]),
+    inventoryRoute.addChildren([inventoryIndexRoute, transfersRoute, returnsRoute]),
     warehousesRoute,
     suppliersRoute,
     purchasingRoute,

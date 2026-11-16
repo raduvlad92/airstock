@@ -31,6 +31,7 @@ import { mediaOperations } from './media.ts';
 import { membersOperations } from './members.ts';
 import { pickingOperations } from './picking.ts';
 import { purchasingOperations } from './purchasing.ts';
+import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
@@ -64,6 +65,7 @@ export const operations: readonly AnyOperation[] = [
   ...membersOperations,
   ...pickingOperations,
   ...purchasingOperations,
+  ...returnsOperations,
   ...shopifyOperations,
   ...shopsOperations,
   ...storageOperations,
@@ -106,6 +108,7 @@ export * from './media.ts';
 export * from './members.ts';
 export * from './picking.ts';
 export * from './purchasing.ts';
+export * from './returns.ts';
 export * from './shopify.ts';
 export * from './shops.ts';
 export * from './storage.ts';

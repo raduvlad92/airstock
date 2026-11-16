@@ -13,7 +13,7 @@ export async function reconcileAll(shopId: string): Promise<string[]> {
   try {
     await client.query('begin read only');
     await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);
-    for (const fn of ['transfer_reconciliation_problems']) {
+    for (const fn of ['transfer_reconciliation_problems', 'return_reconciliation_problems']) {
       const { rows } = await client.query<{
         problem: string;
         target_id: string;

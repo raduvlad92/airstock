@@ -438,6 +438,72 @@ async function buildTransferStatusChanged(
   };
 }
 
+// return.status_changed ------------------------------------------------------------------------
+
+const ReturnQuantities = z.object({
+  expected: z.string(),
+  received: z.string(),
+  sellable: z.string(),
+  damaged: z.string(),
+  repair: z.string(),
+  supplierReturn: z.string(),
+  disposed: z.string(),
+});
+
+const ReturnStatusChanged = z.object({
+  return: z.object({
+    id: z.string(),
+    reference: z.string().nullable(),
+    orderRef: z.string().nullable(),
+    fulfillmentRef: z.string().nullable(),
+    status: z.string(),
+    location: TransferLocation.nullable(),
+    totals: ReturnQuantities,
+    lines: z.array(ReturnQuantities.extend({ variantId: z.string(), sku: z.string() })),
+    version: z.number().int(),
+  }),
+  status: z.object({ from: z.string().nullable(), to: z.string() }),
+});
+
+const ReturnStatusInput = z.object({
+  returnId: z.string(),
+  from: z.string().nullable(),
+  to: z.string(),
+});
+
+/** The return as it is when the event is sent, with the change the command made. */
+async function buildReturnStatusChanged(tx: Tx, input: unknown): Promise<BuiltWebhookEvent | null> {
+  const parsed = ReturnStatusInput.safeParse(input);
+  if (!parsed.success || !UUID_PATTERN.test(parsed.data.returnId)) return null;
+  const qty = (p: string) => `'expected', ${p}expected::text, 'received', ${p}received::text,
+    'sellable', ${p}sellable::text, 'damaged', ${p}damaged::text, 'repair', ${p}repair::text,
+    'supplierReturn', ${p}supplier_return::text, 'disposed', ${p}disposed::text`;
+  const [row] = await tx.query<{ ret: z.infer<typeof ReturnStatusChanged>['return'] }>(
+    `select json_build_object('id', r.id, 'reference', r.reference, 'orderRef', r.order_ref,
+       'fulfillmentRef', r.fulfillment_ref, 'status', r.status, 'version', r.version,
+       'location', case when l.id is null then null else json_build_object('locationId', l.id,
+         'path', l.path, 'warehouseId', l.warehouse_id) end,
+       'totals', (select json_build_object(${qty('t.')}) from (select
+           coalesce(sum(x.expected), 0) as expected, coalesce(sum(x.received), 0) as received,
+           coalesce(sum(x.sellable), 0) as sellable, coalesce(sum(x.damaged), 0) as damaged,
+           coalesce(sum(x.repair), 0) as repair, coalesce(sum(x.supplier_return), 0) as supplier_return,
+           coalesce(sum(x.disposed), 0) as disposed
+         from return_lines x where x.shop_id = r.shop_id and x.return_id = r.id) t),
+       'lines', coalesce((select json_agg(json_build_object('variantId', rl.variant_id, 'sku', v.sku,
+           ${qty('rl.')}) order by rl.position)
+         from return_lines rl join variants v on v.shop_id = rl.shop_id and v.id = rl.variant_id
+         where rl.shop_id = r.shop_id and rl.return_id = r.id), '[]'::json)) as ret
+     from returns r left join locations l on l.shop_id = r.shop_id and l.id = r.location_id
+     where r.id = $1`,
+    [parsed.data.returnId],
+  );
+  if (!row) return null;
+  return {
+    data: { return: row.ret, status: { from: parsed.data.from, to: parsed.data.to } },
+    locationIds: row.ret.location ? [row.ret.location.locationId] : [],
+  };
+}
+
 // job.completed ---------------------------------------------------------------------------------
 
 const JobCompleted = z.object({
@@ -808,16 +874,51 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   },
   {
     id: 'return.status_changed',
-    description: 'A return moved to another state, such as received or inspected (I2).',
-    status: 'coming',
+    description:
+      'A return changed state, such as authorized, received, inspecting, or completed: the return with its per-line expected, received, and dispositioned quantities, and the change.',
+    status: 'available',
     permission: 'inventory.read',
     filters: ['locations'],
-    data: z.object({ return: z.record(z.string(), z.unknown()), status: ComingStatus }),
+    data: ReturnStatusChanged,
     sample: {
-      return: { id: SAMPLE_IDS.return, reference: 'RMA-0001' },
-      status: { from: 'received', to: 'inspected' },
+      return: {
+        id: SAMPLE_IDS.return,
+        reference: 'RMA-0001',
+        orderRef: '1001',
+        fulfillmentRef: null,
+        status: 'completed',
+        location: {
+          locationId: SAMPLE_IDS.location,
+          path: 'Main warehouse/A1',
+          warehouseId: SAMPLE_IDS.warehouse,
+        },
+        totals: {
+          expected: '6.000000',
+          received: '6.000000',
+          sellable: '4.000000',
+          damaged: '2.000000',
+          repair: '0.000000',
+          supplierReturn: '0.000000',
+          disposed: '0.000000',
+        },
+        lines: [
+          {
+            variantId: SAMPLE_IDS.variant,
+            sku: 'ETB-PRE-01',
+            expected: '6.000000',
+            received: '6.000000',
+            sellable: '4.000000',
+            damaged: '2.000000',
+            repair: '0.000000',
+            supplierReturn: '0.000000',
+            disposed: '0.000000',
+          },
+        ],
+        version: 5,
+      },
+      status: { from: 'inspecting', to: 'completed' },
     },
-    build: passthrough,
+    build: buildReturnStatusChanged,
   },
   {
     id: 'shopify.sync_conflict',

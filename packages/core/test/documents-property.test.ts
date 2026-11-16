@@ -8,14 +8,15 @@ import {
   type Harness,
   harness,
   MemoryAuditSink,
+  ownerQuery,
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
 import { reconcileAll } from './documents-helpers.ts';
 
 // A21 for milestone I2: random mixes of receipts (in packs, by lot, by serial), reservations and
-// fulfillments, and transfers (create, ready, partial dispatch and receipt, cancel, exception
-// resolution, moves) keep the ledger, balances, allocations, reservations, serials, owned
+// fulfillments, transfers (create, ready, partial dispatch and receipt, cancel, exception
+// resolution, moves), and returns (receipt into quarantine and every inspection disposition) keep the ledger, balances, allocations, reservations, serials, owned
 // quantities, and every transfer line reconciled, with availability never below zero.
 
 const db = appDatabase({}, 6);
@@ -49,7 +50,11 @@ type Step =
   | { kind: 'receiveTransfer'; pick: number; qty: number | null; damaged: boolean }
   | { kind: 'cancel'; pick: number; qty: number | null }
   | { kind: 'resolve'; pick: number; qty: number | null }
-  | { kind: 'move'; what: Kind; from: number; qty: number };
+  | { kind: 'move'; what: Kind; from: number; qty: number }
+  | { kind: 'return'; what: Kind; qty: number; loc: number }
+  | { kind: 'inspect'; pick: number; disposition: Disposition; qty: number | null };
+
+type Disposition = 'sellable' | 'damaged' | 'repair' | 'supplier_return' | 'disposal';
 
 const what = fc.constantFrom<Kind>('plain', 'lot', 'serial');
 const loc = fc.integer({ min: 0, max: 2 });
@@ -96,6 +101,30 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   },
   fc.record({ kind: fc.constant('cancel' as const), pick, qty: maybeQty }),
   fc.record({ kind: fc.constant('resolve' as const), pick, qty: maybeQty }),
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant('return' as const),
+      what,
+      qty: fc.integer({ min: 1, max: 2 }),
+      loc,
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant('inspect' as const),
+      pick,
+      disposition: fc.constantFrom<Disposition>(
+        'sellable',
+        'damaged',
+        'repair',
+        'supplier_return',
+        'disposal',
+      ),
+      qty: maybeQty,
+    }),
+  },
   fc.record({
     kind: fc.constant('move' as const),
     what,
@@ -117,6 +146,9 @@ const EXPECTED = new Set([
   'nothing_to_transfer',
   'same_location',
   'serial_count_mismatch',
+  'quantity_exceeds_uninspected',
+  'return_closed',
+  'nothing_returnable',
 ]);
 
 describe('stock conservation with transfers (A21, I2)', () => {
@@ -140,6 +172,9 @@ describe('stock conservation with transfers (A21, I2)', () => {
         const gone: Record<string, number> = {};
         const reservations: string[] = [];
         const transfers: string[] = [];
+        const returns: Array<{ returnId: string; variantId: string }> = [];
+        const back: Record<string, number> = {};
+        const disposedSoFar: Record<string, number> = {};
         // Some stock everywhere to start with, so transfers have something to move.
         for (const locationId of locations) {
           await h.run(ops.receiveStock, {
@@ -219,6 +254,48 @@ describe('stock conservation with transfers (A21, I2)', () => {
                 ready: s.ready,
               });
               transfers.push(t.transfer.transferId);
+            } else if (s.kind === 'return') {
+              const variantId = ids[s.what];
+              const returned = back[variantId] ?? 0;
+              let item: Record<string, unknown> = { variantId, quantity: String(s.qty) };
+              if (s.what === 'lot') item = { ...item, lotCode: 'A' };
+              if (s.what === 'serial') {
+                const soldSerials = await ownerQuery<{ serial: string }>(
+                  `select serial from serial_units where variant_id = $1 and status = 'sold'
+                   order by serial limit $2`,
+                  [variantId, s.qty],
+                );
+                if (soldSerials.length < s.qty)
+                  throw Object.assign(new Error(), { code: 'nothing_returnable' });
+                item = { variantId, serials: soldSerials.map((x) => x.serial) };
+              }
+              const ret = await h.run(ops.createReturn, {
+                lines: [{ variantId, quantity: String(s.qty) }],
+              });
+              await h.run(ops.receiveReturn, {
+                returnId: ret.return.returnId,
+                locationId: locations[s.loc],
+                items: [item],
+              });
+              returns.push({ returnId: ret.return.returnId, variantId });
+              back[variantId] = returned + s.qty;
+            } else if (s.kind === 'inspect') {
+              if (returns.length === 0) continue;
+              const r = returns[s.pick % returns.length]!;
+              const done = await h.run(ops.inspectReturn, {
+                returnId: r.returnId,
+                inspections: [
+                  {
+                    variantId: r.variantId,
+                    disposition: s.disposition,
+                    ...(s.qty ? { quantity: String(s.qty) } : {}),
+                  },
+                ],
+              });
+              // Only what this step disposed leaves owned stock.
+              const disposed = Number(done.return.lines[0].disposed);
+              out(r.variantId, String(disposed - (disposedSoFar[r.returnId] ?? 0)));
+              disposedSoFar[r.returnId] = disposed;
             } else if (s.kind === 'move') {
               await h.run(ops.moveStock, {
                 fromLocationId: locations[s.from],
@@ -268,7 +345,9 @@ describe('stock conservation with transfers (A21, I2)', () => {
         }
         for (const k of ['plain', 'lot', 'serial'] as const) {
           const view = await h.run(ops.getAvailability, { variantId: ids[k] });
-          expect(Number(view.totals.ownedTotal)).toBe(received[k] - (gone[ids[k]] ?? 0));
+          expect(Number(view.totals.ownedTotal)).toBe(
+            received[k] - (gone[ids[k]] ?? 0) + (back[ids[k]] ?? 0),
+          );
         }
         expect(await reconcileAll(shop.shopId)).toEqual([]);
       }),

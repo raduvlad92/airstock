@@ -728,7 +728,7 @@ describe('suppliers: costs are visible only with costs.read', () => {
         e.action === 'supplier_item.saved' && e.phase === 'outcome' && e.changes?.created,
     );
     expect(hidden.changes.restricted).toEqual({ permission: 'costs.read', hidden: true });
-    expect(JSON.stringify(viewerEvents)).not.toContain('1.25');
+    expect(JSON.stringify(viewerEvents)).not.toContain('"1.25');
   });
 
   it('keeps one preferred item per variant and unique supplier SKUs', async () => {

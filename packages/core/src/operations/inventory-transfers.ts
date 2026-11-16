@@ -423,7 +423,7 @@ export const readyTransfer = defineOperation({
     'Use this when a draft transfer should go ahead. Places transfer holds on concrete source positions (earliest expiry, then oldest stock first; expired lots only when the line names them), so the units are unavailable to every other caller until they are dispatched or the transfer is cancelled. Fails whole if the source lacks free stock for any line.',
   kind: 'command',
   scope: 'shop',
-  input: TransferRef,
+  input: z.object({ transferId: Id, reason: Reason.optional() }),
   output: CommandOut,
   permission: 'inventory.transfer',
   connectionScope: 'inventory:write',
@@ -442,7 +442,7 @@ export const readyTransfer = defineOperation({
     // Variants first (key share), as every stock command does; archived variants cannot move.
     await prepareCheck(ctx, lines);
     const lock = await lockStock(ctx, await readyCandidates(ctx.tx, t, lines));
-    const operationId = await insertOperation(ctx, 'reservation', t, null);
+    const operationId = await insertOperation(ctx, 'reservation', t, input.reason ?? null);
     const holds = await placeHolds(ctx, t, lines, lock.locked, operationId);
     const status = await refreshTransfer(ctx, t.id);
     const transfer = await loadTransfer(ctx.tx, t.id);
@@ -456,6 +456,7 @@ export const readyTransfer = defineOperation({
         operationId,
         locationIds,
         externalRef: t.reference,
+        reason: input.reason ?? null,
         changes: {
           holds: holds.map((h) => ({
             reservationId: h.reservationId,

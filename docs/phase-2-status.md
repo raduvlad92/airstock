@@ -12,7 +12,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I0 Groundwork | Done | Bench seeds and baseline timings (PR #48, [measurements](phase-2-measurements.md)). Originals shrink to 2,048 px, re-consent revokes earlier connections, and the ChatGPT harness (PR #46). Research (Section 5). The bench seed found a crash in the catalog grid on names outside Latin-1 ("ș", "€"); fixed in PR #50. |
 | I1 Stock engine | Done | Schema, receipts, reservations, fulfillment, allocation rules, bundles, shortages, and valuation (PRs #45, #49). One-of-a-kind items, quick add, starter families for cards and sets, and the dashboard stock panel (PR #51). The scheduled stock check with a reviewed repair (PR #55, Settings › Stock check). |
 | I2 Transfers, returns, counts | In progress | Restarted 16 November, 07:30 UTC |
-| I3 Purchasing and alerts | Done when #62 merges | Purchase orders (PR #59, [ADR 0027](adr/0027-purchase-orders.md)): PDF, email, receipts against lines, on order. Reorder rules, draft from low stock, and alerts in the app, by email, webhooks, and MCP (PR #62, [ADR 0029](adr/0029-reorder-rules-and-alerts.md)). |
+| I3 Purchasing and alerts | Done when #62 merges | Purchase orders (PR #59, [ADR 0027](adr/0027-purchase-orders.md)): PDF, email, receipts against lines, on order. Reorder rules, draft from low stock, and alerts in the app, by email, webhooks, and MCP (PR #62, [ADR 0030](adr/0030-reorder-rules-and-alerts.md)). |
 | I4 Scanning and picking | First half done | The scanner at `/app/scan` and the installed app (PR #54, [ADR 0025](adr/0025-scanning-and-installed-app.md)); look up, receive, and unknown codes (PR #58); pick lists on the phone and as PDF (PR #60, [ADR 0026](adr/0026-picking.md)). Next (I4b), once I2 and I3 land: count, move, receive against a PO, quick add, and short pick to count. |
 | I5 Webhooks, activity, reports | In progress | Webhooks done (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views are being finished. Reports wait for I3. |
 | I6 Shopify connector | Waiting for I2 | |
@@ -70,7 +70,7 @@ ADRs are numbered when they merge. This table links each decision as it lands.
 | D6 | Shortages | [ADR 0021](adr/0021-shortages.md) |
 | D7 | Valuation | [ADR 0022](adr/0022-valuation.md) |
 | D11 | Purchase orders: per-line quantities, receipts at the line cost, PDF in the Worker, send log | [ADR 0027](adr/0027-purchase-orders.md) |
-| D12 | Alerts: checked in the stock transaction, one open alert per rule, notified through the outbox | [ADR 0029](adr/0029-reorder-rules-and-alerts.md) |
+| D12 | Alerts: checked in the stock transaction, one open alert per rule, notified through the outbox | [ADR 0030](adr/0030-reorder-rules-and-alerts.md) |
 | D14 | Webhooks: registry of event types, per-shop subscriptions, signed deliveries with retries | [ADR 0023](adr/0023-outgoing-webhooks.md), [docs/webhooks.md](webhooks.md) |
 | D16 | MCP tools: measured tool choice, not a count | [ADR 0005, update](adr/0005-operation-registry.md) and Section 5.1 |
 | D19 | Media originals shrink above 2,048 px | [ADR 0015, update](adr/0015-media.md) |

@@ -2,8 +2,8 @@ import { uuidv7 } from '@airstock/core';
 import { reconcileConnection, runJob, type ShopifyVariant } from '@airstock/shopify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
-import type { FakeStore } from './fake-shopify.ts';
-import { type Merchant, type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
+import { json } from './setup.ts';
+import { type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
 
 // The order sync fixes after the connector review (PR #82, ADRs 0033, 0035, 0036): cases beyond
 // the review's own tests. Test files run in parallel against one database and outbox: every query
@@ -143,5 +143,135 @@ describe('Shopify order sync fixes', () => {
       [s.m.shopId, only.variantId],
     );
     expect(stock).toEqual({ on_hand: '7.000000', allocated: '0.000000' });
+  });
+  it('units are held where Shopify committed the line, with several mapped locations', async () => {
+    const m = await h.merchant('Two shops');
+    const store = h.newStore('fixes');
+    const sku = `TWO-${uuidv7().slice(-6)}`;
+    const made = await h.item(m, 'Two shops mug', sku);
+    // A second warehouse with a shelf: Shopify's "Warehouse" (1002).
+    const warehouse = await json(
+      await h.command(m.cookie, `/shops/${m.shopId}/warehouses`, { name: 'Second' }),
+    );
+    const shelf = await json(
+      await h.command(m.cookie, `/shops/${m.shopId}/locations`, {
+        warehouseId: warehouse.warehouseId,
+        name: 'Shelf',
+      }),
+    );
+    await h.receive(m, made.variantId, 5);
+    await h.receive(m, made.variantId, 5, { locationId: shelf.locationId });
+    const [variant] = store.addProduct({
+      title: 'Two shops mug',
+      variants: [{ sku, quantities: { '1001': 0, '1002': 0 } }],
+    });
+    const connectionId = await h.install(m, store);
+    const base = `/shops/${m.shopId}/shopify/connections/${connectionId}`;
+    expect(
+      (
+        await h.command(m.cookie, `${base}/locations`, {
+          connectionId,
+          locations: [
+            { shopifyLocationId: '1001', locationId: m.locationId },
+            { shopifyLocationId: '1002', warehouseId: warehouse.warehouseId },
+          ],
+        })
+      ).status,
+    ).toBe(200);
+    await h.command(m.cookie, `${base}/variants`, {
+      connectionId,
+      variants: [
+        {
+          shopifyVariantId: variant!.variantId,
+          shopifyInventoryItemId: variant!.inventoryItemId,
+          variantId: made.variantId,
+        },
+      ],
+    });
+    await h.flushTogether(m.shopId);
+    expect([store.available(variant!, '1001'), store.available(variant!, '1002')]).toEqual([5, 5]);
+    // Shopify commits the order at "Warehouse", the allocation rule's second location.
+    const order = store.placeOrder([{ variant: variant!, quantity: 2 }], '1002');
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(order));
+    await h.runJobs(m.shopId);
+    await h.flushTogether(m.shopId);
+    const held = await ownerQuery<{ location_id: string; allocated: string }>(
+      `select location_id, allocated::text from inventory_positions
+       where shop_id = $1 and variant_id = $2 and allocated > 0`,
+      [m.shopId, made.variantId],
+    );
+    expect(held).toEqual([{ location_id: shelf.locationId, allocated: '2.000000' }]);
+    // Each Shopify location shows what Airstock can still sell there.
+    expect([store.available(variant!, '1001'), store.available(variant!, '1002')]).toEqual([5, 3]);
+    // Shipped from there: stock leaves the shelf, and nothing differs.
+    const f = store.fulfill(order, null, '1002');
+    await h.deliver(
+      store.domain,
+      'fulfillments/create',
+      store.topicBody('fulfillments/create', order, f.fulfillmentId),
+    );
+    await h.runJobs(m.shopId);
+    await h.flushTogether(m.shopId);
+    const [onShelf] = await ownerQuery<{ on_hand: string }>(
+      `select on_hand::text from inventory_positions where shop_id = $1 and variant_id = $2
+       and location_id = $3`,
+      [m.shopId, made.variantId, shelf.locationId],
+    );
+    expect(onShelf?.on_hand).toBe('3.000000');
+    await reconcileConnection(h.deps(), m.shopId, connectionId, { daily: true });
+    expect(await shopifyAlerts(m.shopId)).toEqual([]);
+  });
+
+  it('a line committed at an unmapped Shopify location holds nothing; shipped from a mapped one, it leaves stock', async () => {
+    const s = await setup('Pop-up', [5]);
+    const [only] = s.items as [Item];
+    s.store.levels.set(s.store.key(only.shopify.inventoryItemId, '1002'), 4);
+    const order = s.store.placeOrder([{ variant: only.shopify, quantity: 2 }], '1002');
+    await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(order));
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    expect(await h.available(s.m, only.variantId)).toBe('5.000000');
+    expect(s.store.available(only.shopify, '1001')).toBe(5);
+    const [line] = await ownerQuery<{ outcome: string; shopify_location_id: string }>(
+      `select outcome, shopify_location_id from shopify_order_lines
+       where shop_id = $1 and shopify_order_id = $2`,
+      [s.m.shopId, order.orderId],
+    );
+    expect(line).toEqual({ outcome: 'unmapped_location', shopify_location_id: '1002' });
+    // The merchant ships it from the shop instead (the fulfillment order moved): units leave here.
+    const f = s.store.fulfill(order, null, '1001');
+    await h.deliver(
+      s.store.domain,
+      'fulfillments/create',
+      s.store.topicBody('fulfillments/create', order, f.fulfillmentId),
+    );
+    await h.runJobs(s.m.shopId);
+    const [stock] = await ownerQuery<{ on_hand: string; allocated: string }>(
+      `select sum(on_hand)::text as on_hand, sum(allocated)::text as allocated
+       from inventory_positions where shop_id = $1 and variant_id = $2 and condition = 'sellable'`,
+      [s.m.shopId, only.variantId],
+    );
+    expect(stock).toEqual({ on_hand: '3.000000', allocated: '0.000000' });
+  });
+
+  it('a store with one location, mapped, does not read where lines were committed', async () => {
+    const s = await setup('One place', [5]);
+    const [only] = s.items as [Item];
+    s.store.locationList = [{ id: '1001', name: 'Shop location', active: true }];
+    // The daily run refreshes the store's locations (the install recorded two).
+    await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
+    let reads = 0;
+    const lineLocations = s.store.lineLocations.bind(s.store);
+    s.store.lineLocations = async (id: string) => {
+      reads++;
+      return lineLocations(id);
+    };
+    const order = s.store.placeOrder([{ variant: only.shopify, quantity: 1 }]);
+    await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(order));
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    expect(reads).toBe(0);
+    expect(await h.available(s.m, only.variantId)).toBe('4.000000');
+    expect(s.store.available(only.shopify)).toBe(4);
   });
 });

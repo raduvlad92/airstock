@@ -239,7 +239,7 @@ describe('Shopify connector review findings', () => {
   // target == record and writes nothing, so Shopify keeps showing the reserved units as sellable
   // at the mapped location (oversell), and the next comparison calls it a conflict. PRD 8.5:
   // unmapped Shopify locations are "never guessed".
-  it.fails('F4: an order committed at an unmapped Shopify location leaves the mapped level right', async () => {
+  it('F4: an order committed at an unmapped Shopify location leaves the mapped level right', async () => {
     const s = await setup('Unmapped loc', 5);
     s.store.levels.set(s.store.key(s.item.inventoryItemId, '1002'), 10);
     // Shopify commits the order at "Warehouse" (1002), which this shop has not mapped.

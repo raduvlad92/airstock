@@ -375,6 +375,7 @@ async function allocateInScope(
   rootId: string,
   scopeId: string,
   needs: Array<{ reservationId: string; variantId: string; units: string }>,
+  reason = 'Shopify fulfilled from another location',
 ): Promise<Map<string, string>> {
   const covered = new Map<string, string>();
   for (const need of needs) {
@@ -411,7 +412,7 @@ async function allocateInScope(
             allocationId: a.id,
             quantity: normalize(String(q)),
             positionId: c.position_id,
-            reason: 'Shopify fulfilled from another location',
+            reason,
           });
           c.available = String(Number(c.available) - q);
           fromHere -= q;
@@ -423,6 +424,41 @@ async function allocateInScope(
     covered.set(need.variantId, inScope);
   }
   return covered;
+}
+
+/**
+ * Moves a new reservation of a line into the scope where Shopify committed the line, as far as
+ * stock there allows: Shopify lowered that location's available, so Airstock holds the units
+ * there too, and the push does not show them as sellable at the committing location while
+ * taking them from another (several mapped locations; the allocation rule chose first).
+ */
+async function holdWhereCommitted(
+  ctx: HandlerContext,
+  acc: Acc,
+  line: LineRow,
+  reservationId: string,
+  items: number,
+  scope: ScopeMap,
+): Promise<void> {
+  const parts = line.bundle
+    ? await ctx.tx.query<{ id: string; variant_id: string; per: string }>(
+        `select id, variant_id, component_base_quantity::text as per from reservations
+         where parent_id = $1 order by id`,
+        [reservationId],
+      )
+    : [{ id: reservationId, variant_id: line.variant_id!, per: '1' }];
+  await allocateInScope(
+    ctx,
+    acc,
+    reservationId,
+    scope.scope_id,
+    parts.map((p) => ({
+      reservationId: p.id,
+      variantId: p.variant_id,
+      units: line.bundle ? normalize(exactProduct(String(items), p.per)) : units(line, items),
+    })),
+    'Held where Shopify committed the order line',
+  );
 }
 
 /**
@@ -766,12 +802,18 @@ export const syncShopifyOrder = defineOperation({
       }
       const map = l.variantId ? maps.get(l.variantId) : undefined;
       const mapped = Boolean(map && scopes.length > 0 && l.quantity > 0);
+      // Where Shopify committed the line: read by the connector (null when Shopify did not say),
+      // or, when not read at all, the only mapped location.
+      const at = l.locationId === undefined ? onlyLocation : l.locationId;
+      // Committed at a Shopify location the shop has not mapped (a 3PL, a pop-up): those units
+      // ship from there, so nothing is held here and no mapped level's record moves (PRD 8.5).
+      const elsewhere = mapped && at !== null && !scopeOf(at);
       const row: LineRow = {
         shopify_line_id: l.lineId,
         shopify_variant_id: l.variantId,
         quantity: l.quantity,
-        outcome: mapped ? 'reserved' : 'unmapped',
-        shopify_location_id: l.locationId ?? onlyLocation,
+        outcome: !mapped ? 'unmapped' : elsewhere ? 'unmapped_location' : 'reserved',
+        shopify_location_id: at,
         variant_id: mapped ? map!.variantId : null,
         pack_id: mapped ? map!.packId : null,
         bundle: mapped ? map!.bundle : false,
@@ -806,16 +848,18 @@ export const syncShopifyOrder = defineOperation({
         lines.push(row);
         continue;
       }
-      // Shopify took the ordered units out of its available when it accepted the order.
-      await shopifyTook(
-        ctx.tx,
-        acc,
-        connectionId,
-        row.inventory_item_id,
-        row.shopify_location_id,
-        l.quantity,
-        takenAt,
-      );
+      // Shopify took the ordered units out of its available when it accepted the order (or the
+      // edit that added the line), at the location that committed them.
+      if (!elsewhere)
+        await shopifyTook(
+          ctx.tx,
+          acc,
+          connectionId,
+          row.inventory_item_id,
+          row.shopify_location_id,
+          l.quantity,
+          takenAt,
+        );
       lines.push(row);
     }
     const byLine = new Map(lines.map((l) => [l.shopify_line_id, l]));
@@ -868,7 +912,7 @@ export const syncShopifyOrder = defineOperation({
             // Shopify shipped more than the line holds: its first sync already carries the
             // fulfillment (fulfillments/create came first, or the reconciler found the order).
             // The difference is reserved first, so the shipped units leave stock here.
-            if (fl.quantity > line.open_items) {
+            if (scope && fl.quantity > line.open_items) {
               const made = await reserveItems(
                 ctx,
                 acc,
@@ -882,7 +926,7 @@ export const syncShopifyOrder = defineOperation({
                 continue;
               }
               if (made.short) {
-                line.outcome = 'shortage';
+                if (line.outcome === 'reserved') line.outcome = 'shortage';
                 result.shortage++;
               } else result.reserved++;
               line.open_items = fl.quantity;
@@ -974,7 +1018,11 @@ export const syncShopifyOrder = defineOperation({
       const unknown = r.all - r.unshipped - r.shipped;
       const shippedLeft = Math.max(0, line.fulfilled_items - r.shipped);
       const unshippedRefunds = r.unshipped + Math.max(0, unknown - shippedLeft);
-      const target = cancelled ? 0 : Math.max(0, ordered - line.fulfilled_items - unshippedRefunds);
+      // A line committed at a Shopify location that is not mapped holds nothing here.
+      const target =
+        cancelled || line.outcome === 'unmapped_location'
+          ? 0
+          : Math.max(0, ordered - line.fulfilled_items - unshippedRefunds);
       if (target > line.open_items) {
         const made = await reserveItems(
           ctx,
@@ -987,6 +1035,17 @@ export const syncShopifyOrder = defineOperation({
         if ('refused' in made) {
           refuse(line, made.refused);
           continue;
+        }
+        const committed = scopes.length > 1 ? scopeOf(line.shopify_location_id) : null;
+        if (committed) {
+          await holdWhereCommitted(
+            ctx,
+            acc,
+            line,
+            made.reservationId,
+            target - line.open_items,
+            committed,
+          );
         }
         if (made.short) {
           line.outcome = 'shortage';

@@ -235,6 +235,22 @@ export async function reconcileConnection(
     ),
   );
 
+  // Daily: the store's locations again, so a location added in Shopify since the install is
+  // known (shown as unmapped, and its orders' lines are read, never guessed).
+  if (opts.daily) {
+    try {
+      const locations = await store.admin.locations();
+      await deps.db.transaction({ shopId, userId: null }, (tx) =>
+        tx.query(
+          'update shopify_connections set shopify_locations = $2::jsonb, updated_at = now() where id = $1',
+          [connectionId, JSON.stringify(locations)],
+        ),
+      );
+    } catch (error) {
+      deps.logger?.error('shopify_locations_failed', { connectionId, error: String(error) });
+    }
+  }
+
   // 2. Levels that may differ (all of them daily).
   const { candidates, pending } = await deps.db.transaction(
     { shopId, userId: null, readOnly: true },

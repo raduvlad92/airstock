@@ -510,9 +510,9 @@ export interface OrderResult {
  * Applies an order's state as the Shopify connector, in one transaction (core's
  * `shopify.orders.sync`): reservations per line by the connection's allocation rule with
  * shortages, edits, cancellation, fulfillments, and refunds (PRD 8.5). The rows it keeps make a
- * repeated webhook, job, reconciler run, or catch-up change nothing (A30). With several mapped
- * Shopify locations, the lines' locations are read first, so the right record of Shopify's
- * quantity is lowered.
+ * repeated webhook, job, reconciler run, or catch-up change nothing (A30). Unless the store has
+ * one location and it is mapped, the lines' locations are read first, so the right record of
+ * Shopify's quantity is lowered and the units are held where Shopify committed them.
  */
 export async function processOrder(
   deps: SyncDeps,
@@ -521,15 +521,20 @@ export async function processOrder(
   order: ShopifyOrder,
 ): Promise<OrderResult> {
   const state = await deps.db.transaction({ shopId, userId: null, readOnly: true }, async (tx) => {
-    const [connection] = await tx.query<{ status: string; installed_by_membership_id: string }>(
-      'select status, installed_by_membership_id from shopify_connections where id = $1',
+    const [connection] = await tx.query<{
+      status: string;
+      installed_by_membership_id: string;
+      shopify_locations: Array<{ id: string; active: boolean }> | null;
+    }>(
+      `select status, installed_by_membership_id, shopify_locations from shopify_connections
+       where id = $1`,
       [connectionId],
     );
-    const [maps] = await tx.query<{ count: number }>(
-      'select count(*)::int as count from shopify_location_maps where connection_id = $1',
+    const maps = await tx.query<{ shopify_location_id: string }>(
+      'select shopify_location_id from shopify_location_maps where connection_id = $1',
       [connectionId],
     );
-    return { connection, locationMaps: maps?.count ?? 0 };
+    return { connection, mapped: maps.map((m) => m.shopify_location_id) };
   });
   if (state.connection?.status !== 'active') throw new NotConnectedError();
   const caller = shopifyConnectorCaller(
@@ -537,8 +542,17 @@ export async function processOrder(
     connectionId,
     state.connection.installed_by_membership_id,
   );
+  // Where Shopify committed each line is read unless the store has one location and it is
+  // mapped: with several mapped locations, or any the shop has not mapped (a 3PL, a pop-up), a
+  // line's location is never guessed (PRD 8.5). A line still without one is held by the
+  // allocation rule and lowers no record of Shopify's quantity.
+  const storeLocations = (state.connection.shopify_locations ?? []).filter((l) => l.active);
+  const onlyOne =
+    state.mapped.length === 1 &&
+    storeLocations.length === 1 &&
+    storeLocations[0]!.id === state.mapped[0];
   let withLocations = order;
-  if (state.locationMaps > 1 && order.lines.some((l) => !l.locationId)) {
+  if (state.mapped.length > 0 && !onlyOne && order.lines.some((l) => !l.locationId)) {
     const store = await connectedStore(deps, shopId, connectionId);
     const at = await store.admin.lineLocations(order.orderId);
     withLocations = {

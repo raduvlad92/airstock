@@ -526,12 +526,37 @@ export interface ResolvedItem {
  * Turns items into per-line quantities, each at most `limit(line)`. Without items, every line
  * with something left takes all of it.
  */
+/**
+ * What a line still has of one lot: in transit on this transfer, or held at the source. A lot
+ * scanned without a quantity takes this, not the line's whole remainder across lots.
+ */
+async function lotRemainder(
+  tx: Tx,
+  line: LineRow,
+  lotId: string,
+  of: 'in_transit' | 'held',
+): Promise<string> {
+  const [row] = await tx.query<{ total: string }>(
+    of === 'in_transit'
+      ? `select coalesce(sum(p.on_hand), 0)::text as total from inventory_positions p
+         join transfer_lines l on l.shop_id = p.shop_id and l.transfer_id = p.transfer_id
+         where l.id = $1 and p.variant_id = l.variant_id and p.lot_id = $2`
+      : `select coalesce(sum(a.outstanding), 0)::text as total from reservation_allocations a
+         join inventory_positions p on p.shop_id = a.shop_id and p.id = a.position_id
+         join transfer_lines l on l.shop_id = a.shop_id and l.reservation_id = a.reservation_id
+         where l.id = $1 and p.lot_id = $2`,
+    [line.id, lotId],
+  );
+  return normalize(row?.total ?? '0');
+}
+
 export async function resolveItems(
   ctx: HandlerContext,
   lines: LineRow[],
   items: ItemSpec[] | undefined,
   limit: (l: LineRow) => string,
   what: { code: string; message: string },
+  byLot: 'in_transit' | 'held' | null = null,
 ): Promise<ResolvedItem[]> {
   if (!items || items.length === 0) {
     const all = lines
@@ -591,6 +616,10 @@ export async function resolveItems(
       );
       if (!lot) throw errors.notFound('Lot');
       lotId = lot.id;
+      if (item.quantity === undefined && !serials && byLot) {
+        const ofLot = await lotRemainder(ctx.tx, line, lotId, byLot);
+        if (compare(ofLot, quantity) < 0) quantity = ofLot;
+      }
     }
     const [v] = await ctx.tx.query<{ scale: number }>(
       'select quantity_scale as scale from variants where id = $1',

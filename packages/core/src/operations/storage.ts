@@ -439,6 +439,29 @@ async function assertNoStock(tx: Tx, locationIds: string[], message: string): Pr
 }
 
 /** A location a sales channel sells from stays active until it is unmapped. */
+/**
+ * Refuses while an open transfer is headed to any of the locations with units not yet received
+ * or resolved: they would arrive at an archived location and stay in transit. Transfers are
+ * created with the destination share-locked, so none slips past this check.
+ */
+async function assertNoInboundTransfers(tx: Tx, locationIds: string[]): Promise<void> {
+  const rows = await tx.query<{ id: string; reference: string | null }>(
+    `select t.id, t.reference from transfers t
+     where t.to_location_id = any($1::uuid[]) and t.status not in ('received', 'cancelled')
+       and exists (select 1 from transfer_lines l where l.shop_id = t.shop_id
+         and l.transfer_id = t.id and l.planned - l.cancelled - l.received - l.resolved > 0)
+     order by t.id limit 20`,
+    [locationIds],
+  );
+  if (rows.length > 0) {
+    throw errors.conflict(
+      'transfers_inbound',
+      'Transfers are on their way here. Receive, resolve, or cancel them before archiving.',
+      { transfers: rows.map((r) => ({ transferId: r.id, reference: r.reference })) },
+    );
+  }
+}
+
 async function assertNotMapped(tx: Tx, locationIds: string[]): Promise<void> {
   const [mapped] = await tx.query<{ path: string }>(
     `select l.path from shopify_location_maps m
@@ -833,7 +856,7 @@ export const archiveWarehouse = defineOperation({
   id: 'storage.warehouses.archive',
   summary: 'Archive a warehouse and its locations',
   description:
-    'Refused while any of its locations holds stock or open reservations, or a Shopify store sells from one. A shop keeps at least one active warehouse. History stays; restoring brings back the locations archived with it.',
+    'Refused while any of its locations holds stock or open reservations, a transfer is on its way to one, or a Shopify store sells from one. A shop keeps at least one active warehouse. History stays; restoring brings back the locations archived with it.',
   kind: 'command',
   scope: 'shop',
   input: z.object({ warehouseId: Id }),
@@ -878,6 +901,7 @@ export const archiveWarehouse = defineOperation({
       ids,
       'Move the stock out and release the reservations before archiving this warehouse.',
     );
+    await assertNoInboundTransfers(ctx.tx, ids);
     await assertNotMapped(ctx.tx, ids);
     const active = locations.filter((l) => l.status === 'active').map((l) => l.id);
     const [row] = await ctx.tx.query<{ version: number }>(
@@ -1288,7 +1312,7 @@ export const archiveLocation = defineOperation({
   id: 'storage.locations.archive',
   summary: 'Archive a location and everything inside it',
   description:
-    'Refused while it or a location inside it holds stock or open reservations, or a Shopify store sells from it. Archived locations take no new operations; history stays. Restoring brings back the locations archived with it.',
+    'Refused while it or a location inside it holds stock or open reservations, a transfer is on its way to it, or a Shopify store sells from it. Archived locations take no new operations; history stays. Restoring brings back the locations archived with it.',
   kind: 'command',
   scope: 'shop',
   input: z.object({ locationId: Id }),
@@ -1319,6 +1343,7 @@ export const archiveLocation = defineOperation({
       ids,
       'Move the stock out and release the reservations before archiving this location.',
     );
+    await assertNoInboundTransfers(ctx.tx, ids);
     await assertNotMapped(ctx.tx, ids);
     const inside = subtree
       .filter((l) => l.id !== location.id && l.status === 'active')

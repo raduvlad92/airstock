@@ -254,7 +254,7 @@ export async function applyMoves(
          serial_id, transfer_id, on_hand, received_at)
        select app_shop_id(), x.id, x."variantId", x."locationId", x.condition, x."lotId",
          x."serialId", x."transferId", x.quantity, coalesce(x."receivedAt", now())
-       from x
+       from x order by x.k
        on conflict on constraint inventory_positions_identity
        do update set on_hand = inventory_positions.on_hand + excluded.on_hand,
          received_at = case when inventory_positions.on_hand = 0 then excluded.received_at
@@ -267,14 +267,19 @@ export async function applyMoves(
          and x."serialId" is not distinct from inventory_positions.serial_id
          and x."transferId" is not distinct from inventory_positions.transfer_id) as key`,
       [
+        // In identity order: a position created here waits on another command creating the same
+        // one, so every command creates them in one order and two receipts into empty
+        // positions cannot deadlock (existing destinations are locked by id beforehand).
         JSON.stringify(
-          [...ins.entries()].map(([k, v]) => ({
-            id: v.id,
-            k,
-            ...v.key,
-            quantity: v.quantity,
-            receivedAt: v.receivedAt,
-          })),
+          [...ins.entries()]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([k, v]) => ({
+              id: v.id,
+              k,
+              ...v.key,
+              quantity: v.quantity,
+              receivedAt: v.receivedAt,
+            })),
         ),
       ],
     );

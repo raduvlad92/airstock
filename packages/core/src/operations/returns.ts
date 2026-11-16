@@ -1010,9 +1010,10 @@ export const inspectReturn = defineOperation({
       lot_id: string | null;
       serial_id: string | null;
       serial_normalized: string | null;
+      matched: boolean | null;
       remaining: string;
     }>(
-      `select u.id, u.line_id, u.variant_id, u.lot_id, u.serial_id, su.serial_normalized,
+      `select u.id, u.line_id, u.variant_id, u.lot_id, u.serial_id, su.serial_normalized, u.matched,
          (u.received - u.inspected)::text as remaining
        from return_units u
        left join lots lt on lt.shop_id = u.shop_id and lt.id = u.lot_id
@@ -1085,6 +1086,21 @@ export const inspectReturn = defineOperation({
         left.set(u.id, normalize(subtract(have, take)));
         rest = normalize(subtract(rest, take));
       }
+    }
+
+    // A serial that was not fulfilled from this shop goes back on sale only after a person
+    // reviewed it and cleared the exception (ADR 0029); other dispositions may go ahead.
+    const unreviewed = picks.filter(
+      (p) => p.disposition === 'sellable' && p.unit.matched === false && r.exception_open,
+    );
+    if (unreviewed.length > 0) {
+      throw errors.conflict(
+        'exception_open',
+        'A flagged serial cannot be made sellable before the exception is reviewed and cleared.',
+        {
+          serials: unreviewed.map((p) => p.unit.serial_normalized),
+        },
+      );
     }
 
     // 1–2. The quarantine positions, the sellable ones that receive units, and open shortages.

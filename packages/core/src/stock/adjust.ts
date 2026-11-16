@@ -483,6 +483,39 @@ export async function applyChanges(
         };
   });
   const applied = await applyMoves(ctx, operationId, moves);
+  // A counted position that did not exist when the count read the shelf may have been created by
+  // a receipt that committed meanwhile: the upsert then added the count to it. The count must set
+  // the shelf to what was counted, so it is retried against the position as it is now.
+  const fresh = live.filter((c) => c.target !== undefined && !byKey.get(keyOf(c.key)));
+  if (fresh.length > 0) {
+    const landed = applied.filter((m) => fresh.some((c) => c.key.variantId === m.variantId));
+    const now = await ctx.tx.query<{ id: string; on_hand: string }>(
+      'select id, on_hand::text from inventory_positions where id = any($1::uuid[])',
+      [landed.map((m) => m.toPositionId).filter((id): id is string => id !== null)],
+    );
+    for (const c of fresh) {
+      const m = applied.find(
+        (x) =>
+          x.toPositionId &&
+          keyOf({
+            variantId: x.variantId,
+            locationId: x.to!.locationId,
+            condition: x.to!.condition,
+            lotId: x.lotId,
+            serialId: x.serialId,
+            transferId: x.to!.transferId,
+          }) === keyOf(c.key),
+      );
+      const onHand = now.find((n) => n.id === m?.toPositionId)?.on_hand;
+      if (onHand !== undefined && compare(onHand, c.target!) !== 0) {
+        throw errors.conflict(
+          'retry_conflict',
+          'Stock arrived at a counted shelf while the count was posted. Retry: the count then sets the shelf to the number counted.',
+          { variantId: c.key.variantId, locationId: c.key.locationId },
+        );
+      }
+    }
+  }
   await syncSerials(ctx, operationId, applied, 'written_off');
   await assertReturnUnitsKept(
     ctx.tx,

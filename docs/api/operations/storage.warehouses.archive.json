@@ -3,7 +3,7 @@
     "post": {
       "operationId": "storage.warehouses.archive",
       "summary": "Archive a warehouse and its locations",
-      "description": "Refused while any of its locations holds stock or open reservations, or a Shopify store sells from one. A shop keeps at least one active warehouse. History stays; restoring brings back the locations archived with it.",
+      "description": "Refused while any of its locations holds stock or open reservations, a transfer is on its way to one, or a Shopify store sells from one. A shop keeps at least one active warehouse. History stays; restoring brings back the locations archived with it.",
       "x-permission": "storage.manage",
       "x-connection-scope": "storage:write",
       "x-audit-action": "storage.warehouse.archived",

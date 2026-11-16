@@ -477,3 +477,49 @@ describe('F-COST-RESET-ON-MOVE: a count that moves all units to another shelf re
     });
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-REVERSE-REPAIR (stock lost). A stock-check repair of an on_hand_mismatch writes a ledger-only
+// entry (on hand unchanged) as an 'adjustment' with reason 'reconciliation'
+// (inventory-reconciliation.ts). reverseOperation (inventory-adjustments.ts) accepts any adjustment
+// without a transfer or return, and applies the opposite delta to the real balance: reversing the
+// repair removes units that are on the shelf and leaves history and balance disagreeing again.
+// ---------------------------------------------------------------------------------------------
+describe('F-REVERSE-REPAIR: reversing a stock-check repair changes on hand', () => {
+  it.fails('refuses to reverse a ledger-only repair (or reverses only the ledger entry)', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '10' });
+    const [pos] = await ownerQuery<{ id: string }>(
+      'select id from inventory_positions where shop_id = $1 and variant_id = $2',
+      [shop.shopId, variantId],
+    );
+    // The balance drifted to 13 while the ledger says 10 (the shelf really holds 13).
+    await ownerQuery('update inventory_positions set on_hand = 13 where shop_id = $1 and id = $2', [
+      shop.shopId,
+      pos!.id,
+    ]);
+    await ownerQuery(
+      'update variant_costs set quantity = 13 where shop_id = $1 and variant_id = $2',
+      [shop.shopId, variantId],
+    );
+    const preview = await h.run(ops.previewStockRepair, {
+      problem: 'on_hand_mismatch',
+      targetId: pos!.id,
+    });
+    const repaired = await h.run(ops.repairStockProblem, {
+      problem: 'on_hand_mismatch',
+      targetId: pos!.id,
+      expected: preview.problem.expected,
+      actual: preview.problem.actual,
+      reason: 'Counted the shelf: 13 units are there.',
+      confirm: true,
+    });
+    expect(await reconcile(shop.shopId)).toEqual([]);
+    // Refusing the reversal, or reversing only the ledger entry, both keep the shelf's 13 units.
+    await h
+      .run(ops.reverseOperation, { operationId: repaired.operationId, note: 'undo' })
+      .catch(() => null);
+    const view = await h.run(ops.getAvailability, { variantId });
+    expect(view.totals.onHand).toBe('13.000000');
+  });
+});

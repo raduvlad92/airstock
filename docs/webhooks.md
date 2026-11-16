@@ -333,9 +333,9 @@ Sent by "Send test" in the dashboard or the API, to check the endpoint.
 }
 ```
 
-### `purchase_order.status_changed`
+### `transfer.status_changed`
 
-A purchase order was drafted or moved to another state: sent, partially received, received, closed, or cancelled. Names the order, its supplier and destination, and its version.
+A transfer or a move changed state, such as ready, dispatched, partially received, received, cancelled, or exception: the transfer with its per-line quantities and the change.
 
 - **Needs:** `inventory.read` (held by whoever subscribes)
 - **Filters:** warehouses and locations
@@ -343,22 +343,51 @@ A purchase order was drafted or moved to another state: sent, partially received
 ```json
 {
   "id": "0193a1b2-0000-7000-8000-0000000000ff",
-  "type": "purchase_order.status_changed",
+  "type": "transfer.status_changed",
   "created_at": "2026-11-16T09:00:00.000Z",
   "shop_id": "0193a1b2-0000-7000-8000-000000000001",
   "api_version": "v1",
   "data": {
-    "purchaseOrder": {
-      "id": "0193a1b2-0000-7000-8000-000000000090",
-      "number": "PO-0001",
-      "supplierId": "0193a1b2-0000-7000-8000-0000000000b0",
-      "warehouseId": "0193a1b2-0000-7000-8000-000000000020",
-      "locationId": "0193a1b2-0000-7000-8000-000000000021",
-      "version": 4
+    "transfer": {
+      "id": "0193a1b2-0000-7000-8000-000000000080",
+      "kind": "transfer",
+      "reference": "TR-0001",
+      "status": "dispatched",
+      "from": {
+        "locationId": "0193a1b2-0000-7000-8000-000000000021",
+        "path": "Main warehouse/A1",
+        "warehouseId": "0193a1b2-0000-7000-8000-000000000020"
+      },
+      "to": {
+        "locationId": "0193a1b2-0000-7000-8000-0000000000b1",
+        "path": "Store/Front",
+        "warehouseId": "0193a1b2-0000-7000-8000-0000000000b0"
+      },
+      "totals": {
+        "planned": "10.000000",
+        "cancelled": "0.000000",
+        "dispatched": "10.000000",
+        "received": "0.000000",
+        "resolved": "0.000000",
+        "inTransit": "10.000000"
+      },
+      "lines": [
+        {
+          "variantId": "0193a1b2-0000-7000-8000-000000000011",
+          "sku": "ETB-PRE-01",
+          "planned": "10.000000",
+          "cancelled": "0.000000",
+          "dispatched": "10.000000",
+          "received": "0.000000",
+          "resolved": "0.000000",
+          "inTransit": "10.000000"
+        }
+      ],
+      "version": 3
     },
     "status": {
-      "from": "sent",
-      "to": "partially_received"
+      "from": "ready",
+      "to": "dispatched"
     }
   }
 }
@@ -373,7 +402,7 @@ Registered, listed by the API with `"status": "coming"`, hidden in the dashboard
 | `alert.opened` | An alert opened, such as low stock or a lot nearing expiry (I3). | warehouses and locations, alert kinds |
 | `alert.resolved` | An alert resolved because stock recovered, or was acknowledged (I3). | warehouses and locations, alert kinds |
 | `reservation.shortage` | A connector order was reserved with a shortage it could not cover (I1). | warehouses and locations |
-| `transfer.status_changed` | A transfer moved to another state, such as dispatched or received (I2). | warehouses and locations |
+| `purchase_order.status_changed` | A purchase order moved to another state, such as sent or received (I3). | warehouses and locations |
 | `return.status_changed` | A return moved to another state, such as received or inspected (I2). | warehouses and locations |
 | `shopify.sync_conflict` | Shopify and Airstock disagree on a quantity or field that no order explains (I6). | warehouses and locations |
 

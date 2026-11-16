@@ -1,4 +1,4 @@
-import { type Caller, ops, sweepShortages, uuidv7 } from '@airstock/core';
+import { type Caller, ops, sweepShortages, uuidv7, WEBHOOK_EVENT_TYPES } from '@airstock/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   addMember,
@@ -644,5 +644,74 @@ describe('isolation between shops (A13)', () => {
       [other.shopId],
     );
     expect(count!.n).toBe('1');
+  });
+});
+
+describe('webhooks (D14)', () => {
+  it('emits transfer.status_changed with each status change, in the same transaction, for a subscribed shop', async () => {
+    const own = await seedShop(db, sink, 'Transfer webhooks shop');
+    const ho = harness(db, sink, own);
+    const shelf = await createLeafLocation(ho, own.warehouseId, 'W2');
+    const wh = await ho.run(ops.createWarehouse, { name: 'Far' });
+    const far = await createLeafLocation(ho, wh.warehouseId, 'Far shelf');
+    await ownerQuery(
+      `insert into webhook_subscriptions (shop_id, id, name, url, event_types, secret_key_id,
+         secret_ciphertext, secret_hint)
+       values ($1, $2, 'n8n', 'https://hooks.example.test/x', array['transfer.status_changed'],
+         'k1', 'x', 'abcd')`,
+      [own.shopId, uuidv7()],
+    );
+    const variantId = await createVariant(ho);
+    await ho.run(ops.receiveStock, { variantId, locationId: own.locationId, quantity: '5' });
+    const { transfer } = await ho.run(ops.createTransfer, {
+      fromLocationId: own.locationId,
+      toLocationId: far,
+      lines: [{ variantId, quantity: '4' }],
+    });
+    await ho.run(ops.readyTransfer, { transferId: transfer.transferId });
+    await ho.run(ops.dispatchTransfer, {
+      transferId: transfer.transferId,
+      items: [{ variantId, quantity: '1' }],
+    });
+    // A second partial dispatch keeps the status: no event.
+    await ho.run(ops.dispatchTransfer, {
+      transferId: transfer.transferId,
+      items: [{ variantId, quantity: '1' }],
+    });
+    await ho.run(ops.moveStock, {
+      fromLocationId: own.locationId,
+      toLocationId: shelf,
+      lines: [{ variantId, quantity: '1' }],
+    });
+    // A failed command writes nothing.
+    await expect(
+      ho.run(ops.receiveTransfer, {
+        transferId: transfer.transferId,
+        items: [{ variantId, quantity: '9' }],
+      }),
+    ).rejects.toMatchObject({ code: 'quantity_exceeds_in_transit' });
+    const rows = await ownerQuery<{
+      payload: { type: string; input: { transferId: string; from: string | null; to: string } };
+    }>(
+      `select payload from outbox_events where shop_id = $1 and topic = 'webhook.event'
+       order by created_at, id`,
+      [own.shopId],
+    );
+    expect(rows.map((r) => [r.payload.type, r.payload.input.from, r.payload.input.to])).toEqual([
+      ['transfer.status_changed', null, 'draft'],
+      ['transfer.status_changed', 'draft', 'ready'],
+      ['transfer.status_changed', 'ready', 'partially_dispatched'],
+      ['transfer.status_changed', null, 'received'],
+    ]);
+    // The snapshot built at send time matches the registered schema.
+    const type = WEBHOOK_EVENT_TYPES.find((t) => t.id === 'transfer.status_changed')!;
+    const built = await db.transaction({ shopId: own.shopId, userId: null }, (tx) =>
+      type.build(tx, rows[2]!.payload.input),
+    );
+    expect(type.data.safeParse(built?.data).success).toBe(true);
+    expect(built).toMatchObject({
+      data: { transfer: { status: 'partially_dispatched', totals: { inTransit: '2.000000' } } },
+      locationIds: [own.locationId, far],
+    });
   });
 });

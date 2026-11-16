@@ -36,6 +36,7 @@ import {
   settleItems,
   type TransferRow,
 } from '../stock/transfers.ts';
+import { webhookEvent } from '../webhooks/events.ts';
 import { LotCode, StockCondition } from './inventory.ts';
 
 // Transfers (plan D8, PRD 6.4, ADR "Transfers"): draft, ready (typed transfer holds), dispatch
@@ -272,6 +273,13 @@ function statusChange(transferId: string, status: { from: string; to: string }) 
   return { transferId, from: status.from, to: status.to };
 }
 
+/** transfer.status_changed, written with the change when the summary status moved (D14). */
+function statusWebhook(transferId: string, status: { from: string | null; to: string }) {
+  return status.from === status.to
+    ? []
+    : [webhookEvent('transfer.status_changed', { transferId, from: status.from, to: status.to })];
+}
+
 async function checkPair(ctx: HandlerContext, fromId: string, toId: string) {
   if (fromId === toId) {
     throw errors.unprocessable('same_location', 'The source and destination are the same.');
@@ -360,6 +368,7 @@ export const createTransfer = defineOperation({
     const transfer = await loadTransfer(ctx.tx, transferId);
     const locationIds = [...new Set([from.id, to.id, ...holds.map((h) => h.locationId)])];
     return {
+      webhooks: statusWebhook(transferId, { from: null, to: status.to }),
       result: { operationId, transfer },
       audit: {
         targetType: 'transfer',
@@ -439,6 +448,7 @@ export const readyTransfer = defineOperation({
     const transfer = await loadTransfer(ctx.tx, t.id);
     const locationIds = [...new Set(holds.map((h) => h.locationId))];
     return {
+      webhooks: statusWebhook(t.id, status),
       result: { operationId, transfer },
       audit: {
         targetType: 'transfer',
@@ -530,6 +540,7 @@ export const dispatchTransfer = defineOperation({
     const transfer = await loadTransfer(ctx.tx, t.id);
     const transit = await inTransitLocation(ctx.tx);
     return {
+      webhooks: statusWebhook(t.id, status),
       result: { operationId, transfer },
       audit: {
         targetType: 'transfer',
@@ -614,6 +625,7 @@ export const receiveTransfer = defineOperation({
     const transfer = await loadTransfer(ctx.tx, t.id);
     const transit = await inTransitLocation(ctx.tx);
     return {
+      webhooks: statusWebhook(t.id, status),
       result: { operationId, transfer, shortagesFilled },
       audit: {
         targetType: 'transfer',
@@ -683,6 +695,7 @@ export const cancelTransfer = defineOperation({
     const transfer = await loadTransfer(ctx.tx, t.id);
     const locationIds = [...new Set(released.map((r) => r.locationId))];
     return {
+      webhooks: statusWebhook(t.id, status),
       result: { operationId, transfer },
       audit: {
         targetType: 'transfer',
@@ -745,6 +758,7 @@ export const reportTransferException = defineOperation({
     const status = await refreshTransfer(ctx, t.id);
     const transfer = await loadTransfer(ctx.tx, t.id);
     return {
+      webhooks: statusWebhook(t.id, status),
       result: { operationId: null, transfer },
       audit: {
         targetType: 'transfer',
@@ -806,6 +820,7 @@ export const resolveTransferException = defineOperation({
     const transfer = await loadTransfer(ctx.tx, t.id);
     const visible = canSeeCosts(ctx);
     return {
+      webhooks: statusWebhook(t.id, status),
       result: {
         operationId,
         transfer,
@@ -939,6 +954,7 @@ export const moveStock = defineOperation({
     const transit = await inTransitLocation(ctx.tx);
     const moves = [...dispatched.moves, ...received.moves];
     return {
+      webhooks: statusWebhook(t.id, { from: null, to: status.to }),
       result: { operationId: receiptOp, transfer, shortagesFilled: received.shortagesFilled },
       audit: {
         targetType: 'transfer',

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { applyAlertChanges, reorderRuleStates, type RuleState } from '../alerts/check.ts';
+import { applyAlertChanges, type RuleState, reorderRuleStates } from '../alerts/check.ts';
 import { compare, normalize, subtract } from '../catalog/decimal.ts';
 import { NonNegativeDecimal, PositiveDecimal } from '../decimal.ts';
 import { errors } from '../errors.ts';
@@ -244,7 +244,9 @@ export const setReorderRule = defineOperation({
     const reorderPoint = normalize(input.reorderPoint ?? before!.reorder_point);
     // Giving one of quantity or maximum clears the other.
     let reorderQuantity =
-      input.reorderQuantity === undefined ? (before?.reorder_quantity ?? null) : input.reorderQuantity;
+      input.reorderQuantity === undefined
+        ? (before?.reorder_quantity ?? null)
+        : input.reorderQuantity;
     let maximumLevel =
       input.maximumLevel === undefined ? (before?.maximum_level ?? null) : input.maximumLevel;
     if (input.reorderQuantity && input.maximumLevel === undefined) maximumLevel = null;
@@ -357,7 +359,9 @@ export const removeReorderRule = defineOperation({
       [input.ruleId],
     );
     if (!rule) throw errors.notFound('Reorder rule');
-    if (!(await destinationInScope(ctx.tx, ctx.locationScope, rule.warehouse_id, rule.location_id))) {
+    if (
+      !(await destinationInScope(ctx.tx, ctx.locationScope, rule.warehouse_id, rule.location_id))
+    ) {
       throw errors.forbidden('This rule’s warehouse or location is outside your locations.');
     }
     if (input.expectedVersion !== undefined && input.expectedVersion !== rule.version) {
@@ -473,7 +477,15 @@ export const suggestFromLowStock = defineOperation({
       }),
     ),
     withoutSupplier: z
-      .array(SuggestedLine.pick({ ruleId: true, variantId: true, sku: true, productName: true, need: true }))
+      .array(
+        SuggestedLine.pick({
+          ruleId: true,
+          variantId: true,
+          sku: true,
+          productName: true,
+          need: true,
+        }),
+      )
       .describe('Low rules with no preferred supplier or supplier item: set one to include them.'),
     costVisible: z.boolean(),
   }),
@@ -558,9 +570,7 @@ export const suggestFromLowStock = defineOperation({
       need: string;
     }> = [];
     for (const s of states) {
-      const wanted = s.reorderQuantity
-        ? s.reorderQuantity
-        : subtract(s.maximumLevel!, s.available);
+      const wanted = s.reorderQuantity ? s.reorderQuantity : subtract(s.maximumLevel!, s.available);
       const need = normalize(subtract(wanted, s.onOrder));
       if (compare(need, '0') <= 0) continue;
       const item = s.preferredSupplierId
@@ -586,7 +596,8 @@ export const suggestFromLowStock = defineOperation({
       let quantity = factor
         ? ceilDecimal(normalize(divideExact(need, factor)), 0)
         : ceilDecimal(need, scale);
-      if (item?.minimum_order_quantity) quantity = max(quantity, normalize(item.minimum_order_quantity));
+      if (item?.minimum_order_quantity)
+        quantity = max(quantity, normalize(item.minimum_order_quantity));
       const key = `${supplierId}:${s.warehouseId}`;
       const draft = drafts.get(key) ?? {
         supplierId,

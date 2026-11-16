@@ -288,7 +288,9 @@ const PreferencesOut = z.object({
       isDefault: z.boolean(),
     }),
   ),
-  lotExpiryAlertDays: z.number().describe('Shop setting: lots expiring within this many days alert.'),
+  lotExpiryAlertDays: z
+    .number()
+    .describe('Shop setting: lots expiring within this many days alert.'),
 });
 
 export const getAlertPreferences = defineOperation({
@@ -400,7 +402,9 @@ export const setAlertSettings = defineOperation({
         targetType: 'shop',
         targetId: ctx.shopId,
         outcome: before?.days === input.lotExpiryAlertDays ? 'no_change' : 'succeeded',
-        changes: { lotExpiryAlertDays: { from: before?.days ?? null, to: input.lotExpiryAlertDays } },
+        changes: {
+          lotExpiryAlertDays: { from: before?.days ?? null, to: input.lotExpiryAlertDays },
+        },
       },
     };
   },

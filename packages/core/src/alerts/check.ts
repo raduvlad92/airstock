@@ -4,7 +4,7 @@ import { compare } from '../catalog/decimal.ts';
 import { uuidv7 } from '../ids.ts';
 import { destinationLocationIds } from '../purchasing/orders.ts';
 import type { HandlerContext, HandlerResult } from '../registry.ts';
-import { webhookEvent, type WebhookEmit } from '../webhooks/events.ts';
+import { type WebhookEmit, webhookEvent } from '../webhooks/events.ts';
 
 // Alerts checked inside the transaction that changes stock or on order (D12, PRD 6.9): a cheap
 // comparison after the command's own locks (alerts are last in the lock order, ADR 0006). The
@@ -104,7 +104,9 @@ export async function applyAlertChanges(
      select 'resolved', id, opened_at, resolved_at from resolved`,
     [
       JSON.stringify(opened.map((o) => ({ ...o, webhookLocationIds: undefined }))),
-      JSON.stringify(resolved.map((r) => ({ id: r.id, resolution: r.resolution, details: r.details }))),
+      JSON.stringify(
+        resolved.map((r) => ({ id: r.id, resolution: r.resolution, details: r.details })),
+      ),
     ],
   );
   const effects = none();

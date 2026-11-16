@@ -730,8 +730,9 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   // Registered now so the catalog is complete; each becomes available with its milestone.
   {
     id: 'alert.opened',
-    description: 'An alert opened, such as low stock or a lot nearing expiry (I3).',
-    status: 'coming',
+    description:
+      'An alert opened: low stock (available plus on order at or below a reorder point), a lot nearing expiry, a new shortage, or a stock check problem. One event per opening, not per order; filter by alert kind and location.',
+    status: 'available',
     permission: 'inventory.read',
     filters: ['locations', 'alertKinds'],
     data: z.object({ alert: z.record(z.string(), z.unknown()) }),
@@ -739,11 +740,19 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
       alert: {
         id: SAMPLE_IDS.alert,
         kind: 'low_stock',
+        status: 'open',
         variantId: SAMPLE_IDS.variant,
-        sku: 'ETB-PRE-01',
         warehouseId: SAMPLE_IDS.warehouse,
+        ruleId: '0193a1b2-0000-7000-8000-0000000000c0',
+        sku: 'ETB-PRE-01',
+        productName: 'Prismatic Evolutions Elite Trainer Box',
+        warehouseName: 'Main warehouse',
+        locationPath: null,
         available: '2',
+        onOrder: '0',
         reorderPoint: '5',
+        reorderQuantity: '24',
+        maximumLevel: null,
         openedAt: '2026-11-16T09:00:00.000Z',
       },
     },
@@ -751,8 +760,9 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   },
   {
     id: 'alert.resolved',
-    description: 'An alert resolved because stock recovered, or was acknowledged (I3).',
-    status: 'coming',
+    description:
+      'An alert resolved because its condition cleared: stock recovered above the reorder point, the lot sold out, the shortage was filled, the stock check came back clean, or the rule was removed.',
+    status: 'available',
     permission: 'inventory.read',
     filters: ['locations', 'alertKinds'],
     data: z.object({ alert: z.record(z.string(), z.unknown()) }),
@@ -760,10 +770,10 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
       alert: {
         id: SAMPLE_IDS.alert,
         kind: 'low_stock',
-        variantId: SAMPLE_IDS.variant,
-        sku: 'ETB-PRE-01',
-        resolvedAt: '2026-11-17T09:00:00.000Z',
         resolution: 'recovered',
+        recovered: { available: '26', onOrder: '0' },
+        openedAt: '2026-11-16T09:00:00.000Z',
+        resolvedAt: '2026-11-17T09:00:00.000Z',
       },
     },
     build: passthrough,

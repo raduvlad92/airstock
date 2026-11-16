@@ -96,7 +96,7 @@ export async function sweepExpiredReservations(db: Database, maxShops = 50): Pro
          join reservation_allocations a on a.shop_id = r.shop_id and a.reservation_id = r.id
          join inventory_positions p on p.shop_id = a.shop_id and p.id = a.position_id
          where r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()
-           and a.released + a.fulfilled < a.quantity
+           and a.outstanding > 0
          limit 200`,
       );
       const ids = positions.map((p) => p.id).sort();

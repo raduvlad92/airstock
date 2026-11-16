@@ -153,7 +153,7 @@ export const setShopifyMappings = defineOperation({
     }
     const [location] = await ctx.tx.query<{ status: string; has_children: boolean }>(
       `select l.status, exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as has_children
-       from locations l where l.id = $1 for share`,
+       from locations l where l.id = $1 and l.kind = 'storage' for share`,
       [input.locationId],
     );
     if (!location) throw errors.notFound('Location');

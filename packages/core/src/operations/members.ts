@@ -247,7 +247,7 @@ export const setLocationScope = defineOperation({
     if (scopeIds.length > 0) {
       const found = await ctx.tx.query<{ id: string }>(
         `select id from warehouses where id = any($1::uuid[])
-         union select id from locations where id = any($1::uuid[])`,
+         union select id from locations where id = any($1::uuid[]) and kind = 'storage'`,
         [scopeIds],
       );
       if (found.length !== scopeIds.length) throw errors.notFound('Warehouse or location');

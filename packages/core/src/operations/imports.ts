@@ -323,7 +323,7 @@ export const previewImport = defineOperation({
     );
     const locations = await ctx.tx.query<{ id: string; path: string }>(
       `select l.id, l.path from locations l
-       where l.status = 'active' and not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id)
+       where l.status = 'active' and l.kind = 'storage' and not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id)
          and ($1::uuid[] is null or l.path_ids && $1::uuid[])`,
       [ctx.locationScope],
     );
@@ -1535,6 +1535,7 @@ async function receiveOpeningStock(
     (
       await tx.query<{ id: string }>(
         `select l.id from locations l where l.id = any($1::uuid[]) and l.status = 'active'
+           and l.kind = 'storage'
            and not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id)`,
         [locations],
       )
@@ -1543,7 +1544,13 @@ async function receiveOpeningStock(
   const input = receipts
     .filter((r) => usable.has(r.location_id))
     .sort((a, b) => (a.variant_id + a.location_id < b.variant_id + b.location_id ? -1 : 1))
-    .map((r) => ({ ...r, operation_id: uuidv7(), position_id: uuidv7(), entry_id: uuidv7() }));
+    .map((r) => ({
+      ...r,
+      operation_id: uuidv7(),
+      position_id: uuidv7(),
+      entry_id: uuidv7(),
+      history_id: uuidv7(),
+    }));
   const callerId = `${base.caller.kind}:${base.caller.id}`;
   const made = await tx.query<{
     key: string;
@@ -1566,22 +1573,47 @@ async function receiveOpeningStock(
        insert into inventory_operations (shop_id, id, kind, actor_type, actor_id, source, external_ref, reason)
        select app_shop_id(), f.operation_id, 'receipt', $3, $4, 'import', 'import ' || $5, 'opening stock' from fresh f),
      pos as (
-       insert into inventory_positions (shop_id, id, variant_id, location_id, condition, on_hand)
-       select app_shop_id(), min(f.position_id::text)::uuid, f.variant_id, f.location_id, 'sellable', sum(f.quantity)
+       insert into inventory_positions (shop_id, id, variant_id, location_id, condition, on_hand,
+         received_at)
+       select app_shop_id(), min(f.position_id::text)::uuid, f.variant_id, f.location_id, 'sellable',
+         sum(f.quantity), now()
        from fresh f group by f.variant_id, f.location_id
        on conflict on constraint inventory_positions_identity
        do update set on_hand = inventory_positions.on_hand + excluded.on_hand,
+         received_at = case when inventory_positions.on_hand = 0 then now()
+           else inventory_positions.received_at end,
          version = inventory_positions.version + 1, updated_at = now()
-       returning id, variant_id, location_id, on_hand),
-     entries as (
-       insert into inventory_entries (shop_id, id, operation_id, position_id, variant_id, location_id, delta)
-       select app_shop_id(), f.entry_id, f.operation_id, p.id, f.variant_id, f.location_id, f.quantity
-       from fresh f join pos p on p.variant_id = f.variant_id and p.location_id = f.location_id)
+       returning id, variant_id, location_id, on_hand)
      select f.key, f.operation_id, p.id as position_id, p.on_hand::text as on_hand
      from fresh f join pos p on p.variant_id = f.variant_id and p.location_id = f.location_id`,
     [JSON.stringify(input), callerId, base.caller.kind, base.caller.id, importId],
   );
   const byKey = new Map(input.map((r) => [r.key, r]));
+  if (made.length > 0) {
+    // The positions are locked; now each variant's cost row, in variant order (lock order, D7).
+    // Opening stock carries no cost: it takes the default cost or the current average.
+    const fresh = made.map((m) => ({ ...byKey.get(m.key)!, position_id: m.position_id }));
+    await tx.query(
+      `with fresh as (
+         select * from jsonb_to_recordset($1::jsonb) as x(variant_id uuid, location_id uuid,
+           quantity numeric, operation_id uuid, position_id uuid, entry_id uuid, history_id uuid)),
+       per_variant as (
+         select variant_id, sum(quantity) as quantity, min(operation_id::text)::uuid as operation_id,
+           min(history_id::text)::uuid as history_id
+         from fresh group by variant_id order by variant_id),
+       costs as (
+         select v.variant_id, c.unit_cost, c.cost_basis
+         from per_variant v
+         cross join lateral apply_stock_cost(v.history_id, v.variant_id, v.operation_id, 'receipt',
+           v.quantity, null) c)
+       insert into inventory_entries (shop_id, id, operation_id, position_id, variant_id, location_id,
+         delta, unit_cost, cost_basis)
+       select app_shop_id(), f.entry_id, f.operation_id, f.position_id, f.variant_id, f.location_id,
+         f.quantity, c.unit_cost, c.cost_basis
+       from fresh f join costs c on c.variant_id = f.variant_id`,
+      [JSON.stringify(fresh)],
+    );
+  }
   const events = made.map((m) => {
     const r = byKey.get(m.key)!;
     return auditEvent(base, {

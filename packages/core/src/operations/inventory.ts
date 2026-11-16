@@ -54,6 +54,32 @@ async function loadStockableVariant(
   return variant;
 }
 
+/**
+ * Applies a stock change to the variant's owned quantity and moving average (D7) through the
+ * shared SQL function, which locks the variant's cost row: call it after the positions and
+ * reservations are locked. Returns the unit cost the entries record.
+ */
+export async function applyStockCost(
+  ctx: HandlerContext,
+  variantId: string,
+  operationId: string,
+  kind: 'receipt' | 'fulfillment' | 'adjustment' | 'transfer' | 'return' | 'count',
+  delta: string,
+  unitCost: string | null,
+): Promise<{ unit_cost: string | null; cost_basis: string; average_after: string | null }> {
+  const [row] = await ctx.tx.query<{
+    unit_cost: string | null;
+    cost_basis: string;
+    average_after: string | null;
+  }>(
+    `select unit_cost::text, cost_basis, average_after::text
+     from apply_stock_cost($1, $2, $3, $4, $5::numeric, $6::numeric)`,
+    [ctx.newId(), variantId, operationId, kind, delta, unitCost],
+  );
+  if (!row) throw errors.internal();
+  return row;
+}
+
 function actorColumns(ctx: HandlerContext) {
   return [ctx.caller.kind, ctx.caller.id, ctx.caller.source, ctx.attemptId] as const;
 }
@@ -69,18 +95,29 @@ export async function expireAllocationsAt(
   positionIds: string[],
 ): Promise<AuditEvent[]> {
   if (positionIds.length === 0) return [];
+  // Reservations are locked after positions, in id order, following the documented lock order.
+  const due = await ctx.tx.query<{ id: string }>(
+    `select r.id from reservations r
+     where r.shop_id = app_shop_id() and r.status in ('active', 'partially_fulfilled')
+       and r.expires_at <= now()
+       and exists (select 1 from reservation_allocations a
+         where a.shop_id = r.shop_id and a.reservation_id = r.id and a.position_id = any($1::uuid[])
+           and a.outstanding > 0)
+     order by r.id for update`,
+    [positionIds],
+  );
+  if (due.length === 0) return [];
   const released = await ctx.tx.query<{
     reservation_id: string;
     position_id: string;
     outstanding: string;
   }>(
     `with expired as (
-       select a.id, a.position_id, a.reservation_id, a.quantity - a.released - a.fulfilled as outstanding
+       select a.id, a.position_id, a.reservation_id, a.outstanding
        from reservation_allocations a
        join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
        where a.shop_id = app_shop_id() and a.position_id = any($1::uuid[])
-         and r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()
-         and a.released + a.fulfilled < a.quantity),
+         and r.id = any($2::uuid[]) and a.outstanding > 0),
      alloc as (
        update reservation_allocations a set released = a.released + e.outstanding
        from expired e where a.shop_id = app_shop_id() and a.id = e.id),
@@ -90,18 +127,18 @@ export async function expireAllocationsAt(
        from (select position_id, sum(outstanding) as total from expired group by position_id) s
        where p.shop_id = app_shop_id() and p.id = s.position_id)
      select reservation_id, position_id, outstanding::text from expired`,
-    [positionIds],
+    [positionIds, due.map((d) => d.id)],
   );
   if (released.length === 0) return [];
   const reservationIds = [...new Set(released.map((r) => r.reservation_id))];
-  // Reservations are locked after positions, following the documented lock order.
   const closed = await ctx.tx.query<{ id: string }>(
     `update reservations r set status = 'expired', updated_at = now(), version = r.version + 1
      where r.shop_id = app_shop_id() and r.id = any($1::uuid[])
        and r.status in ('active', 'partially_fulfilled')
+       and r.shortage_quantity = 0
        and not exists (
          select 1 from reservation_allocations a
-         where a.shop_id = r.shop_id and a.reservation_id = r.id and a.released + a.fulfilled < a.quantity)
+         where a.shop_id = r.shop_id and a.reservation_id = r.id and a.outstanding > 0)
      returning r.id`,
     [reservationIds],
   );
@@ -177,7 +214,7 @@ export const receiveStock = defineOperation({
     // one that starts later, so neither can pass its no-stock check while stock arrives.
     const [location] = await ctx.tx.query<{ status: string; has_children: boolean }>(
       `select l.status, exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as has_children
-       from locations l where l.id = $1 for share`,
+       from locations l where l.id = $1 and l.kind = 'storage' for share`,
       [input.locationId],
     );
     if (!location) throw errors.notFound('Location');
@@ -190,23 +227,21 @@ export const receiveStock = defineOperation({
       );
     }
     const operationId = ctx.newId();
+    // 1. The position (locked by the upsert), then 2. the variant's cost row (lock order).
     const [position] = await ctx.tx.query<{ id: string; on_hand: string; allocated: string }>(
       `with op as (
          insert into inventory_operations (shop_id, id, kind, actor_type, actor_id, source, attempt_id,
            external_ref, reason)
-         values (app_shop_id(), $1, 'receipt', $2, $3, $4, $5, $6, $7)),
-       pos as (
-         insert into inventory_positions (shop_id, id, variant_id, location_id, condition, on_hand)
-         values (app_shop_id(), $8, $9, $10, $11, $12::numeric)
-         on conflict on constraint inventory_positions_identity
-         do update set on_hand = inventory_positions.on_hand + excluded.on_hand,
-           version = inventory_positions.version + 1, updated_at = now()
-         returning id, on_hand, allocated),
-       entry as (
-         insert into inventory_entries (shop_id, id, operation_id, position_id, variant_id, location_id,
-           delta, unit_cost)
-         select app_shop_id(), $13, $1, pos.id, $9, $10, $12::numeric, $14::numeric from pos)
-       select id, on_hand::text, allocated::text from pos`,
+         values (app_shop_id(), $1, 'receipt', $2, $3, $4, $5, $6, $7))
+       insert into inventory_positions (shop_id, id, variant_id, location_id, condition, on_hand,
+         received_at)
+       values (app_shop_id(), $8, $9, $10, $11, $12::numeric, now())
+       on conflict on constraint inventory_positions_identity
+       do update set on_hand = inventory_positions.on_hand + excluded.on_hand,
+         received_at = case when inventory_positions.on_hand = 0 then now()
+           else inventory_positions.received_at end,
+         version = inventory_positions.version + 1, updated_at = now()
+       returning id, on_hand::text, allocated::text`,
       [
         operationId,
         ...actorColumns(ctx),
@@ -217,11 +252,32 @@ export const receiveStock = defineOperation({
         input.locationId,
         input.condition,
         input.quantity,
-        ctx.newId(),
-        input.unitCost ?? null,
       ],
     );
     if (!position) throw errors.internal();
+    const cost = await applyStockCost(
+      ctx,
+      input.variantId,
+      operationId,
+      'receipt',
+      input.quantity,
+      input.unitCost ?? null,
+    );
+    await ctx.tx.query(
+      `insert into inventory_entries (shop_id, id, operation_id, position_id, variant_id, location_id,
+         delta, unit_cost, cost_basis)
+       values (app_shop_id(), $1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8)`,
+      [
+        ctx.newId(),
+        operationId,
+        position.id,
+        input.variantId,
+        input.locationId,
+        input.quantity,
+        cost.unit_cost,
+        cost.cost_basis,
+      ],
+    );
     return {
       result: {
         operationId,
@@ -506,9 +562,9 @@ export const releaseReservation = defineOperation({
       );
     }
     const [open] = await ctx.tx.query<{ outstanding: string; covers: boolean }>(
-      `select coalesce(sum(quantity - released - fulfilled), 0)::text as outstanding,
-         coalesce(sum(quantity - released - fulfilled), 0) >= coalesce($2::numeric, 0) as covers
-       from reservation_allocations where reservation_id = $1 and released + fulfilled < quantity`,
+      `select coalesce(sum(outstanding), 0)::text as outstanding,
+         coalesce(sum(outstanding), 0) >= coalesce($2::numeric, 0) as covers
+       from reservation_allocations where reservation_id = $1 and outstanding > 0`,
       [input.reservationId, input.quantity ?? null],
     );
     if (!open?.covers) {
@@ -524,10 +580,10 @@ export const releaseReservation = defineOperation({
     const operationId = ctx.newId();
     const released = await ctx.tx.query<{ position_id: string; location_id: string; take: string }>(
       `with open as (
-         select a.id, a.position_id, a.quantity - a.released - a.fulfilled as outstanding,
-           sum(a.quantity - a.released - a.fulfilled) over (order by a.id desc) as running
+         select a.id, a.position_id, a.outstanding,
+           sum(a.outstanding) over (order by a.id desc) as running
          from reservation_allocations a
-         where a.shop_id = app_shop_id() and a.reservation_id = $1 and a.released + a.fulfilled < a.quantity),
+         where a.shop_id = app_shop_id() and a.reservation_id = $1 and a.outstanding > 0),
        picks as (
          select id, position_id, least(outstanding, $2::numeric - (running - outstanding)) as take
          from open where running - outstanding < $2::numeric),
@@ -551,7 +607,7 @@ export const releaseReservation = defineOperation({
          status = case when exists (
              select 1 from reservation_allocations a
              where a.shop_id = r.shop_id and a.reservation_id = r.id
-               and a.released + a.fulfilled < a.quantity) then r.status
+               and a.outstanding > 0) then r.status
            when exists (
              select 1 from reservation_allocations a
              where a.shop_id = r.shop_id and a.reservation_id = r.id and a.fulfilled > 0) then 'fulfilled'
@@ -590,29 +646,19 @@ export const releaseReservation = defineOperation({
 });
 
 /**
- * Stock per position with what is reserved and available right now: expired claims stop counting
- * before the sweeper releases them. Shared by stock reads and bundle availability. Parameters:
+ * Stock per position with what is reserved and available right now, from the shared SQL function
+ * `stock_positions` (migration 0017): expired claims and expired lots stop counting before any
+ * sweeper runs. Shared by stock reads and bundle availability. Parameters:
  * $1 variant IDs, $2 an optional location (with its sub-locations), $3 the caller's location
  * scope, $4 an optional warehouse.
  */
 export const POSITION_STOCK_SQL = `
-  select p.id, p.variant_id, p.location_id, l.path, l.warehouse_id, p.condition, p.on_hand,
-    p.allocated - coalesce(x.expired, 0) as reserved,
-    case when p.condition = 'sellable' and l.status = 'active'
-      and location_fulfillment_eligible(l.shop_id, l.path_ids)
-      then p.on_hand - p.allocated + coalesce(x.expired, 0) else 0 end as available
-  from inventory_positions p
-  join locations l on l.shop_id = p.shop_id and l.id = p.location_id
-  left join lateral (
-    select sum(a.quantity - a.released - a.fulfilled) as expired
-    from reservation_allocations a
-    join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
-    where a.shop_id = p.shop_id and a.position_id = p.id and a.released + a.fulfilled < a.quantity
-      and r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()) x on true
-  where p.variant_id = any($1::uuid[])
-    and ($2::uuid is null or l.path_ids @> array[$2::uuid])
-    and ($3::uuid[] is null or l.path_ids && $3::uuid[])
-    and ($4::uuid is null or l.warehouse_id = $4::uuid)`;
+  select sp.position_id as id, sp.variant_id, sp.location_id, sp.location_path as path,
+    sp.warehouse_id, sp.condition, sp.on_hand, sp.reserved, sp.available
+  from stock_positions($1::uuid[]) sp
+  where ($2::uuid is null or sp.path_ids @> array[$2::uuid])
+    and ($3::uuid[] is null or sp.path_ids && $3::uuid[])
+    and ($4::uuid is null or sp.warehouse_id = $4::uuid)`;
 
 export const getAvailability = defineOperation({
   id: 'inventory.availability.get',

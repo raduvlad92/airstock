@@ -179,30 +179,29 @@ export async function addMember(
   return { userId, membershipId, caller: sessionCaller(userId) };
 }
 
-/** Ledger and balances agree, and allocations never exceed stock (A21). */
+/**
+ * Every stock invariant holds (A21): the ledger, balances, allocations, reservations, serials, and
+ * the owned quantity behind the moving average agree. Runs the same SQL check as the scheduled
+ * reconciliation (`stock_reconciliation_problems`, D18), in the shop's context.
+ */
 export async function reconcile(shopId: string): Promise<string[]> {
-  const problems = await ownerQuery<{ problem: string }>(
-    `select 'on_hand mismatch at ' || p.id as problem
-       from inventory_positions p
-       left join (select position_id, sum(delta) as total from inventory_entries where shop_id = $1 group by position_id) e
-         on e.position_id = p.id
-      where p.shop_id = $1 and p.on_hand <> coalesce(e.total, 0)
-     union all
-     select 'allocated mismatch at ' || p.id
-       from inventory_positions p
-       left join (select position_id, sum(quantity - released - fulfilled) as total
-                  from reservation_allocations where shop_id = $1 group by position_id) a
-         on a.position_id = p.id
-      where p.shop_id = $1 and p.allocated <> coalesce(a.total, 0)
-     union all
-     select 'over-allocated at ' || id from inventory_positions where shop_id = $1 and allocated > on_hand
-     union all
-     select 'reservation total mismatch ' || r.id
-       from reservations r
-       join (select reservation_id, sum(quantity) as total from reservation_allocations where shop_id = $1 group by reservation_id) a
-         on a.reservation_id = r.id
-      where r.shop_id = $1 and r.quantity <> a.total`,
-    [shopId],
-  );
-  return problems.map((p) => p.problem);
+  // As the runtime role, so row-level security limits the check to this shop like the job.
+  const client = new pg.Client({ connectionString: inject('databases').appUrl });
+  await client.connect();
+  try {
+    await client.query('begin read only');
+    await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);
+    const { rows } = await client.query<{
+      problem: string;
+      target_id: string;
+      expected: string;
+      actual: string;
+    }>('select problem, target_id, expected, actual from stock_reconciliation_problems()');
+    await client.query('commit');
+    return rows.map(
+      (r) => `${r.problem} at ${r.target_id}: expected ${r.expected}, got ${r.actual}`,
+    );
+  } finally {
+    await client.end();
+  }
 }

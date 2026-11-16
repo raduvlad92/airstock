@@ -151,6 +151,7 @@ for (const [label, inputFor] of scenarios) {
   let rows = 0;
   let perRun = 0;
   const failed: Record<string, number> = {};
+  const byShop = new Map<string, number[]>();
   for (let i = 0; i < Number(args.n); i++) {
     const shop = seed.shops[i % seed.shops.length]!;
     const c = await caller(shop.shopId);
@@ -173,6 +174,8 @@ for (const [label, inputFor] of scenarios) {
     perRun = statements - before;
     times.push(ms);
     server.push(Math.max(0, ms - perRun * roundTrip));
+    const name = shop.name ?? shop.shopId;
+    byShop.set(name, [...(byShop.get(name) ?? []), Math.max(0, ms - perRun * roundTrip)]);
     rows += (res.result as { rows: unknown[] }).rows.length;
   }
   if (times.length === 0) {
@@ -189,6 +192,9 @@ for (const [label, inputFor] of scenarios) {
     serverP95: pct(server, 95),
     statements: perRun,
     rows: Math.round(rows / times.length),
+    serverP95ByShop: Object.fromEntries(
+      [...byShop].map(([name, xs]) => [name, Number(pct(xs, 95).toFixed(1))]),
+    ),
   };
   out.push(row);
   console.log(

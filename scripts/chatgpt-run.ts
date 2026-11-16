@@ -1,28 +1,45 @@
 /**
  * ChatGPT tool-choice harness (Phase 2 plan D16, Section 7.4): lists the MCP calls a shop's
- * connections made in a time window, from `audit_events`, as a Markdown table ready to paste into
- * a status document. With an expected list, it also marks each prompt right or wrong.
+ * connections made in a time window as a Markdown table ready to paste into a status document.
+ * With an expected list, it also marks each prompt right or wrong.
  *
- *   DATABASE_OWNER_URL=postgres://… pnpm chatgpt-run --shop "ChatGPT run" --from 2026-11-20T09:00Z \
- *     [--to 2026-11-20T10:00Z] [--connection <grant ID>] [--expect docs/chatgpt-runs/phase-2.json] \
- *     [--gap 8] [--width 90] [--out run.md]
+ * Two ways to read the calls:
  *
- * - `--shop` takes a shop's name or ID. Times are ISO 8601; without a zone they are UTC.
+ *   # API mode: an API credential of the shop with activity:read (every scope is fine).
+ *   AIRSTOCK_TOKEN=ask_… pnpm chatgpt-run --shop <shop ID> --from 2026-11-20T09:00Z \
+ *     [--base https://airstock.deletecookies.dev] [--to …] [--connection <grant ID>] \
+ *     [--expect docs/chatgpt-runs/phase-2.json] [--gap 8] [--width 90] [--out run.md]
+ *
+ *   # Database mode: the owner connection string.
+ *   DATABASE_OWNER_URL=postgres://… pnpm chatgpt-run --db --shop "ChatGPT run" --from … [same options]
+ *
+ * - API mode reads the shop's activity history (`GET /activity`, PRD 7.4) with the filters
+ *   source mcp and actor type connection, page by page. It is the mode used when AIRSTOCK_TOKEN is
+ *   set; `--db` picks the database instead. The token is read from the environment and never
+ *   printed. `--shop` is the shop's ID (in the dashboard address, /app/shops/<ID>/…).
+ * - Database mode reads `audit_events` and `connection_grants`; `--shop` takes a name or an ID.
+ * - Times are ISO 8601; without a zone they are UTC.
  * - `--connection` keeps one connection (grant ID); by default every connection of the shop counts.
  * - A call is one tool call: the outcome event of its operation (a command's attempt event is
- *   skipped). Arguments come from the event: a read's input or its recorded filters, a command's
- *   changes, or the problem a refused call was told about. A call refused before it reached an
- *   operation (an unknown action, say) leaves no event and is not listed.
+ *   skipped). Arguments come from the event: in database mode a read's input or its recorded
+ *   filters, a command's changes, or the problem a refused call was told about. The activity API
+ *   does not return a read's input or a refusal's details, so in API mode a read shows the record
+ *   it was about (`{"variant":"…"}`) and a refusal only its code. A call refused before it reached
+ *   an operation (an unknown action, say) leaves no event and is not listed.
+ * - A connection's scopes come from `connection_grants` in database mode, and from the event that
+ *   created it (`connection.created`) in API mode.
  * - `--expect` reads `{ "prompts": [{ "prompt": 1, "text": "…", "expect": [{ "tool": "get_stock",
- *   "action": "lot_trace" }] }] }`. An expected step may name an `outcome` (such as `denied`);
+ *   "action": "lot_trace" }] }] }`. An expected step may name an `outcome` (such as `denied`), and
+ *   `or` lists other calls that also do (a report instead of a per-item read, say);
  *   `ordered: true` needs the steps in that order; `orNoCall: true` also counts a prompt right when
- *   none of its expected tools was called (a refusal before any call). Prompts take the calls in
+ *   none of its expected tools was called (a refusal before any call); `optional: true` marks a
+ *   prompt the owner may skip: with no call it is listed as skipped and not counted. Prompts take the calls in
  *   time order, split only where `--gap` seconds or more passed between two calls (default 8): the
  *   split that makes the most prompts right wins, then the one that gives the most calls to a
  *   prompt expecting their tool, then the one that cuts at the longest pauses.
  *   When a split is off, give the prompt an `at` time (its first call is at or after it).
- * - Read-only: it runs one SELECT per table and never writes. Point it at staging only for a real
- *   run; it prints shop data (tool arguments) to the terminal.
+ * - Read-only in both modes: it never writes (its own API reads are in the shop's history, as
+ *   source api). It prints shop data (tool arguments) to the terminal.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -42,6 +59,9 @@ export interface AuditRow {
   changes: unknown;
   context: unknown;
   error: unknown;
+  /** The record the event is about; the API mode shows it for a read. */
+  target_type?: string | null;
+  target_id?: string | null;
 }
 
 export interface Call {
@@ -56,10 +76,15 @@ export interface Call {
   grantId: string | null;
 }
 
-export interface ExpectedStep {
+export interface ExpectedCall {
   tool: string;
   action?: string | string[];
   outcome?: string;
+}
+
+export interface ExpectedStep extends ExpectedCall {
+  /** Other calls that satisfy this step as well. */
+  or?: ExpectedCall[];
 }
 
 export interface ExpectedPrompt {
@@ -68,6 +93,8 @@ export interface ExpectedPrompt {
   expect: ExpectedStep[];
   ordered?: boolean;
   orNoCall?: boolean;
+  /** A prompt the owner may skip; with no call of its own it is skipped, not wrong. */
+  optional?: boolean;
   at?: string;
 }
 
@@ -98,12 +125,17 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+/** The record an event is about, when it names one (a variant, a report). */
+function targetOf(row: AuditRow): Record<string, string> | null {
+  return row.target_type && row.target_id ? { [row.target_type]: row.target_id } : null;
+}
+
 /** What best shows the arguments of a call, from what its event recorded. */
 function argsOf(row: AuditRow): unknown {
   const context = record(row.context);
   if (row.error) return context?.problem ?? null;
   if (context && 'input' in context) return context.input;
-  return row.changes ?? row.context ?? null;
+  return row.changes ?? row.context ?? targetOf(row);
 }
 
 /**
@@ -181,11 +213,18 @@ export function shorten(value: unknown, width = 90): string {
   return text.length > width ? `${text.slice(0, width - 1)}…` : text;
 }
 
-const actionMatches = (step: ExpectedStep, call: Call) =>
+const callMatches = (step: ExpectedCall, call: Call) =>
   step.tool === call.tool &&
   (step.action === undefined ||
     (Array.isArray(step.action) ? step.action : [step.action]).includes(call.action ?? '')) &&
   (step.outcome === undefined || step.outcome === call.outcome);
+
+const actionMatches = (step: ExpectedStep, call: Call) =>
+  callMatches(step, call) || (step.or ?? []).some((alt) => callMatches(alt, call));
+
+/** Every tool a prompt expects, alternatives included. */
+const toolsOf = (prompt: ExpectedPrompt) =>
+  new Set(prompt.expect.flatMap((s) => [s.tool, ...(s.or ?? []).map((a) => a.tool)]));
 
 /**
  * Whether these calls satisfy a prompt: each expected step needs its own call, in order when the
@@ -193,7 +232,7 @@ const actionMatches = (step: ExpectedStep, call: Call) =>
  * a specific one needs.
  */
 export function promptRight(prompt: ExpectedPrompt, calls: Call[]): boolean {
-  const tools = new Set(prompt.expect.map((s) => s.tool));
+  const tools = toolsOf(prompt);
   if (prompt.orNoCall && !calls.some((c) => tools.has(c.tool))) return true;
   if (prompt.ordered) {
     let at = 0;
@@ -249,7 +288,7 @@ export function assignPrompts(prompts: ExpectedPrompt[], calls: Call[], gapSecon
   const OWN_TOOL = 1e3;
   const EARLY = 1e-3;
   const ownTools = (p: number, i: number, j: number) => {
-    const tools = new Set(prompts[p]!.expect.map((s) => s.tool));
+    const tools = toolsOf(prompts[p]!);
     let count = 0;
     for (let k = i; k < j; k++) if (tools.has(calls[k]!.tool)) count++;
     return count;
@@ -303,6 +342,12 @@ const code = (text: string) => (text ? `\`${cell(text)}\`` : '');
 function toolLabel(tool: string, action: string | string[] | null | undefined): string {
   const actions = action === null || action === undefined ? '' : [action].flat().join(' or ');
   return actions ? `${code(tool)} ${actions}` : code(tool);
+}
+
+function stepLabel(step: ExpectedStep): string {
+  const one = (c: ExpectedCall) =>
+    `${toolLabel(c.tool, c.action)}${c.outcome ? ` (${c.outcome})` : ''}`;
+  return [step, ...(step.or ?? [])].map(one).join(' or ');
 }
 
 function outcomeLabel(call: Call): string {
@@ -376,15 +421,17 @@ export function renderRun(input: RenderInput): string {
   });
   if (prompts && starts) {
     let right = 0;
+    let skipped = 0;
     lines.push('', '| Prompt | Expected | Called | Result |', '| --- | --- | --- | --- |');
     prompts.forEach((prompt, p) => {
       const own = calls.slice(starts[p], p + 1 < starts.length ? starts[p + 1] : calls.length);
-      const ok = promptRight(prompt, own);
+      const skip = prompt.optional === true && own.length === 0;
+      const ok = !skip && promptRight(prompt, own);
       if (ok) right++;
+      if (skip) skipped++;
       const expected =
-        prompt.expect
-          .map((s) => `${toolLabel(s.tool, s.action)}${s.outcome ? ` (${s.outcome})` : ''}`)
-          .join(prompt.ordered ? ', then ' : ', ') + (prompt.orNoCall ? ', or no call' : '');
+        prompt.expect.map(stepLabel).join(prompt.ordered ? ', then ' : ', ') +
+        (prompt.orNoCall ? ', or no call' : '');
       const called =
         own
           .map(
@@ -393,11 +440,13 @@ export function renderRun(input: RenderInput): string {
           )
           .join(', ') || 'no call';
       const label = prompt.text ? `${prompt.prompt}. ${cell(prompt.text)}` : String(prompt.prompt);
-      lines.push(`| ${label} | ${expected} | ${called} | ${ok ? 'Right' : '**Wrong**'} |`);
+      const result = skip ? 'Skipped (optional)' : ok ? 'Right' : '**Wrong**';
+      lines.push(`| ${label} | ${expected} | ${called} | ${result} |`);
     });
+    const skippedNote = skipped > 0 ? ` (${skipped} optional skipped)` : '';
     lines.push(
       '',
-      `**${right} of ${prompts.length} prompts right.** Calls were matched to prompts in time order; check the Prompt column above, and give a prompt an \`at\` time in the expected file if a split is off.`,
+      `**${right} of ${prompts.length - skipped} prompts right${skippedNote}.** Calls were matched to prompts in time order; check the Prompt column above, and give a prompt an \`at\` time in the expected file if a split is off.`,
     );
   }
   return `${lines.join('\n')}\n`;
@@ -444,6 +493,157 @@ export async function loadRun(
   };
 }
 
+/** Where API mode reads from: an Airstock base URL, the shop, and an API credential's token. */
+export interface ApiSource {
+  base: string;
+  shopId: string;
+  token: string;
+  /** Defaults to the global fetch; tests pass the app's own handler. */
+  fetch?: (request: Request) => Promise<Response>;
+}
+
+/** An event as `GET /shops/{shopId}/activity` returns it (activity.list). */
+export interface ActivityEvent {
+  eventId: string;
+  occurredAt: string;
+  action: string;
+  phase: 'attempt' | 'outcome';
+  outcome: string;
+  source: string;
+  actorType: string;
+  actorId: string | null;
+  clientId: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  attemptId: string | null;
+  requestId: string | null;
+  changes: unknown;
+  error: unknown;
+}
+
+interface ActivityPage {
+  events: ActivityEvent[];
+  nextCursor: string | null;
+  ingestion: { delayed: boolean; pendingRequests: number } | null;
+}
+
+/** An activity event in the shape `callsFrom` reads; a connection's actor ID is its grant ID. */
+export function rowFromEvent(e: ActivityEvent): AuditRow {
+  return {
+    event_id: e.eventId,
+    occurred_at: new Date(e.occurredAt),
+    action: e.action,
+    phase: e.phase,
+    outcome: e.outcome,
+    grant_id: e.actorType === 'connection' ? e.actorId : null,
+    request_id: e.requestId,
+    attempt_id: e.attemptId,
+    changes: e.changes,
+    context: null,
+    error: e.error,
+    target_type: e.targetType,
+    target_id: e.targetId,
+  };
+}
+
+/** One GET under /api/v1/shops/{shopId}, waiting out rate limits (429) and brief outages. */
+async function apiGet<T>(
+  source: ApiSource,
+  path: string,
+  params: Record<string, string | null | undefined> = {},
+): Promise<T> {
+  const url = new URL(`${source.base.replace(/\/$/, '')}/api/v1/shops/${source.shopId}${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null && value !== undefined) url.searchParams.set(key, value);
+  }
+  const send = source.fetch ?? ((request: Request) => fetch(request));
+  for (let attempt = 0; ; attempt++) {
+    const res = await send(
+      new Request(url, { headers: { authorization: `Bearer ${source.token}` } }),
+    );
+    if ((res.status === 429 || res.status === 503) && attempt < 8) {
+      const wait = Number(res.headers.get('retry-after'));
+      await new Promise((r) => setTimeout(r, (wait > 0 ? wait : attempt + 1) * 1000));
+      continue;
+    }
+    const text = await res.text();
+    if (!res.ok) {
+      // The problem body says why (unauthenticated, forbidden scope, invalid filter); the token
+      // is never part of it.
+      throw new Error(`GET ${url.pathname}${url.search}: ${res.status} ${text.slice(0, 500)}`);
+    }
+    return JSON.parse(text) as T;
+  }
+}
+
+/**
+ * Loads the shop, its MCP calls in the window, and the connections that made them, through the
+ * activity API (PRD 7.4) with an API credential: newest first, 100 events a page, keyset cursor.
+ * `delayed` is true when the history said recent events may still be on their way.
+ */
+export async function loadRunFromApi(
+  source: ApiSource,
+  options: { from: Date; to: Date | null; connection: string | null },
+): Promise<{
+  shopName: string;
+  calls: Call[];
+  connections: RenderInput['connections'];
+  delayed: boolean;
+}> {
+  if (!UUID.test(source.shopId)) {
+    throw new Error(
+      "In API mode --shop is the shop's ID, as in the dashboard address /app/shops/<ID>/…",
+    );
+  }
+  const { shop } = await apiGet<{ shop: { name: string } }>(source, '');
+  const events: ActivityEvent[] = [];
+  let delayed = false;
+  let cursor: string | null = null;
+  do {
+    const page: ActivityPage = await apiGet<ActivityPage>(source, '/activity', {
+      source: 'mcp',
+      actorType: 'connection',
+      actorId: options.connection,
+      from: options.from.toISOString(),
+      to: options.to?.toISOString(),
+      limit: '100',
+      before: cursor,
+    });
+    if (page.ingestion?.delayed) delayed = true;
+    events.push(...page.events);
+    cursor = page.nextCursor;
+  } while (cursor);
+  // The API lists newest first; calls are built in time order.
+  const rows = events.reverse().map(rowFromEvent);
+  const calls = callsFrom(rows);
+  const grantIds = [...new Set(calls.map((c) => c.grantId).filter((g): g is string => !!g))];
+  const connections: Array<RenderInput['connections'][number] & { createdAt: string }> = [];
+  for (const id of grantIds) {
+    const { events: created } = await apiGet<ActivityPage>(source, '/activity', {
+      action: 'connection.created',
+      targetType: 'connection_grant',
+      targetId: id,
+      phase: 'outcome',
+      limit: '1',
+    });
+    const scopes = record(created[0]?.changes)?.scopes;
+    const clientId = events.find((e) => e.actorId === id && e.clientId)?.clientId ?? null;
+    connections.push({
+      id,
+      clientId,
+      scopes: Array.isArray(scopes) ? scopes.map(String) : [],
+      createdAt: created[0]?.occurredAt ?? '',
+    });
+  }
+  connections.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return {
+    shopName: shop.name,
+    calls,
+    connections: connections.map(({ createdAt: _, ...c }) => c),
+    delayed,
+  };
+}
+
 async function main() {
   const { values: args } = parseArgs({
     options: {
@@ -455,39 +655,58 @@ async function main() {
       width: { type: 'string', default: '90' },
       gap: { type: 'string', default: '8' },
       out: { type: 'string' },
+      base: { type: 'string', default: 'https://airstock.deletecookies.dev' },
+      db: { type: 'boolean', default: false },
     },
   });
-  if (!args.shop || !args.from) throw new Error('Give --shop (name or ID) and --from (ISO time).');
+  if (!args.shop || !args.from) throw new Error('Give --shop and --from (ISO time).');
+  const token = process.env.AIRSTOCK_TOKEN;
   const url = process.env.DATABASE_OWNER_URL;
-  if (!url) throw new Error('Set DATABASE_OWNER_URL.');
+  if (args.db ? !url : !token) {
+    throw new Error(
+      args.db
+        ? 'Set DATABASE_OWNER_URL for --db.'
+        : 'Set AIRSTOCK_TOKEN (an API credential of the shop), or use --db with DATABASE_OWNER_URL.',
+    );
+  }
   const prompts = args.expect
     ? (JSON.parse(await readFile(args.expect, 'utf8')) as { prompts: ExpectedPrompt[] }).prompts
     : undefined;
   const from = parseTime(args.from);
   const to = args.to ? parseTime(args.to) : null;
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
-  try {
-    await client.query('set default_transaction_read_only = on');
-    const run = await loadRun(client, {
-      shop: args.shop,
-      from,
-      to,
-      connection: args.connection ?? null,
-    });
-    const markdown = renderRun({
-      ...run,
-      from,
-      to,
-      prompts,
-      width: Number(args.width),
-      gapSeconds: Number(args.gap),
-    });
-    if (args.out) await writeFile(args.out, markdown);
-    process.stdout.write(markdown);
-  } finally {
-    await client.end();
+  const connection = args.connection ?? null;
+  let run: Awaited<ReturnType<typeof loadRun>>;
+  if (args.db) {
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await client.query('set default_transaction_read_only = on');
+      run = await loadRun(client, { shop: args.shop, from, to, connection });
+    } finally {
+      await client.end();
+    }
+  } else {
+    const loaded = await loadRunFromApi(
+      { base: args.base!, shopId: args.shop, token: token! },
+      { from, to, connection },
+    );
+    if (loaded.delayed) {
+      console.error(
+        'The activity history says recent events may still be on their way; run again in a minute for the last calls.',
+      );
+    }
+    run = loaded;
   }
+  const markdown = renderRun({
+    ...run,
+    from,
+    to,
+    prompts,
+    width: Number(args.width),
+    gapSeconds: Number(args.gap),
+  });
+  if (args.out) await writeFile(args.out, markdown);
+  process.stdout.write(markdown);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

@@ -237,6 +237,45 @@ describe('matching calls to prompts', () => {
     expect(promptRight(ordered, [c(0, 'manage_purchasing'), c(1, 'stock_alerts')])).toBe(false);
   });
 
+  it('accepts an alternative call for a step', () => {
+    const prompt: ExpectedPrompt = {
+      prompt: 5,
+      expect: [
+        { tool: 'get_stock', action: 'lots', or: [{ tool: 'run_report', action: 'run' }] },
+        { tool: 'get_stock', action: 'lot_trace' },
+      ],
+    };
+    const trace = c(1, 'get_stock', 'lot_trace');
+    expect(promptRight(prompt, [c(0, 'run_report', 'run'), trace])).toBe(true);
+    expect(promptRight(prompt, [c(0, 'get_stock', 'lots'), trace])).toBe(true);
+    expect(promptRight(prompt, [c(0, 'run_report', 'run')])).toBe(false);
+    expect(promptRight(prompt, [c(0, 'search_catalog', 'query'), trace])).toBe(false);
+  });
+
+  it('skips an optional prompt without a call and leaves it out of the count', () => {
+    const markdown = renderRun({
+      shopName: 'Run',
+      from: new Date(t0),
+      to: null,
+      connections: [],
+      calls: [c(0, 'get_stock', 'stock'), c(30, 'run_report', 'run'), c(60, 'warehouse_work')],
+      prompts: [
+        { prompt: 1, expect: [{ tool: 'get_stock' }] },
+        {
+          prompt: 2,
+          expect: [{ tool: 'get_stock', action: 'lots', or: [{ tool: 'run_report' }] }],
+        },
+        { prompt: 3, optional: true, expect: [{ tool: 'shopify_sync', action: 'health' }] },
+        { prompt: 4, expect: [{ tool: 'warehouse_work' }] },
+      ],
+    });
+    expect(markdown).toContain(
+      '| 2 | `get_stock` lots or `run_report` | `run_report` run | Right |',
+    );
+    expect(markdown).toContain('| 3 | `shopify_sync` health | no call | Skipped (optional) |');
+    expect(markdown).toContain('**3 of 3 prompts right (1 optional skipped).**');
+  });
+
   it('shortens arguments for a table cell', () => {
     expect(
       shorten(

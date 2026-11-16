@@ -21,6 +21,7 @@ import {
   reconcile,
   type SeededShop,
   seedShop,
+  waitUntilBlockedBy,
 } from '../../../test/helpers.ts';
 
 // Review findings for the inventory engine (review/inventory-findings). Each test demonstrates one
@@ -92,21 +93,6 @@ async function documentProblems(shopId: string): Promise<string[]> {
   }
 }
 
-/** Waits until some backend is blocked on a row lock while running SQL that matches `like`. */
-async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    const rows = await ownerQuery(
-      `select 1 from pg_stat_activity
-       where wait_event_type = 'Lock' and query like $1`,
-      [like],
-    );
-    if (rows.length > 0) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`no backend waited on a lock for ${like}`);
-}
-
 // ---------------------------------------------------------------------------------------------
 // F-SWEEP-LOCK-ORDER (deadlock). background.ts sweepShortages locks each variant's candidate
 // positions in its own statement, variant by variant (ordered by variant id), and fillShortages
@@ -166,7 +152,7 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
         (e: { code?: string }) => e.code ?? String(e),
       );
       // The sweep has locked pA (variant A) and now waits for pB (variant B).
-      await waitForLockWait('%p.on_hand > 0 or $9%');
+      await waitUntilBlockedBy(command, '%p.on_hand > 0 or $9%');
       const second = command
         .query('select id from inventory_positions where id = $1 for update', [pA!.id])
         .then(

@@ -14,6 +14,7 @@ import {
   reconcile,
   type SeededShop,
   seedShop,
+  waitUntilBlockedBy,
 } from '../../../test/helpers.ts';
 
 // Pick lists (plan 5.11, PRD 6.10), A41 pick half: a list for 20 orders in location-path order;
@@ -462,20 +463,6 @@ async function rawClient(): Promise<pg.Client> {
   return client;
 }
 
-/** Waits until some backend is blocked on a row lock while running SQL that matches `like`. */
-async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    const rows = await ownerQuery(
-      `select 1 from pg_stat_activity where wait_event_type = 'Lock' and query like $1`,
-      [like],
-    );
-    if (rows.length > 0) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`no backend waited on a lock for ${like}`);
-}
-
 async function availability(variantId: string): Promise<string> {
   return (await h.run(ops.getAvailability, { variantId })).totals.onHand;
 }
@@ -589,7 +576,7 @@ describe('completing pick lists: bundles, expiry, precision, and lock order', ()
       const pick = outcomeOf(
         h.run(ops.recordPick, { pickListId: list.pickListId, lineId: list.pickLines[0].lineId }),
       );
-      await waitForLockWait('%pick_lists%');
+      await waitUntilBlockedBy(completion, '%pick_lists%');
       const lines = await completion
         .query('select 1 from pick_lines where pick_list_id = $1 for update', [list.pickListId])
         .then(
@@ -630,7 +617,7 @@ describe('completing pick lists: bundles, expiry, precision, and lock order', ()
       await other.query('begin');
       await other.query('select 1 from inventory_positions where id = $1 for update', [low]);
       const complete = outcomeOf(h.run(ops.completePickList, { pickListId: list.pickListId }));
-      await waitForLockWait('%inventory_positions%for update%');
+      await waitUntilBlockedBy(other, '%inventory_positions%for update%');
       const second = await other
         .query('select 1 from inventory_positions where id = $1 for update', [high])
         .then(

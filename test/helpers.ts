@@ -48,6 +48,32 @@ export async function ownerQuery<R = Record<string, unknown>>(
   }
 }
 
+/**
+ * Waits until a backend is blocked by a lock that `holder` (a test's own connection) holds,
+ * while running SQL that matches `like`. pg_stat_activity lists every database on the server,
+ * and other test files and other worktrees' runs wait on locks too, so the waiter is found by
+ * its blocker rather than by its SQL alone.
+ */
+export async function waitUntilBlockedBy(
+  holder: pg.ClientBase,
+  like: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const [{ pid }] = (await holder.query<{ pid: number }>('select pg_backend_pid() as pid'))
+    .rows as [{ pid: number }];
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const rows = await ownerQuery(
+      `select 1 from pg_stat_activity
+       where $1 = any(pg_blocking_pids(pid)) and wait_event_type = 'Lock' and query like $2`,
+      [pid, like],
+    );
+    if (rows.length > 0) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`no backend waited on a lock held by ${pid} for ${like}`);
+}
+
 /** In-memory stand-in for the audit queue, with failure injection. */
 export class MemoryAuditSink implements AuditSink {
   readonly events: AuditEvent[] = [];

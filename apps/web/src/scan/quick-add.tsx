@@ -252,6 +252,8 @@ function NewItem({ env, initialCertificate }: { env: ScanEnv; initialCertificate
       void queryClient.invalidateQueries({ queryKey: ['shop', env.shopId] });
     },
     onError: (error) => {
+      // The next attempt is a new request (it may acknowledge similar names): a new key.
+      key.current = crypto.randomUUID();
       if (error instanceof ApiError && error.code === 'similar_items_found') {
         setSimilar(
           (error.problem.similarNames as Array<{ productId: string; name: string }>) ?? [],
@@ -259,7 +261,6 @@ function NewItem({ env, initialCertificate }: { env: ScanEnv; initialCertificate
         env.feedback('notice', 'Items with similar names exist. Check them before adding.');
         return;
       }
-      key.current = crypto.randomUUID();
       env.feedback('error', errorMessage(error));
     },
   });

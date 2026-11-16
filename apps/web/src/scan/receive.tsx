@@ -325,7 +325,12 @@ function PoWalk({
     try {
       const found = await resolveScan(env.shopId, line.sku);
       if (found.kind === 'item' && found.item.variantId === line.variantId) {
-        setOpen({ line, item: { ...found.item, pack: null } });
+        // Tapping a line starts in the line's own pack, as if its case had been scanned.
+        const pack =
+          line.packId && line.packFactor
+            ? { packId: line.packId, name: line.packName ?? 'Pack', baseQuantity: line.packFactor }
+            : null;
+        setOpen({ line, item: { ...found.item, pack } });
       } else {
         env.feedback('notice', `Scan ${line.sku} to receive it.`);
       }

@@ -188,6 +188,8 @@ describe('scan page: quick add', () => {
       { ...body, acknowledgeSimilar: false },
       { ...body, acknowledgeSimilar: true },
     ]);
+    // Acknowledging similar names is a new request, under a new idempotency key.
+    expect(sent[0]!.key).not.toBe(sent[1]!.key);
     // One command, then the picture is uploaded and linked to the new product.
     expect(vi.mocked(uploadToProduct)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(uploadToProduct).mock.calls[0]!.slice(0, 2)).toEqual([SHOP, PROD]);

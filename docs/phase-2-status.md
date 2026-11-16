@@ -15,7 +15,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I3 Purchasing and alerts | Done | Purchase orders (PR #59, [ADR 0027](adr/0027-purchase-orders.md)): PDF, email, receipts against lines, on order. Reorder rules, draft from low stock, and alerts in the app, by email, webhooks, and MCP (PR #62, [ADR 0030](adr/0030-reorder-rules-and-alerts.md)). |
 | I4 Scanning and picking | Done | The scanner at `/app/scan` and the installed app (PR #54, [ADR 0025](adr/0025-scanning-and-installed-app.md)); look up, receive, and unknown codes (PR #58); pick lists on the phone and as PDF (PR #60, [ADR 0026](adr/0026-picking.md)). Count, move, receive against a PO, quick add with pictures, and short pick to count (PR #69, ADR 0025 update). |
 | I5 Webhooks, activity, reports | Done for January | Webhooks (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views with the PRD 7.4 filters, location-scoped history, lifecycle, ingestion delay, and export; a shop-first audit key with no default partition, so a two-filter search over 1 million events is 9 ms p95 warm and 534 ms cold (PR #52, [ADR 0032](adr/0032-activity-views.md), [measurements](phase-2-measurements.md)). The eight standard reports with filters, saved reports, CSV export, and `run_report` (PR #71, [ADR 0034](adr/0034-reports.md)). Scheduled report emails come after January. |
-| I6 Shopify connector | In progress | Mapping and onboarding (PR #67, [ADR 0033](adr/0033-shopify-mapping-and-onboarding.md)); the order flow with shortages, edits, cancellations, fulfillments, and refunds into returns (PR #70); batched compare-and-set push and the reconciler (PR #74); sync health and the `shopify_sync` tool (PR #76). Listings in both directions are in progress. |
+| I6 Shopify connector | Done | Mapping and onboarding (PR #67, [ADR 0033](adr/0033-shopify-mapping-and-onboarding.md)); the order flow with shortages, edits, cancellations, fulfillments, and refunds into returns (PR #70, [ADR 0035](adr/0035-shopify-order-lifecycle.md)); batched compare-and-set push and the reconciler (PR #74, [ADR 0036](adr/0036-shopify-push-and-reconciler.md)); sync health and `shopify_sync` (PR #76, [ADR 0037](adr/0037-shopify-sync-health.md)); listings in both directions with per-field ownership (PR #79, [ADR 0038](adr/0038-shopify-listings.md)). The staging app's configuration is in `config/shopify/shopify.app.staging.toml`. An independent review of the connector is in progress. |
 | I7 MVP gate | In progress | **Correctness review done:** an independent review of the inventory engine confirmed 21 defects (8 high: for example a serial on hand in two places, a pick list shipping bundle parts nobody picked, counts escaping location scope and the one-of-a-kind limit, PO receipts converting with a resized pack). Each has a test (PR #73); all are fixed (PRs #77, #78), plus 13 suspected issues the fixers proved and fixed, including three deadlocks. The volume run on the persona shops is in progress. The ChatGPT run and the owner's checks follow when I6 lands. |
 | I8 Pilot go-live | Not started | |
 | I9 After January | Not started | |
@@ -24,14 +24,17 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 
 **16 November, 09:10–12:10 UTC:** the usage limit stopped the agents a second time. The Shopify order-flow work was saved from its checkout. Since then, at most three agents run at once, so fewer are cut off mid-task.
 
+**CI fix, 16 November:** a documentation-only merge skipped the staging deploy, so when it cancelled a code merge's run, that code never reached staging (the review fixes in #78). Since PR #83, every merge to `main` builds, tests, and deploys. Staging's Hyperdrive connection limit is 20 (was 60), after 10 parallel callers ran its 0.25 CU database out of memory in the volume run.
+
 ## 2. Owner steps
 
 | When | Step | State |
 | --- | --- | --- |
 | I0 | Create the `airstock-bench` Neon project and a project-scoped API key | Done, 16 November |
 | I4, now | Scan on the iPhone in Safari and as an installed app, close up and in dim light, including a graded-card slab label: the script in Section 2.1 | **Ready** |
-| I5 | Give an n8n webhook URL and set up a subscription in the dashboard | Later |
-| I6 | Give the store's Shopify product export, for the rehearsal on a development store | Later |
+| I5, now | Give an n8n webhook URL and set up a subscription in the dashboard (Integrations → Webhooks); [webhooks.md](webhooks.md) has the n8n signature check | **Ready** |
+| I6, now | **Reconnect both Shopify development stores**, so they grant the new permissions: in staging, open each shop → Settings → Integrations → "Connect another store", enter `airstock-dev-a.myshopify.com` (and `airstock-dev-b.myshopify.com` in its shop), and approve in Shopify. Optionally, on `airstock-dev-a`, order `AIR-MUG-01` with the test gateway, fulfill it, then refund with restock: sync health should show no conflicts and the unit should be in quarantine | **Ready** |
+| I6, now | Give the store's Shopify product export, for the rehearsal on a development store | **Ready** |
 | I7 | Decide production: domain, Neon plan, WorkOS production environment, email sender | Later |
 
 ### 2.1 iPhone check (I4)

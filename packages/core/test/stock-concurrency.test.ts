@@ -266,3 +266,106 @@ describe('receipts filling shortages while orders arrive (D6)', () => {
     expect(await reconcile(shop.shopId)).toEqual([]);
   });
 });
+
+describe('release day: many reservations of one variant with many lots (I7, R5)', () => {
+  const day = (offset: number) =>
+    new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+  /** A lot-tracked variant with `lots` lots of `each` units, expiring in order, on two shelves. */
+  async function manyLots(lots: number, each: string) {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot_expiry' });
+    const other = await createLeafLocation(h, shop.warehouseId, `Release ${uuidv7().slice(-4)}`);
+    const codes: string[] = [];
+    for (let i = 0; i < lots; i++) {
+      const code = `REL-${String(i).padStart(2, '0')}`;
+      codes.push(code);
+      await h.run(ops.receiveStock, {
+        variantId,
+        locationId: i % 2 === 0 ? shop.locationId : other,
+        quantity: each,
+        lotCode: code,
+        // Received in a shuffled order, so expiry, not arrival, decides.
+        expiresOn: day(100 + ((i * 7) % lots) * 3),
+      });
+    }
+    return { variantId, codes };
+  }
+
+  /** Allocated units per lot code, from the database (this variant only). */
+  async function allocatedByLot(variantId: string) {
+    const rows = await ownerQuery<{ code: string; expires_on: string; allocated: string }>(
+      `select lt.code, lt.expires_on::text, sum(p.allocated)::text as allocated
+       from inventory_positions p join lots lt on lt.shop_id = p.shop_id and lt.id = p.lot_id
+       where p.shop_id = $1 and p.variant_id = $2
+       group by lt.code, lt.expires_on order by lt.expires_on, lt.code`,
+      [shop.shopId, variantId],
+    );
+    return rows.map((r) => ({ code: r.code, allocated: Number(r.allocated) }));
+  }
+
+  it('lets twelve callers reserve one unit each at once, earliest expiry first, nothing else', async () => {
+    const { variantId } = await manyLots(10, '2');
+    const outcome = await race(12, () =>
+      h.run(ops.reserveStock, { variantId, quantity: '1', purpose: 'external_order' }),
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.ok).toBe(12);
+    // Exactly the twelve earliest-expiring units: the first six lots full, the rest untouched.
+    const byLot = await allocatedByLot(variantId);
+    expect(byLot.map((l) => l.allocated)).toEqual([2, 2, 2, 2, 2, 2, 0, 0, 0, 0]);
+    expect((await h.run(ops.getAvailability, { variantId })).totals).toMatchObject({
+      reserved: '12.000000',
+      available: '8.000000',
+    });
+    expect(await reconcile(shop.shopId)).toEqual([]);
+  });
+
+  it('reserves exactly the available units when thirty callers want more than there is', async () => {
+    const { variantId } = await manyLots(12, '3');
+    // An expired claim on the earliest lot (the sweeper has not run): its units count as free.
+    const stale = await h.run(ops.reserveStock, {
+      variantId,
+      quantity: '2',
+      expiresInSeconds: 60,
+    });
+    await ownerQuery(
+      `update reservations set expires_at = now() - interval '1 minute' where shop_id = $1 and id = $2`,
+      [shop.shopId, stale.reservationId],
+    );
+    const wanted = Array.from({ length: 30 }, (_, i) => 1 + (i % 3));
+    const outcome = await race(30, (i) =>
+      h.run(ops.reserveStock, {
+        variantId,
+        quantity: String(wanted[i]),
+        purpose: 'external_order',
+      }),
+    );
+    // Only "not enough": no deadlock, no constraint violation, no retry error.
+    expect(new Set(outcome.errors)).toEqual(new Set(['insufficient_stock']));
+    const reserved = (outcome.values as Array<{ quantity: string }>).reduce(
+      (sum, r) => sum + Number(r.quantity),
+      0,
+    );
+    const view = await h.run(ops.getAvailability, { variantId });
+    // 36 units in all; the callers took what they could: the last free units can be fewer than
+    // a caller asked for, so at most two stay free.
+    expect(reserved).toBeGreaterThanOrEqual(34);
+    expect(reserved).toBeLessThanOrEqual(36);
+    expect(view.totals).toMatchObject({ reserved: `${reserved}.000000` });
+    expect(Number(view.totals.available)).toBe(36 - reserved);
+    // The stale claim was released, not counted twice; nothing is over-allocated.
+    const [stalled] = await ownerQuery<{ status: string }>(
+      'select status from reservations where shop_id = $1 and id = $2',
+      [shop.shopId, stale.reservationId],
+    );
+    expect(stalled?.status).toBe('expired');
+    const [over] = await ownerQuery<{ n: number }>(
+      `select count(*)::int as n from inventory_positions
+       where shop_id = $1 and variant_id = $2 and allocated > on_hand`,
+      [shop.shopId, variantId],
+    );
+    expect(over?.n).toBe(0);
+    expect(await reconcile(shop.shopId)).toEqual([]);
+  });
+});

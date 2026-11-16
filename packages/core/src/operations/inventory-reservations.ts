@@ -1,5 +1,6 @@
 import type { Tx } from '@airstock/db';
 import { z } from 'zod';
+import { STOCK_ALERT_PROBE } from '../alerts/check.ts';
 import type { AuditEvent } from '../audit.ts';
 import { compare, normalize, subtract } from '../catalog/decimal.ts';
 import { PositiveDecimal } from '../decimal.ts';
@@ -12,6 +13,7 @@ import {
   applyStockCost,
   assertScale,
   canSeeCosts,
+  chooseFromCandidates,
   choosePositions,
   exactProduct,
   expireClaimsAt,
@@ -20,6 +22,7 @@ import {
   loadStockVariant,
   lockCandidates,
   lockPositions,
+  lockReservationVariants,
   normalizeCode,
   OPEN_STATUSES,
   type Pick,
@@ -106,6 +109,85 @@ async function assertStorageLocation(tx: Tx, locationId: string | undefined): Pr
 }
 
 // Reserve ----------------------------------------------------------------------------------
+
+/**
+ * The reservation's operation and rows: $1 operation, $2–$5 actor, $6 external reference, $7 the
+ * reservation rows, $8 purpose, $9 expiry in seconds, $10 channel, $11 location limit.
+ */
+const INSERT_RESERVATION_CTES = `with op as (
+     insert into inventory_operations (shop_id, id, kind, actor_type, actor_id, source, attempt_id,
+       external_ref)
+     select app_shop_id(), $1, 'reservation', $2, $3, $4, $5, $6 where (select ok from ok)),
+   rows as (
+     select * from jsonb_to_recordset($7::jsonb) as x(id uuid, "variantId" uuid, quantity numeric,
+       shortage numeric, "parentId" uuid, per numeric, "bundleVersionId" uuid, "lotId" uuid)),
+   res as (
+     insert into reservations (shop_id, id, variant_id, quantity, shortage_quantity, purpose,
+       external_ref, expires_at, created_operation_id, channel, location_id, lot_id, parent_id,
+       component_base_quantity, bundle_version_id)
+     select app_shop_id(), r.id, r."variantId", r.quantity, r.shortage, $8, $6,
+       case when $9::integer is null then null else now() + make_interval(secs => $9::integer) end,
+       $1, $10, $11, r."lotId", r."parentId", r.per, r."bundleVersionId"
+     from rows r where (select ok from ok)
+     returning id, expires_at)`;
+
+/**
+ * The fast path (I7, ADR 0006 update), in one statement under the variants' advisory lock, on a
+ * snapshot taken after it: chooses positions by the allocation rule among the candidates ($13 the
+ * variants; $14 the rule, $15 the location limit, $16 the caller's scope, $17 the lot), locks only
+ * the chosen positions in id order, checks them on the locked rows (on hand less allocated covers
+ * what is taken: a command that is not a reservation may have changed them meanwhile), and only
+ * then writes the operation, the reservations, the allocations, and the positions' allocated
+ * totals. $12 is the needs with their reservation, $18 the allocation ids. Writes nothing and
+ * answers ok = false when the need is not covered or a position changed.
+ */
+const CLAIM_RESERVATION_SQL = `with need as (
+     select * from jsonb_to_recordset($12::jsonb)
+       as x("variantId" uuid, quantity numeric, "reservationId" uuid)),
+   cand0 as (
+     select sp.* from stock_positions($13::uuid[]) sp
+     where sp.available > 0
+       and ($14::uuid[] is null or sp.path_ids && $14::uuid[])
+       and ($15::uuid is null or sp.path_ids @> array[$15::uuid])
+       and ($16::uuid[] is null or sp.path_ids && $16::uuid[])
+       and ($17::uuid is null or sp.lot_id = $17)),${chooseFromCandidates('$14')},
+   picked as (
+     select p.*, n."reservationId", ids.id as allocation_id
+     from (select picks.*, row_number() over (order by variant_id, rn) as k from picks) p
+     join need n on n."variantId" = p.variant_id
+     left join unnest($18::uuid[]) with ordinality as ids(id, k) on ids.k = p.k),
+   want as (select position_id as id, sum(take) as quantity from picks group by position_id),
+   locked as materialized (
+     select p.id, p.on_hand, p.allocated from inventory_positions p
+     where p.id in (select id from want) order by p.id for update),
+   ok as (
+     select not exists (
+         select 1 from need n
+         where n.quantity <> coalesce((select sum(take) from picks where variant_id = n."variantId"), 0))
+       and not exists (select 1 from picked where allocation_id is null)
+       and (select count(*) from locked) = (select count(*) from want)
+       and not exists (
+         select 1 from want w join locked l on l.id = w.id where w.quantity > l.on_hand - l.allocated)
+       as ok),
+   ${INSERT_RESERVATION_CTES.slice('with '.length)},
+   alloc as (
+     insert into reservation_allocations (shop_id, id, reservation_id, position_id, quantity)
+     select app_shop_id(), allocation_id, "reservationId", position_id, take from picked
+     where (select ok from ok)),
+   pos as (
+     update inventory_positions p
+     set allocated = p.allocated + w.quantity, version = p.version + 1, updated_at = now()
+     from want w where p.shop_id = app_shop_id() and p.id = w.id and (select ok from ok))
+   select (select ok from ok) as ok,
+     case when $9::integer is null then null else now() + make_interval(secs => $9::integer) end
+       as expires_at,
+     coalesce((select json_agg(json_build_object('allocationId', allocation_id,
+       'reservationId', "reservationId", 'variantId', variant_id, 'positionId', position_id,
+       'locationId', location_id, 'lotId', lot_id, 'serialId', serial_id, 'quantity', take::text)
+       order by k) from picked), '[]'::json) as picks`;
+
+/** Allocation ids handed to the fast path; a reservation that needs more takes the slow path. */
+const FAST_PICKS = 32;
 
 export const reserveStock = defineOperation({
   id: 'inventory.reservations.create',
@@ -218,111 +300,170 @@ export const reserveStock = defineOperation({
         perBundle: null,
       });
 
-    // 1. Positions, 2. expired claims there, then the choice.
-    const locked = await lockCandidates(ctx.tx, {
-      variantIds: needs.map((n) => n.variantId),
+    const operationId = ctx.newId();
+    const reservationId = ctx.newId();
+    type Short = (typeof needs)[number] & { shortage: string };
+    const reservationRows = (short: Short[]) =>
+      bundle
+        ? [
+            {
+              id: reservationId,
+              variantId: input.variantId,
+              quantity: normalize(input.quantity),
+              shortage: '0',
+              parentId: null,
+              per: null,
+              bundleVersionId: bundle.bundleVersionId,
+              lotId: null,
+            },
+            ...short.map((s) => ({
+              id: ctx.newId(),
+              variantId: s.variantId,
+              quantity: s.quantity,
+              shortage: s.shortage,
+              parentId: reservationId,
+              per: s.perBundle,
+              bundleVersionId: null,
+              lotId: null,
+            })),
+          ]
+        : [
+            {
+              id: reservationId,
+              variantId: input.variantId,
+              quantity: normalize(input.quantity),
+              shortage: short[0]!.shortage,
+              parentId: null,
+              per: null,
+              bundleVersionId: null,
+              lotId,
+            },
+          ];
+    const allocatedTo = (rows: ReturnType<typeof reservationRows>) =>
+      new Map(rows.filter((r) => r.parentId !== null || !bundle).map((r) => [r.variantId, r.id]));
+    const reservationParams = (rows: ReturnType<typeof reservationRows>) => [
+      operationId,
+      ...actorColumns(ctx),
+      input.externalRef ?? null,
+      JSON.stringify(rows),
+      input.purpose,
+      expiresInSeconds,
+      channel,
+      input.locationId ?? null,
+    ];
+    const spec = {
       locationId: input.locationId ?? null,
       lotId,
       ruleScopes,
       scope: ctx.locationScope,
-      includeEmpty: input.allowShortage ?? false,
-    });
-    const events = await expireClaimsAt(ctx, locked);
-    const { picks, available } = await choosePositions(ctx.tx, needs, locked, ruleScopes);
-    const short = needs.map((n) => ({ ...n, shortage: shortfall(n.quantity, picks, n.variantId) }));
-    if (short.some((s) => s.shortage !== '0') && !input.allowShortage) {
-      if (!bundle) throw insufficientStock(input.quantity, available.get(input.variantId) ?? '0');
-      const [row] = await ctx.tx.query<{ bundles: string }>(
-        `select coalesce(min(trunc(x.available / x.per)), 0)::text as bundles
-         from jsonb_to_recordset($1::jsonb) as x(available numeric, per numeric)`,
-        [
-          JSON.stringify(
-            needs.map((n) => ({ available: available.get(n.variantId) ?? '0', per: n.perBundle })),
-          ),
-        ],
-      );
-      throw insufficientStock(input.quantity, row?.bundles ?? '0', {
-        components: short.map((s) => ({
-          variantId: s.variantId,
-          requested: s.quantity,
-          available: available.get(s.variantId) ?? '0',
-        })),
-      });
+    };
+    const variantIds = [...new Set(needs.map((n) => n.variantId))];
+    // Before any lock: the alert probe, so the pipeline need not run it while the locks are held,
+    // and whether claims of expired reservations are still on the variants' positions (only the
+    // slow path releases those).
+    const [pre] = await ctx.tx.query<{
+      rules: boolean;
+      shortage_alerts: boolean;
+      expired_claims: boolean;
+    }>(
+      `select ${STOCK_ALERT_PROBE},
+         exists (select 1 from reservations r
+           join reservation_allocations a on a.shop_id = r.shop_id and a.reservation_id = r.id
+           where r.variant_id = any($1::uuid[]) and r.status in ('active', 'partially_fulfilled')
+             and r.expires_at <= now() and a.outstanding > 0) as expired_claims`,
+      [variantIds],
+    );
+    const alertProbe = {
+      variantIds,
+      rules: pre?.rules ?? false,
+      shortageAlerts: pre?.shortage_alerts ?? false,
+    };
+
+    let short: Short[] = needs.map((n) => ({ ...n, shortage: '0' }));
+    let rows = reservationRows(short);
+    let made: Array<Pick & { allocationId: string; reservationId: string }> | null = null;
+    let expiresAtValue: Date | null = null;
+    let events: AuditEvent[] = [];
+
+    // Fast path (I7, ADR 0006 update): reservations of a variant wait for each other on an
+    // advisory lock, then choose, lock only the chosen positions, and write in one statement.
+    // When that statement finds too little or a changed position, it writes nothing and the
+    // attempt is undone to the savepoint, which releases its locks; the slow path decides.
+    if (!pre?.expired_claims) {
+      await ctx.tx.query('savepoint reserve_fast');
+      await lockReservationVariants(ctx.tx, variantIds);
+      const byVariant = allocatedTo(rows);
+      const [claimed] = await ctx.tx.query<{
+        ok: boolean;
+        expires_at: Date | null;
+        picks: Array<Pick & { allocationId: string; reservationId: string }>;
+      }>(CLAIM_RESERVATION_SQL, [
+        ...reservationParams(rows),
+        JSON.stringify(
+          needs.map((n) => ({
+            variantId: n.variantId,
+            quantity: n.quantity,
+            reservationId: byVariant.get(n.variantId),
+          })),
+        ),
+        variantIds,
+        spec.ruleScopes,
+        spec.locationId,
+        spec.scope,
+        spec.lotId,
+        Array.from({ length: FAST_PICKS }, () => ctx.newId()),
+      ]);
+      if (claimed?.ok) {
+        made = claimed.picks;
+        expiresAtValue = claimed.expires_at;
+      } else {
+        await ctx.tx.query('rollback to savepoint reserve_fast');
+      }
     }
 
-    const operationId = ctx.newId();
-    const reservationId = ctx.newId();
-    const rows = bundle
-      ? [
-          {
-            id: reservationId,
-            variantId: input.variantId,
-            quantity: normalize(input.quantity),
-            shortage: '0',
-            parentId: null,
-            per: null,
-            bundleVersionId: bundle.bundleVersionId,
-            lotId: null,
-          },
-          ...short.map((s) => ({
-            id: ctx.newId(),
+    if (!made) {
+      // Slow path: 1. every candidate position, 2. expired claims there, then the choice.
+      const locked = await lockCandidates(ctx.tx, {
+        variantIds: needs.map((n) => n.variantId),
+        ...spec,
+        includeEmpty: input.allowShortage ?? false,
+      });
+      events = await expireClaimsAt(ctx, locked);
+      const { picks, available } = await choosePositions(ctx.tx, needs, locked, ruleScopes);
+      short = needs.map((n) => ({ ...n, shortage: shortfall(n.quantity, picks, n.variantId) }));
+      if (short.some((s) => s.shortage !== '0') && !input.allowShortage) {
+        if (!bundle) throw insufficientStock(input.quantity, available.get(input.variantId) ?? '0');
+        const [row] = await ctx.tx.query<{ bundles: string }>(
+          `select coalesce(min(trunc(x.available / x.per)), 0)::text as bundles
+           from jsonb_to_recordset($1::jsonb) as x(available numeric, per numeric)`,
+          [
+            JSON.stringify(
+              needs.map((n) => ({
+                available: available.get(n.variantId) ?? '0',
+                per: n.perBundle,
+              })),
+            ),
+          ],
+        );
+        throw insufficientStock(input.quantity, row?.bundles ?? '0', {
+          components: short.map((s) => ({
             variantId: s.variantId,
-            quantity: s.quantity,
-            shortage: s.shortage,
-            parentId: reservationId,
-            per: s.perBundle,
-            bundleVersionId: null,
-            lotId: null,
+            requested: s.quantity,
+            available: available.get(s.variantId) ?? '0',
           })),
-        ]
-      : [
-          {
-            id: reservationId,
-            variantId: input.variantId,
-            quantity: normalize(input.quantity),
-            shortage: short[0]!.shortage,
-            parentId: null,
-            per: null,
-            bundleVersionId: null,
-            lotId,
-          },
-        ];
-    const [created] = await ctx.tx.query<{ expires_at: Date | null }>(
-      `with op as (
-         insert into inventory_operations (shop_id, id, kind, actor_type, actor_id, source, attempt_id,
-           external_ref)
-         values (app_shop_id(), $1, 'reservation', $2, $3, $4, $5, $6)),
-       rows as (
-         select * from jsonb_to_recordset($7::jsonb) as x(id uuid, "variantId" uuid, quantity numeric,
-           shortage numeric, "parentId" uuid, per numeric, "bundleVersionId" uuid, "lotId" uuid)),
-       res as (
-         insert into reservations (shop_id, id, variant_id, quantity, shortage_quantity, purpose,
-           external_ref, expires_at, created_operation_id, channel, location_id, lot_id, parent_id,
-           component_base_quantity, bundle_version_id)
-         select app_shop_id(), r.id, r."variantId", r.quantity, r.shortage, $8, $6,
-           case when $9::integer is null then null else now() + make_interval(secs => $9::integer) end,
-           $1, $10, $11, r."lotId", r."parentId", r.per, r."bundleVersionId"
-         from rows r
-         returning id, expires_at)
-       select expires_at from res where id = $12`,
-      [
-        operationId,
-        ...actorColumns(ctx),
-        input.externalRef ?? null,
-        JSON.stringify(rows),
-        input.purpose,
-        expiresInSeconds,
-        channel,
-        input.locationId ?? null,
-        reservationId,
-      ],
-    );
-    const byVariant = new Map(
-      rows.filter((r) => r.parentId !== null || !bundle).map((r) => [r.variantId, r.id]),
-    );
-    const made = await allocate(ctx, byVariant, picks);
+        });
+      }
+      rows = reservationRows(short);
+      const [created] = await ctx.tx.query<{ expires_at: Date | null }>(
+        `with ok as (select true as ok), ${INSERT_RESERVATION_CTES.slice('with '.length)}
+         select expires_at from res where id = $12`,
+        [...reservationParams(rows), reservationId],
+      );
+      made = await allocate(ctx, allocatedTo(rows), picks);
+      expiresAtValue = created?.expires_at ?? null;
+    }
     const shortageTotal = bundle ? '0' : short[0]!.shortage;
-    const expiresAt = iso(created?.expires_at ?? null);
+    const expiresAt = iso(expiresAtValue);
     const bundleOut = bundle
       ? {
           bundleVersionId: bundle.bundleVersionId,
@@ -414,6 +555,7 @@ export const reserveStock = defineOperation({
           : []),
       ],
       events,
+      alertProbe,
     };
   },
 });

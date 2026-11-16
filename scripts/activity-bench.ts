@@ -5,8 +5,10 @@
  *
  *   DATABASE_URL=postgres://airstock_app:…@host/db SHOP_ID=<uuid> tsx scripts/activity-bench.ts
  *
- * Optional: RUNS (default 20), EXPLAIN=1 to print each plan once. The filter values are read from
- * the shop's own history, so the script works on any seed.
+ * Optional: RUNS (default 20), EXPLAIN=1 to print each plan once, and COLD_HOOK, a shell command
+ * run before each search's first run (for example one that suspends the Neon compute), to time
+ * that run cold. The filter values are read from the shop's own history, so the script works on
+ * any seed.
  */
 import { type ActivityFiltersInput, activityQuery } from '../packages/core/src/activity/query.ts';
 import { PgDatabase, poolSource } from '../packages/db/src/index.ts';
@@ -20,7 +22,8 @@ if (!url || !shopId) {
 const runs = Number(process.env.RUNS ?? 20);
 /** Called before each shape's first run, to measure it cold (for example: suspend the compute). */
 const coldHook = process.env.COLD_HOOK;
-const db = new PgDatabase(poolSource(url, 2));
+// Reassigned after a cold hook: suspending the compute ends every open connection.
+let db = new PgDatabase(poolSource(url, 2));
 const ctx = { shopId, userId: null, readOnly: true };
 
 async function one<T>(sql: string, params: unknown[] = []): Promise<T | undefined> {
@@ -127,7 +130,10 @@ for (const [name, filters, scope] of cases) {
   const { sql, params } = activityQuery({ filters, scope, limit: 51, cursor: null });
   let cold = '';
   if (coldHook) {
+    await db.close().catch(() => {});
     execSync(coldHook, { stdio: 'inherit' });
+    // The first query wakes the compute and reads from cold storage: connection included.
+    db = new PgDatabase(poolSource(url, 2));
     const t = performance.now();
     await db.transaction(ctx, (tx) => tx.query(sql, params));
     cold = ` ${(performance.now() - t).toFixed(0)} |`;

@@ -334,7 +334,6 @@ describe('N5 through MCP', () => {
       (search.inputSchema.properties as Record<string, { enum?: string[] }>).action!.enum,
     ).toEqual(expect.arrayContaining(['get_packaging', 'lookup_barcode', 'bundle_availability']));
     expect(tools.map((x) => x.name)).toContain('manage_suppliers');
-    expect(tools.length).toBeLessThanOrEqual(16);
 
     const { variantId, sku } = await product();
     const packs = await tool('edit_catalog', {

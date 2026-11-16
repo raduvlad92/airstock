@@ -1,5 +1,4 @@
 import {
-  drainOutbox,
   execute,
   handleWebhookOutbox,
   type OutboxMessage,
@@ -8,7 +7,7 @@ import {
   WebhookSecretCipher,
 } from '@airstock/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { seedShop } from '../../../test/helpers.ts';
+import { ownerQuery, type SeededShop, seedShop } from '../../../test/helpers.ts';
 import { connectMcp, grantToken } from './mcp-client.ts';
 import { apiToken, connectionGrant, json, type TestApp, testApp } from './setup.ts';
 
@@ -23,10 +22,11 @@ beforeAll(async () => {
   );
   t = await testApp({
     webhookSecrets: cipher,
-    // The real dispatch path: committed outbox rows go to the webhook dispatcher. Other test
-    // files leave rows in the shared outbox, so drain it rather than take one batch.
+    // The real dispatch path: committed outbox rows go to the webhook dispatcher. Test files
+    // run in parallel against one outbox, so only this file's shops are drained: draining
+    // everything would take other files' rows, which they assert on themselves.
     dispatch: (db) =>
-      drainOutbox(db, async (messages) => {
+      drainOwnShops(async (messages) => {
         outbox.push(...messages);
         for (const m of messages) {
           await handleWebhookOutbox(
@@ -51,9 +51,52 @@ beforeAll(async () => {
 });
 afterAll(() => t.close());
 
+/** Shops seeded by this file; only their outbox rows are dispatched here. */
+const ownShops = new Set<string>();
+async function ownShop(name: string): Promise<SeededShop> {
+  const shop = await seedShop(t.db, t.sink, name);
+  ownShops.add(shop.shopId);
+  return shop;
+}
+
+// Rows this file has handled. Selecting by this set, not by dispatched_at, keeps the file
+// immune to another file's global drain marking its rows dispatched first.
+const handled = new Set<string>();
+
+async function drainOwnShops(publish: (messages: OutboxMessage[]) => Promise<void>) {
+  let total = 0;
+  for (;;) {
+    const rows = await ownerQuery<{
+      shop_id: string;
+      id: string;
+      topic: string;
+      payload: unknown;
+      created_at: Date;
+    }>(
+      `select shop_id, id, topic, payload, created_at from outbox_events
+       where shop_id = any($1::uuid[]) and not (id = any($2::uuid[]))
+       order by created_at, id limit 100`,
+      [[...ownShops], [...handled]],
+    );
+    if (rows.length === 0) return total;
+    await publish(
+      rows.map((r) => ({
+        shopId: r.shop_id,
+        id: r.id,
+        topic: r.topic,
+        payload: r.payload,
+        createdAt: new Date(r.created_at).toISOString(),
+      })),
+    );
+    for (const r of rows) handled.add(r.id);
+    await ownerQuery('select mark_outbox_dispatched($1::uuid[])', [rows.map((r) => r.id)]);
+    total += rows.length;
+  }
+}
+
 describe('webhooks over REST (D14)', () => {
   it('creates a subscription with an API credential and sends a signed test', async () => {
-    const shop = await seedShop(t.db, t.sink, 'REST webhook shop');
+    const shop = await ownShop('REST webhook shop');
     const { token } = await apiToken(t, shop, ['webhooks:manage']);
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
     const types = await t.app.request(`/api/v1/shops/${shop.shopId}/webhook-event-types`, {
@@ -100,7 +143,7 @@ describe('webhooks over REST (D14)', () => {
   });
 
   it('refuses a credential without the webhooks:manage scope', async () => {
-    const shop = await seedShop(t.db, t.sink, 'Scope webhook shop');
+    const shop = await ownShop('Scope webhook shop');
     const { token } = await apiToken(t, shop, ['shop:read', 'inventory:read']);
     const res = await t.app.request(`/api/v1/shops/${shop.shopId}/webhook-subscriptions`, {
       headers: { authorization: `Bearer ${token}` },
@@ -109,7 +152,7 @@ describe('webhooks over REST (D14)', () => {
   });
 
   it('never offers webhooks to an MCP connection, nor the scope at consent', async () => {
-    const shop = await seedShop(t.db, t.sink, 'MCP webhook shop');
+    const shop = await ownShop('MCP webhook shop');
     const grant = await connectionGrant(shop, ['shop:read', 'activity:read']);
     const session = await connectMcp(t, await grantToken(t, grant));
     const { tools } = await session.client.listTools();

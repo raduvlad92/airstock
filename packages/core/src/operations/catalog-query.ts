@@ -102,6 +102,9 @@ export const QueryInput = z.object({
     .enum(['exclude', 'include', 'only'])
     .default('exclude')
     .describe('One-of-a-kind items that were sold are hidden unless included.'),
+  stockAt: Id.optional().describe(
+    'Variants mode: a location without sub-locations. Each row then carries stockAt: the sellable units on hand there and the position version, which a count typed for that location sends back as what it read.',
+  ),
   limit: z.number().int().min(1).max(QUERY_LIMITS.pageSize).default(50),
   cursor: z
     .string()
@@ -136,6 +139,22 @@ export const QueryRow = z.object({
     .nullable()
     .describe('When requested in fields: sellable stock available in your locations.'),
   values: z.record(z.string(), FieldValueOut),
+  stockAt: z
+    .object({
+      locationId: Id,
+      onHand: z.string().describe('Sellable units on hand at the location.'),
+      version: z
+        .number()
+        .nullable()
+        .describe('The version of the position a count sets; null when there is none yet.'),
+      countable: z
+        .boolean()
+        .describe(
+          'A quantity can be counted here as one number: not lot- or serial-tracked, not a bundle.',
+        ),
+    })
+    .optional()
+    .describe('Only with stockAt.'),
 });
 export type QueryRowType = z.infer<typeof QueryRow>;
 
@@ -164,6 +183,9 @@ interface Row {
   v_attributes: Record<string, unknown> | null;
   v_weight: unknown;
   available: string | null;
+  stock_on_hand: string | null;
+  stock_version: number | null;
+  stock_countable: boolean | null;
   sort_value: string | null;
   variant_count: number | null;
   price_min: string | null;
@@ -296,6 +318,24 @@ export async function runQuery(
       mode === 'variants' && wanted.has('available')
         ? fields.get('available')!.expr(params, mode)
         : 'null';
+    const stockAt =
+      mode === 'variants' && input.stockAt ? await checkStockAt(ctx, input.stockAt) : null;
+    // The position a count of one number sets: sellable, no lot or serial, not in transit.
+    const stockJoin = stockAt
+      ? `left join lateral (
+           select coalesce(sum(sp.on_hand) filter (where sp.lot_id is null and sp.serial_id is null), 0) as plain,
+             max(sp.version) filter (where sp.lot_id is null and sp.serial_id is null) as version,
+             coalesce(sum(sp.on_hand), 0) as total
+           from inventory_positions sp
+           where sp.shop_id = v.shop_id and sp.variant_id = v.id and sp.location_id = ${params.add(stockAt)}
+             and sp.condition = 'sellable' and sp.transfer_id is null) st on true`
+      : '';
+    const stockSql = stockAt
+      ? `(v.tracking_mode = 'none' and not exists (select 1 from bundles b
+           where b.shop_id = v.shop_id and b.variant_id = v.id and b.active)) as stock_countable,
+         st.version::int as stock_version,
+         (case when v.tracking_mode = 'none' then st.plain else st.total end)::text as stock_on_hand`
+      : 'null::boolean as stock_countable, null::int as stock_version, null as stock_on_hand';
     const select =
       mode === 'variants'
         ? `p.id as product_id, p.name, p.status as product_status, p.family_id, p.tags,
@@ -303,19 +343,20 @@ export async function runQuery(
            v.id as variant_id, v.sku, v.price::text as price, v.status, v.option_value_ids,
            v.attributes as v_attributes,
            case when v.weight = 'null'::jsonb then to_jsonb('cleared'::text) else v.weight end as v_weight,
-           ${availableSql}::text as available,
+           ${availableSql}::text as available, ${stockSql},
            null::int as variant_count, null as price_min, null as price_max, null::text[] as skus`
         : `p.id as product_id, p.name, p.status as product_status, p.family_id, p.tags,
            p.attributes as p_attributes, p.weight as p_weight,
            null::uuid as variant_id, null as sku, null as price, null as status, null::uuid[] as option_value_ids,
            null::jsonb as v_attributes, null::jsonb as v_weight, null as available,
+           null::boolean as stock_countable, null::int as stock_version, null as stock_on_hand,
            va.variant_count, va.price_min, va.price_max, va.skus`;
     const lateral =
       mode === 'products'
         ? `left join lateral (select count(*)::int as variant_count, min(x.price)::text as price_min,
              max(x.price)::text as price_max, (array_agg(x.sku order by x.sku))[1:3] as skus
            from variants x where x.shop_id = p.shop_id and x.product_id = p.id and x.status = 'active') va on true`
-        : '';
+        : stockJoin;
     const limit = params.add(input.limit + 1);
     const rows = await ctx.tx.query<Row>(
       `select ${select}, (${sortExpr})::text as sort_value
@@ -350,7 +391,7 @@ export async function runQuery(
     }
     return {
       mode,
-      rows: await shapeRows(ctx.tx, page, mode, all, wanted),
+      rows: await shapeRows(ctx.tx, page, mode, all, wanted, stockAt),
       nextCursor,
       total,
       totalCapped,
@@ -368,6 +409,7 @@ async function shapeRows(
   mode: Mode,
   defs: StoredField[],
   wanted: Set<string>,
+  stockAt: string | null = null,
 ): Promise<QueryRowType[]> {
   if (page.length === 0) return [];
   const productIds = [...new Set(page.map((r) => r.product_id))];
@@ -463,8 +505,32 @@ async function shapeRows(
       skus: r.skus,
       available: r.available,
       values,
+      ...(stockAt
+        ? {
+            stockAt: {
+              locationId: stockAt,
+              onHand: r.stock_on_hand ?? '0',
+              version: r.stock_version,
+              countable: r.stock_countable ?? false,
+            },
+          }
+        : {}),
     };
   });
+}
+
+/** The stockAt location: one that holds stock (no sub-locations), within the caller's scope. */
+async function checkStockAt(ctx: HandlerContext, locationId: string): Promise<string> {
+  const [row] = await ctx.tx.query<{ in_scope: boolean; leaf: boolean }>(
+    `select ($2::uuid[] is null or l.path_ids && $2::uuid[]) as in_scope,
+       not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as leaf
+     from locations l where l.id = $1`,
+    [locationId, ctx.locationScope],
+  );
+  if (!row || !row.in_scope) throw new QueryError('stockAt', 'No such location in your access.');
+  if (!row.leaf)
+    throw new QueryError('stockAt', 'Choose a location without sub-locations (a shelf).');
+  return locationId;
 }
 
 export const queryItems = defineOperation({

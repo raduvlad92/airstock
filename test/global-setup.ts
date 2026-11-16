@@ -35,7 +35,10 @@ export default async function setup(project: TestProject) {
   await owner.query(`
     create function test_fail_audit() returns trigger language plpgsql as $$
     begin
-      if new.reason = 'TEST_FAIL_AUDIT_INSERT' then
+      -- Either the command's reason says so, or the transaction asked for it
+      -- (failingAuditDatabase in test/helpers.ts), for commands without a reason.
+      if new.reason = 'TEST_FAIL_AUDIT_INSERT'
+        or current_setting('airstock.test_fail_audit', true) = 'on' then
         raise exception 'simulated audit persistence failure';
       end if;
       return new;

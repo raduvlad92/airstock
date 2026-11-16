@@ -1,0 +1,147 @@
+{
+  "/api/v1/shops/{shopId}/lots/trace/exports": {
+    "post": {
+      "operationId": "inventory.lots.export_trace",
+      "summary": "Export a lot trace as CSV",
+      "description": "Use this when someone needs a lot’s trace as a file, for a recall or to send to a supplier or authority: one line per movement, from each receipt (with its supplier and purchase order) to every order, transfer, return, and disposal. Give lotId, or variantId with lotCode. Runs as a job; follow it with get_export. The file is ready for 24 hours and the person downloads it in the Airstock dashboard (Products, then Import, under Recent exports, or from the lot trace), never in chat. Movements at locations you cannot access are left out, as in lot_trace.",
+      "x-permission": "exports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.lot_trace_export.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key within 7 days returns the original result without repeating the effect. After 7 days the key is forgotten, and a request with it runs as a new one.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "lotId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "variantId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "lotCode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "description": "A lot or batch code. Codes are unique per variant, ignoring case and extra spaces."
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "export": {
+                    "type": "object",
+                    "properties": {
+                      "exportId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "catalog",
+                          "activity",
+                          "lot_trace"
+                        ],
+                        "description": "catalog: products or variants; activity: the activity history; lot_trace: one lot’s trace."
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "rowCount": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "completedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadUntil": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadPath": {
+                        "description": "An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "exportId",
+                      "kind",
+                      "status",
+                      "rowCount",
+                      "error",
+                      "createdAt",
+                      "completedAt",
+                      "downloadUntil",
+                      "downloadPath"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "export"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

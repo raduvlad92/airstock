@@ -45,9 +45,10 @@
                         "type": "string",
                         "enum": [
                           "catalog",
-                          "activity"
+                          "activity",
+                          "lot_trace"
                         ],
-                        "description": "catalog: products or variants; activity: the activity history."
+                        "description": "catalog: products or variants; activity: the activity history; lot_trace: one lot’s trace."
                       },
                       "status": {
                         "type": "string"

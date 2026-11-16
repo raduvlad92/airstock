@@ -3,7 +3,7 @@
     "post": {
       "operationId": "inventory.counts.quick",
       "summary": "Record what was counted on a shelf and correct stock now",
-      "description": "Use this for \"I counted shelf B2: 4 of SKU X and none of SKU Y\", or a quantity typed for a location in the grid: sets each counted item to the number counted and posts the differences as adjustments with the reason count correction, in one step. Serial-tracked items list the serials present; lot-tracked items name the lot. If a count is below what is reserved, the error lists the claims: retry with reservationChoices. For a counting round over many shelves that is entered over time, start a count session instead.",
+      "description": "Use this for \"I counted shelf B2: 4 of SKU X and none of SKU Y\", or a quantity typed for a location in the grid: sets each counted item to the number counted and posts the differences as adjustments with the reason count correction, in one step. Serial-tracked items list the serials present; lot-tracked items name the lot. If a count is below what is reserved, the error lists the claims: retry with reservationChoices. A count of a quantity read on screen sends read (the position version and on hand read); if units moved since, it fails with moved_since_read, and the person decides whether the count stands. For a counting round over many shelves that is entered over time, start a count session instead.",
       "x-permission": "inventory.count",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "inventory.count.quick",
@@ -92,6 +92,34 @@
                           "minLength": 1,
                           "maxLength": 100
                         }
+                      },
+                      "read": {
+                        "description": "What the count was based on, for one position (give the lot for lot-tracked items). If units moved there since (the version and on hand both changed), the count is refused with moved_since_read for review; a version changed only by reservations passes.",
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The position version read; null when there was no position."
+                          },
+                          "onHand": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                            "description": "The units on hand read, in base units."
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "onHand"
+                        ]
                       }
                     },
                     "required": [

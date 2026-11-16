@@ -2,7 +2,15 @@ import type { ops } from '@airstock/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
-import { ApiError, api, command, type Out } from '../api.ts';
+import { api, command, type Out } from '../api.ts';
+import {
+  belowReserved,
+  type Choice,
+  ClaimChoices,
+  MovedSinceReadReview,
+  movedSinceRead,
+  type PositionRead,
+} from '../components/count-review.tsx';
 import {
   Badge,
   Card,
@@ -26,103 +34,6 @@ import { useStockLocations, variantsBySku } from './transfers.tsx';
 type Session = Out<typeof ops.getCount>;
 type Sessions = Out<typeof ops.listCounts>;
 
-interface Claim {
-  allocationId: string;
-  reservationId: string;
-  purpose: string;
-  externalRef: string | null;
-  outstanding: string;
-}
-interface ClaimProblem {
-  positionId: string;
-  toResolve: string;
-  allocations: Claim[];
-}
-export type Choice = { allocationId: string; action: 'release' | 'reallocate'; quantity?: string };
-
-/** The claims a below-reserved error lists, if that is what the error is. */
-export function belowReserved(error: unknown): ClaimProblem[] | null {
-  if (error instanceof ApiError && error.code === 'below_reserved') {
-    return (error.problem.positions as ClaimProblem[] | undefined) ?? null;
-  }
-  return null;
-}
-
-/** Asks, per claim, to release it or move it to other stock, then retries with the choices. */
-export function ClaimChoices({
-  problems,
-  pending,
-  onRetry,
-}: {
-  problems: ClaimProblem[];
-  pending: boolean;
-  onRetry: (choices: Choice[]) => void;
-}) {
-  const [actions, setActions] = useState<Record<string, string>>({});
-  const [amounts, setAmounts] = useState<Record<string, string>>({});
-  return (
-    <div className="stack">
-      <Notice>
-        This leaves fewer units than are reserved. Choose what happens to each claim; nothing is
-        released without your choice.
-      </Notice>
-      {problems.map((p) => (
-        <div key={p.positionId} className="stack">
-          <p className="muted">{formatDecimal(p.toResolve)} reserved units need a decision.</p>
-          {p.allocations.map((a) => (
-            <div className="inline-form" key={a.allocationId}>
-              <span>
-                {a.purpose === 'transfer' ? 'Transfer hold' : (a.externalRef ?? 'Reservation')} ·{' '}
-                {formatDecimal(a.outstanding)}
-              </span>
-              <Field label="Action">
-                <select
-                  value={actions[a.allocationId] ?? ''}
-                  onChange={(e) => setActions({ ...actions, [a.allocationId]: e.target.value })}
-                >
-                  <option value="">Keep</option>
-                  {a.purpose === 'transfer' ? null : <option value="release">Release</option>}
-                  <option value="reallocate">Move to other stock</option>
-                </select>
-              </Field>
-              <Field label="Units">
-                <input
-                  value={amounts[a.allocationId] ?? ''}
-                  onChange={(e) => setAmounts({ ...amounts, [a.allocationId]: e.target.value })}
-                  placeholder={`All ${formatDecimal(a.outstanding)}`}
-                  inputMode="decimal"
-                  size={8}
-                />
-              </Field>
-            </div>
-          ))}
-        </div>
-      ))}
-      <div>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() =>
-            onRetry(
-              Object.entries(actions)
-                .filter(([, action]) => action !== '')
-                .map(([allocationId, action]) => ({
-                  allocationId,
-                  action: action as Choice['action'],
-                  ...((amounts[allocationId] ?? '').trim()
-                    ? { quantity: amounts[allocationId]!.trim() }
-                    : {}),
-                })),
-            )
-          }
-        >
-          Apply with these choices
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function useCountsRefresh(shopId: string) {
   const queryClient = useQueryClient();
   return () =>
@@ -138,14 +49,57 @@ function useCountsRefresh(shopId: string) {
  * A one-line count: the quantity on one shelf, posted as a count correction (D10). Used on the
  * Counts tab and in a product's stock panel.
  */
+/** A stock panel position, as the count form reads it. */
+export interface ReadPosition {
+  locationId: string;
+  condition: string;
+  lotId: string | null;
+  lotCode: string | null;
+  serial: string | null;
+  inTransit: boolean;
+  onHand: string;
+  version: number;
+}
+
+/**
+ * What a count of one shelf is based on, from the positions shown: the sellable position there
+ * (of the lot typed, for lots). Null when it cannot be told (a lot not given).
+ */
+export function readFor(
+  positions: ReadPosition[],
+  locationId: string,
+  lots: boolean,
+  lotCode: string,
+): PositionRead | null {
+  if (lots && !lotCode.trim()) return null;
+  // Lot codes match as the server matches them: trimmed, spaces collapsed, any case.
+  const norm = (code: string) => code.trim().replace(/\s+/g, ' ').toUpperCase();
+  const p = positions.find(
+    (x) =>
+      x.locationId === locationId &&
+      x.condition === 'sellable' &&
+      !x.inTransit &&
+      x.serial === null &&
+      (lots ? norm(x.lotCode ?? '') === norm(lotCode) : x.lotId === null),
+  );
+  return p ? { version: p.version, onHand: p.onHand } : { version: null, onHand: '0' };
+}
+
+/**
+ * A one-line count: the quantity on one shelf, posted as a count correction (D10). Used on the
+ * Counts tab and in a product's stock panel. With the panel's positions, it sends what it read:
+ * if the shelf moved since, the person reviews the count before anything changes.
+ */
 export function QuickCountForm({
   shopId,
   variantId,
   lots = false,
+  positions,
 }: {
   shopId: string;
   variantId?: string;
   lots?: boolean;
+  positions?: ReadPosition[];
 }) {
   const { leaves } = useStockLocations(shopId);
   const refresh = useCountsRefresh(shopId);
@@ -155,18 +109,23 @@ export function QuickCountForm({
   const [lotCode, setLotCode] = useState('');
   const at = locationId || leaves[0]?.locationId || '';
   const count = useMutation({
-    mutationFn: async (choices: Choice[]) => {
+    mutationFn: async (attempt: {
+      counted: string;
+      read: PositionRead | null;
+      choices: Choice[];
+    }) => {
       const id = variantId ?? (await variantsBySku(shopId, [sku.trim()]))[0];
       return command<Out<typeof ops.quickCount>>(`/shops/${shopId}/counts/quick`, {
         locationId: at,
         counts: [
           {
             variantId: id,
-            counted: counted.trim(),
+            counted: attempt.counted,
             ...(lotCode.trim() ? { lotCode: lotCode.trim() } : {}),
+            ...(attempt.read ? { read: attempt.read } : {}),
           },
         ],
-        ...(choices.length > 0 ? { reservationChoices: choices } : {}),
+        ...(attempt.choices.length > 0 ? { reservationChoices: attempt.choices } : {}),
       });
     },
     onSuccess: async () => {
@@ -174,13 +133,19 @@ export function QuickCountForm({
       await refresh();
     },
   });
+  const last = count.variables;
   const problems = belowReserved(count.error);
+  const moved = movedSinceRead(count.error)?.[0];
   return (
     <form
       className="stack mini-form"
       onSubmit={(e) => {
         e.preventDefault();
-        count.mutate([]);
+        count.mutate({
+          counted: counted.trim(),
+          read: positions ? readFor(positions, at, lots, lotCode) : null,
+          choices: [],
+        });
       }}
     >
       <h3>Count</h3>
@@ -220,11 +185,18 @@ export function QuickCountForm({
       <button type="submit" disabled={count.isPending || !at}>
         Save count
       </button>
-      {problems ? (
+      {moved && last ? (
+        <MovedSinceReadReview
+          problem={moved}
+          counted={last.counted}
+          pending={count.isPending}
+          onRetry={(c, read) => count.mutate({ counted: c, read, choices: [] })}
+        />
+      ) : problems && last ? (
         <ClaimChoices
           problems={problems}
           pending={count.isPending}
-          onRetry={(c) => count.mutate(c)}
+          onRetry={(choices) => count.mutate({ ...last, choices })}
         />
       ) : (
         <ErrorNotice error={count.error} />

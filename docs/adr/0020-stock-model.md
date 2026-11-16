@@ -91,6 +91,12 @@ The I7 volume run measured the inventory list (stock on hand by position, first 
 
 Partline's list went from 1,322 ms to 177 ms of database time with one caller (`docs/phase-2-measurements.md`, "I7 fixes").
 
+## Update, 16 November 2026: the lot trace export (G6)
+
+- **What.** `inventory.lots.export_trace` (REST `POST /shops/{shopId}/lots/trace/exports`, MCP `import_export` action `export_lot_trace`) writes one lot's trace as CSV: one line per movement, oldest first, as the trace read lists them, with the lot, SKU, expiry, movement kind, quantity, location, order reference, reservation, the operation's reference, the purchase order (from `purchase_order_receipts`) and supplier of each receipt, the actor, and the operation ID.
+- **How.** It is an export job like the catalog and activity exports (`export_jobs`, `query.mode = 'lot_trace'`, run by the catalog export runner): it runs as the member who started it, with their location scope now, so a scoped member's file leaves out other locations' movements exactly as the trace read does. The file downloads through the export file route, each download is logged, and the job logs `inventory.lot_trace_export.created`, `.completed`, and `.failed`. At most 100,000 movements per file; the last line says when it stopped there.
+- **Where.** The stock panel's lot column opens the trace (lot, supplier, purchase order, totals, orders, movements) with Export CSV; the export is listed with the others under Recent exports (kind `lot_trace`).
+
 ## Revisit when
 
 - Allocation over a variant with hundreds of lots misses the 500 ms target (plan risk R5): lock the candidates in one statement with a cap, then consider an advisory lock per variant and location.

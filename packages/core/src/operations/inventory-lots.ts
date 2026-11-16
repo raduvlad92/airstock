@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { normalize, subtract } from '../catalog/decimal.ts';
 import { errors } from '../errors.ts';
+import { effectivePermissions } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id } from '../schemas.ts';
 import { normalizeCode } from '../stock/engine.ts';
+import { findLot, type LotTraceQuery } from '../stock/lot-trace.ts';
+import { ExportOut, exportOut, loadExport, storeCaller } from './imports.ts';
 import { Flag, isSet, LotCode } from './inventory.ts';
 
 // Lots, lot trace, and serial history (plan Section 5.7, D4). All three are queries over the
@@ -155,7 +158,7 @@ export const traceLot = defineOperation({
   id: 'inventory.lots.trace',
   summary: 'Trace a lot from receipt to every order',
   description:
-    'Use this for recalls and "which orders got lot X": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode. Movements and totals cover only the locations you can access (partial).',
+    'Use this for recalls and "which orders got lot X": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode. Movements and totals cover only the locations you can access (partial). For the trace as a file, use import_export export_lot_trace.',
   kind: 'read',
   scope: 'shop',
   input: z.object({
@@ -193,37 +196,7 @@ export const traceLot = defineOperation({
   http: { method: 'GET', path: '/shops/{shopId}/lots/trace' },
   mcp: { tool: TOOL, action: 'lot_trace', readOnly: true, destructive: false },
   async handler(ctx, input) {
-    if (!input.lotId && !(input.variantId && input.lotCode)) {
-      throw errors.validation([
-        { path: 'lotId', message: 'Give lotId, or variantId and lotCode.' },
-      ]);
-    }
-    const [lot] = await ctx.tx.query<{
-      lotId: string;
-      variantId: string;
-      sku: string;
-      code: string;
-      expiresOn: string | null;
-      producedOn: string | null;
-      supplierId: string | null;
-      supplierName: string | null;
-      purchaseOrderRef: string | null;
-    }>(
-      `select lt.id as "lotId", lt.variant_id as "variantId", v.sku, lt.code,
-         to_char(lt.expires_on, 'YYYY-MM-DD') as "expiresOn",
-         to_char(lt.produced_on, 'YYYY-MM-DD') as "producedOn", lt.supplier_id as "supplierId",
-         s.name as "supplierName", lt.purchase_order_ref as "purchaseOrderRef"
-       from lots lt join variants v on v.shop_id = lt.shop_id and v.id = lt.variant_id
-       left join suppliers s on s.shop_id = lt.shop_id and s.id = lt.supplier_id
-       where ($1::uuid is null or lt.id = $1)
-         and ($2::uuid is null or (lt.variant_id = $2 and lt.code_normalized = $3))`,
-      [
-        input.lotId ?? null,
-        input.lotId ? null : (input.variantId ?? null),
-        input.lotCode ? normalizeCode(input.lotCode) : null,
-      ],
-    );
-    if (!lot) throw errors.notFound('Lot');
+    const lot = await findLot(ctx.tx, input);
     // Location scope (PRD 2.4): movements and figures at other locations are hidden.
     const movements = await ctx.tx.query<z.infer<typeof Movement>>(MOVEMENTS_SQL('e.lot_id = $1'), [
       lot.lotId,
@@ -270,6 +243,55 @@ export const traceLot = defineOperation({
         locationIds: [...new Set(movements.map((m) => m.locationId))].slice(0, 100),
         context: { input },
       },
+    };
+  },
+});
+
+export const exportLotTrace = defineOperation({
+  id: 'inventory.lots.export_trace',
+  summary: 'Export a lot trace as CSV',
+  description:
+    'Use this when someone needs a lot’s trace as a file, for a recall or to send to a supplier or authority: one line per movement, from each receipt (with its supplier and purchase order) to every order, transfer, return, and disposal. Give lotId, or variantId with lotCode. Runs as a job; follow it with get_export. The file is ready for 24 hours and the person downloads it in the Airstock dashboard (Products, then Import, under Recent exports, or from the lot trace), never in chat. Movements at locations you cannot access are left out, as in lot_trace.',
+  kind: 'command',
+  scope: 'shop',
+  input: z.object({
+    lotId: Id.optional(),
+    variantId: Id.optional(),
+    lotCode: LotCode.optional(),
+  }),
+  output: z.object({ export: ExportOut }),
+  // Downloading any export needs exports.run; reading the trace needs inventory.read too.
+  permission: 'exports.run',
+  connectionScope: 'inventory:read',
+  audit: { action: 'inventory.lot_trace_export.created' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/lots/trace/exports', status: 201 },
+  mcp: { tool: 'import_export', action: 'export_lot_trace', readOnly: false, destructive: false },
+  async handler(ctx, input) {
+    if (!ctx.membership || !effectivePermissions(ctx.membership).has('inventory.read')) {
+      throw errors.forbidden('Requires the inventory.read permission.');
+    }
+    const lot = await findLot(ctx.tx, input);
+    const exportId = ctx.newId();
+    const query: LotTraceQuery = {
+      mode: 'lot_trace',
+      lotId: lot.lotId,
+      lotCode: lot.code,
+      sku: lot.sku,
+    };
+    await ctx.tx.query(
+      `insert into export_jobs (shop_id, id, caller, query) values (app_shop_id(), $1, $2, $3)`,
+      [exportId, JSON.stringify(storeCaller(ctx.caller)), JSON.stringify(query)],
+    );
+    return {
+      result: { export: exportOut(ctx.shopId, await loadExport(ctx.tx, exportId)) },
+      audit: {
+        targetType: 'export',
+        targetId: exportId,
+        changes: { query },
+        context: { partial: ctx.locationScope !== null },
+      },
+      outbox: [{ topic: 'catalog.export.run', payload: { exportId } }],
     };
   },
 });
@@ -360,4 +382,4 @@ export const serialHistory = defineOperation({
 });
 
 /** This module's operations, in registry order: MCP lists a tool's actions in this order. */
-export const inventoryLotsOperations = [listLots, traceLot, serialHistory] as const;
+export const inventoryLotsOperations = [listLots, traceLot, serialHistory, exportLotTrace] as const;

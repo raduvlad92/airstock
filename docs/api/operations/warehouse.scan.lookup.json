@@ -448,6 +448,10 @@
                                 },
                                 "available": {
                                   "type": "string"
+                                },
+                                "version": {
+                                  "type": "number",
+                                  "description": "The position version; a count of what was read here sends it back."
                                 }
                               },
                               "required": [
@@ -465,7 +469,8 @@
                                 "sellable",
                                 "onHand",
                                 "reserved",
-                                "available"
+                                "available",
+                                "version"
                               ],
                               "additionalProperties": false
                             }

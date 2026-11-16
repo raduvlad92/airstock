@@ -1848,6 +1848,7 @@ button.danger {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: var(--accent);
+}
 
 /* Purchasing (I3) */
 .table tr.clickable {

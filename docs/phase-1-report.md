@@ -16,7 +16,7 @@ All of it is reachable from the dashboard, REST, and MCP.
 
 Every query shape meets the 1-second target on staging with 3 shops of 10,000 variants each, at under half the target. A 10,000-row import commits in 22 seconds against the 5-minute target.
 
-One exit criterion needs the owner: the recorded ChatGPT run (F13). Its prompts and steps are in Section 8.
+The owner's ChatGPT run (F13) on 15–16 November passed six of seven prompts. ChatGPT picked the right `edit_catalog` action every time. It answered the export prompt from supplier records instead of starting an export, and a family name in a filter silently matched nothing ([status, Section 5](phase-1-status.md#5-chatgpt-run-f13)).
 
 | ID | Criterion | State | Evidence |
 | --- | --- | --- | --- |
@@ -32,7 +32,7 @@ One exit criterion needs the owner: the recorded ChatGPT run (F13). Its prompts 
 | F10 | 10,000-row import previewed, chunked, resumable, with per-row outcomes and opening stock as receipts; export respects permissions, and its download is logged | Done | A19 in `packages/core/test/imports.test.ts`. On staging, 10,000 rows committed in 22 s (Section 4.2), and a 300-row import with stock ran through the queue in 1.8–5.1 s. Export downloads are logged (`catalog.export.downloaded`). |
 | F11 | Media uploads, derivatives, roles, order, variant links; failed uploads leave nothing; cross-shop unreachable; access logged per D5 | Done | `packages/core/test/media.test.ts` and `apps/worker/test/media.test.ts` (checksum, type, size, expiry, signature, cross-shop). On staging, a picture uploaded through the detail panel showed its signed 320 px thumbnail after 2.2 s. |
 | F12 | p95 under 1 s at the server for 50 rows, 3 × 10,000 variants, with a custom-field filter and sort; the grid never loads the whole catalog | Done | Staging: worst p95 435 ms (Section 4.1). The grid reads pages of 50 (Chromium test with 10,000 variants; on staging, 1 query and 27 rendered rows out of 609). |
-| F13 | ChatGPT answers the Section 7.3 prompts inside its grant | Owner | Section 8, step 1. |
+| F13 | ChatGPT answers the Section 7.3 prompts inside its grant | Done, with two findings | Owner's run on 15–16 November, checked in `audit_events`: prompts 2, 3, 4, 6, and 7 right; prompt 1 partly (a family name matched nothing); prompt 5 used the wrong tool (no export). The read-only connection was refused a price change. Details in the [status doc, Section 5](phase-1-status.md#5-chatgpt-run-f13). |
 | F14 | Rented and third-party warehouses record operator and contract; terms hidden without permission; archive and stock rules | Done | `packages/core/test/storage.test.ts` and `apps/worker/test/storage.test.ts`. On staging, a rented warehouse with an operator and contract rates was saved. |
 
 ## 2. What was built
@@ -177,6 +177,8 @@ Media is the largest new item and grows with the catalog, not with use. A shop w
 
 ## 7. Proposed PRD changes
 
+Applied in PRD v0.7 on 16 November 2026.
+
 | ID | Change | Section |
 | --- | --- | --- |
 | P16 | Catalog query targets are met with JSONB attributes and no generated columns at 10,000 variants per shop. Keep expression indexes as the next step only when a shop's benchmark nears 1 s. | 12.3 |
@@ -190,9 +192,9 @@ Media is the largest new item and grows with the catalog, not with use. A shop w
 
 ## 8. Owner actions to close Phase 1
 
-1. **ChatGPT run (F13), about 20 minutes.** On staging, with the ChatGPT connection from Phase 0, ask the seven prompts in plan Section 7.3 in a shop that has the four starter templates. Step-by-step instructions are in the status doc (Section 5).
+1. **ChatGPT run (F13):** done on 15–16 November. Results in the [status doc, Section 5](phase-1-status.md#5-chatgpt-run-f13).
 2. **Print a label sheet (optional, F8 spot check), about 5 minutes.** Print an A4 sheet from the labels page and scan two codes with a phone.
-3. **Phase 0 leftovers.** E3 (an emailed-code sign-in and a Microsoft sign-in) and E8 (the phone scan matrix) are as described in the [Phase 0 report](phase-0-report.md), Section 8.
+3. **Phase 0 leftovers.** E3 is done (Microsoft and an emailed code signed in on 16 November). E8 is partly done: iPhone Chrome decoded every target; iPhone Safari, Android Chrome, and the installed app are still to run ([Phase 0 status, Section 8](phase-0-status.md#8-owner-checks-16-november-2026)).
 
 ## 9. Not done, and handoff to Phase 2
 

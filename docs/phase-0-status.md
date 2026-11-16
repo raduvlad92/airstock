@@ -25,19 +25,19 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 | --- | --- | --- |
 | E1 | Done | Repository public; CI in `.github/workflows/ci.yml` migrates and deploys staging on every push to `main`. |
 | E2 | Done | Requests run next to the database (4–8 ms per statement); jobs go through the fetch handler because consumers are not placed ([report, 4.4](phase-0-report.md#44-findings-that-changed-the-build)). |
-| E3 | Partly | Google on staging, for two accounts; an emailed-code sign-in on staging (16 November, Section 7); an invitation accepted on staging by the invited address (Section 7); one user in two shops with different owners in CI. Microsoft reached WorkOS but needed an email-verification step Airstock did not have; that step is added (Section 7). Still needed from the owner: one Microsoft sign-in, and a shop created by the invited user. |
+| E3 | Done | On staging: Google for two accounts, an emailed code (00:10 UTC, 16 November), and Microsoft (00:24 UTC, after the email-verification step was added); an invitation accepted by the invited address; two shops with different owners ("Bibica", and "Vladeeno1" made by the emailed-code account). One user in two shops with different owners is covered in CI (`apps/worker/test/members.test.ts`). Section 8. |
 | E4 | Done | `pnpm parity` in CI, `packages/core/test/registry.test.ts`, `docs/api/openapi.json` checked in CI. 24 operations, 9 MCP tools. |
 | E5 | Done in CI | See Section 4. |
 | E6 | Done | Real ChatGPT run on staging, 14 November 2026 (Section 6), plus `apps/worker/test/mcp.test.ts` and `web.test.ts`. |
 | E7 | Done | Two development stores, two shops ([report, Section 3](phase-0-report.md#3-shopify-on-staging-e7)), plus `apps/worker/test/shopify.test.ts`. |
-| E8 | Waiting | `/scan-test` is live; results save to R2 and are read at `GET /scan-test/results`. |
+| E8 | Partly | iPhone Chrome in a tab decoded all four targets with zxing, 60–86 ms. Not yet run: iPhone Safari, Android Chrome, installed, close, and dim light (Section 8). |
 | E9 | Done, domain pending | Resend chosen; one invitation delivered. Sent from `mail.tracker.deletecookies.dev` until a Resend domain slot exists for `mail.airstock.deletecookies.dev`. |
 | E10 | Done | [Report](phase-0-report.md), Sections 4 and 6. |
 
 ## 3. What the owner needs to provide
 
-1. **Phone scan matrix (E8):** iPhone Safari and Android Chrome, in a tab and installed ([report, Section 8](phase-0-report.md#8-owner-actions-to-close-phase-0)).
-2. **Sign-ins (E3):** the invitation is accepted and an emailed code worked (Section 7). Still needed: sign in once with Microsoft (type the code WorkOS emails, if asked), and, as vlad@deletecookies.net, create a shop.
+1. **Phone scan matrix (E8):** the rest of the matrix: iPhone Safari and Android Chrome, in a tab and installed, close and in dim light ([report, Section 8](phase-0-report.md#8-owner-actions-to-close-phase-0)). iPhone Chrome in a tab is done (Section 8).
+2. **Sign-ins (E3):** done (Section 8).
 3. **Email domain (E9):** decided by the owner on 14 November: keep sending from `mail.tracker.deletecookies.dev` for testing. `mail.airstock.deletecookies.dev` waits for Resend Pro or a freed domain slot, before any real merchant receives email.
 
 ## 4. Acceptance scenarios covered by tests
@@ -133,3 +133,24 @@ The fix: when WorkOS answers `email_verification_required`, Airstock keeps the p
 - **P15 fixed** ([PR #17](https://github.com/raduvlad92/airstock/pull/17)): a connection grant that no client binds within 10 minutes of consent can no longer be bound, the dashboard lists it as expired, and the 30-minute sweep records it with a `connection.expired` event ([ADR 0007](adr/0007-mcp-connection-binding.md)). Staging's one abandoned grant (`01a1da72`, created 14:24:57 UTC) had already been revoked at 15:07.
 - **PRD v0.5** applies the report's 15 proposed changes ([PRD change history](ecommerce-platform-prd-and-architecture.md#change-history)).
 - Merged branches were deleted, locally and on GitHub.
+
+## 8. Owner checks (16 November 2026)
+
+Checked in the staging activity history and in R2. Times are UTC.
+
+**Sign-ins (E3).**
+
+| Time | Event |
+| --- | --- |
+| 00:10:56 | An emailed-code sign-in (Section 7). |
+| 00:16 | That account created the shop "Vladeeno1". Staging now has shops with different owners. |
+| 00:24 | The owner signed in with Microsoft (`user.signed_in`, method `microsoft`), after PR #34 added the email-verification step. |
+
+**Phone scans (E8).** `/scan-test` saved 23 sessions on 14 November, 21:15–21:22, from Chrome on Windows and Chrome on an iPhone, all in a browser tab, at arm's length in good light.
+
+| Device | Native decoder | zxing |
+| --- | --- | --- |
+| iPhone, Chrome (WebKit) | Not available | EAN-13, UPC-A, Code 128, and QR all decoded to the right value, 60–86 ms after the first frame |
+| Windows, Chrome, laptop camera | Not available | No target decoded in 5 tries; one read was another barcode in view. A laptop camera is not part of the matrix. |
+
+The first iPhone tries failed or returned other real barcodes in view (a product's EAN-13 and an Amazon label); those count as wrong targets, not decoder errors. The last eight tries all decoded the right target. Still to run: iPhone Safari, Android Chrome (the only browser where the native decoder can be measured), the installed app, close range, and dim light.

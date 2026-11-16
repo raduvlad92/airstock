@@ -1,0 +1,141 @@
+{
+  "/api/v1/shops/{shopId}/variants/{variantId}/stock-settings": {
+    "post": {
+      "operationId": "catalog.variants.stock_settings.set",
+      "summary": "Set a variant’s tracking, one-of-a-kind, sell-by margin, and default cost",
+      "description": "Use this to track a variant by lot, lot with expiry, or serial (only while it has no stock and no open reservations); to mark it one of a kind (at most one unit in stock, \"sold\" once fulfilled); to set a sell-by margin in days before lot expiry; or to set the default cost used for receipts without a cost (needs costs.read). Send only what changes.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "catalog.variant.stock_settings_set",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "expectedVersion": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "trackingMode": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "lot",
+                    "lot_expiry",
+                    "serial"
+                  ]
+                },
+                "oneOfAKind": {
+                  "type": "boolean"
+                },
+                "sellByMarginDays": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 3650
+                },
+                "defaultCost": {
+                  "description": "Null clears it.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                      "description": "Decimal string, zero or more, at most 14 integer digits and 6 decimal places."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "version": {
+                    "type": "number"
+                  },
+                  "trackingMode": {
+                    "type": "string"
+                  },
+                  "oneOfAKind": {
+                    "type": "boolean"
+                  },
+                  "sellByMarginDays": {
+                    "type": "number"
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "defaultCost": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "variantId",
+                  "version",
+                  "trackingMode",
+                  "oneOfAKind",
+                  "sellByMarginDays",
+                  "costVisible",
+                  "defaultCost"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

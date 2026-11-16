@@ -19,6 +19,7 @@ let ha: Harness;
 let hb: Harness;
 let variantB: string;
 let reservationB: string;
+let lotB: string;
 
 beforeAll(async () => {
   a = await seedShop(db, sink, 'Shop A');
@@ -29,6 +30,16 @@ beforeAll(async () => {
   await hb.run(ops.receiveStock, { variantId: variantB, locationId: b.locationId, quantity: '10' });
   reservationB = (await hb.run(ops.reserveStock, { variantId: variantB, quantity: '2' }))
     .reservationId;
+  const lotted = await createVariant(hb);
+  await hb.run(ops.setStockSettings, { variantId: lotted, trackingMode: 'lot' });
+  lotB = (
+    await hb.run(ops.receiveStock, {
+      variantId: lotted,
+      locationId: b.locationId,
+      quantity: '1',
+      lotCode: 'B-LOT',
+    })
+  ).lot.lotId;
 });
 afterAll(() => db.close());
 
@@ -65,6 +76,41 @@ describe('tenant isolation (A13)', () => {
     [
       'another shop’s warehouse',
       () => ha.run(ops.createLocation, { warehouseId: b.warehouseId, name: 'X' }),
+    ],
+    [
+      'another shop’s reservation to fulfill',
+      () => ha.run(ops.fulfillReservation, { reservationId: reservationB }),
+    ],
+    [
+      'another shop’s reservation to reallocate',
+      () =>
+        ha.run(ops.reallocateReservation, {
+          reservationId: reservationB,
+          locationId: a.locationId,
+        }),
+    ],
+    [
+      'another shop’s reservation in a list',
+      () => ha.run(ops.listReservations, { reservationId: reservationB }),
+    ],
+    ['another shop’s variant’s lots', () => ha.run(ops.listLots, { variantId: variantB })],
+    ['another shop’s lot', () => ha.run(ops.traceLot, { lotId: lotB })],
+    [
+      'another shop’s serial',
+      () => ha.run(ops.serialHistory, { variantId: variantB, serial: 'X' }),
+    ],
+    ['another shop’s variant’s value', () => ha.run(ops.getValuation, { variantId: variantB })],
+    [
+      'another shop’s variant’s stock settings',
+      () => ha.run(ops.setStockSettings, { variantId: variantB, oneOfAKind: true }),
+    ],
+    [
+      'another shop’s warehouse in an allocation rule',
+      () => ha.run(ops.setAllocationRule, { channel: 'x', locationIds: [b.warehouseId] }),
+    ],
+    [
+      'another shop’s variant in a reservation',
+      () => ha.run(ops.reserveStock, { variantId: variantB, quantity: '1' }),
     ],
   ])('cannot reach %s', async (_label, call) => {
     await expect(call()).rejects.toMatchObject({ status: 404 });

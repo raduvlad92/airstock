@@ -225,6 +225,7 @@ export const reserveStock = defineOperation({
       lotId,
       ruleScopes,
       scope: ctx.locationScope,
+      includeEmpty: input.allowShortage ?? false,
     });
     const events = await expireClaimsAt(ctx, locked);
     const { picks, available } = await choosePositions(ctx.tx, needs, locked, ruleScopes);
@@ -1068,6 +1069,10 @@ export const reallocateReservation = defineOperation({
       );
     }
     await assertStorageLocation(ctx.tx, input.locationId);
+    const [exists] = await ctx.tx.query('select 1 from reservations where id = $1', [
+      input.reservationId,
+    ]);
+    if (!exists) throw errors.notFound('Reservation');
     const open = await ctx.tx.query<{
       id: string;
       reservation_id: string;

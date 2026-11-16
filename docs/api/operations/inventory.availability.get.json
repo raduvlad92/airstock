@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.availability.get",
       "summary": "Get stock and availability for a variant",
-      "description": "Shows on-hand, reserved, and available quantities per location and condition, with totals. Totals cover only the locations you can access; `partial` says when that is a subset.",
+      "description": "Use this for \"how many do I have\" questions: on hand, reserved, available, in transit, quarantined, damaged, expired, and shortage for one variant, per location, condition, lot, and serial, with totals. Filter by locationId (with its sub-locations) or warehouseId. Totals cover only the locations you can access; `partial` says when that is a subset. The average cost and value are included with costs.read.",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.availability.viewed",
@@ -34,6 +34,15 @@
             "type": "string",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
           }
+        },
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
         }
       ],
       "responses": {
@@ -51,6 +60,9 @@
                   "sku": {
                     "type": "string"
                   },
+                  "trackingMode": {
+                    "type": "string"
+                  },
                   "partial": {
                     "type": "boolean"
                   },
@@ -58,7 +70,8 @@
                     "type": "object",
                     "properties": {
                       "onHand": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Physically at locations, in every condition (not in transit)."
                       },
                       "sellableOnHand": {
                         "type": "string"
@@ -67,13 +80,35 @@
                         "type": "string"
                       },
                       "available": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Never below zero; shortages are reported separately."
                       },
                       "quarantined": {
                         "type": "string"
                       },
                       "damaged": {
                         "type": "string"
+                      },
+                      "repair": {
+                        "type": "string"
+                      },
+                      "supplierReturn": {
+                        "type": "string"
+                      },
+                      "expired": {
+                        "type": "string",
+                        "description": "On hand in lots past their sellable date."
+                      },
+                      "inTransit": {
+                        "type": "string"
+                      },
+                      "ownedTotal": {
+                        "type": "string",
+                        "description": "On hand plus in transit."
+                      },
+                      "shortage": {
+                        "type": "string",
+                        "description": "Demand from accepted orders that no stock covers yet (whole shop)."
                       }
                     },
                     "required": [
@@ -82,7 +117,13 @@
                       "reserved",
                       "available",
                       "quarantined",
-                      "damaged"
+                      "damaged",
+                      "repair",
+                      "supplierReturn",
+                      "expired",
+                      "inTransit",
+                      "ownedTotal",
+                      "shortage"
                     ],
                     "additionalProperties": false
                   },
@@ -103,16 +144,63 @@
                           "type": "string"
                         },
                         "warehouseId": {
-                          "type": "string",
-                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "condition": {
                           "type": "string",
                           "enum": [
                             "sellable",
                             "quarantine",
-                            "damaged"
+                            "damaged",
+                            "repair",
+                            "supplier_return"
                           ]
+                        },
+                        "lotId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lotCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expiresOn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lotExpired": {
+                          "type": "boolean"
+                        },
+                        "serial": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "inTransit": {
+                          "type": "boolean"
+                        },
+                        "sellable": {
+                          "type": "boolean"
                         },
                         "onHand": {
                           "type": "string"
@@ -130,20 +218,74 @@
                         "locationPath",
                         "warehouseId",
                         "condition",
+                        "lotId",
+                        "lotCode",
+                        "expiresOn",
+                        "lotExpired",
+                        "serial",
+                        "inTransit",
+                        "sellable",
                         "onHand",
                         "reserved",
                         "available"
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "cost": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "averageCost": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "defaultCost": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "ownedQuantity": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "averageCost",
+                          "defaultCost",
+                          "ownedQuantity",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Shop-wide moving average and value of owned stock; needs costs.read."
                   }
                 },
                 "required": [
                   "variantId",
                   "sku",
+                  "trackingMode",
                   "partial",
                   "totals",
-                  "positions"
+                  "positions",
+                  "costVisible",
+                  "cost"
                 ],
                 "additionalProperties": false
               }

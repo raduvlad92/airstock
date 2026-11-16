@@ -1,0 +1,161 @@
+{
+  "/api/v1/shops/{shopId}/lots": {
+    "get": {
+      "operationId": "inventory.lots.list",
+      "summary": "List a variant’s lots with expiry and stock",
+      "description": "Use this for lot and expiry questions about one variant: each lot’s code, expiry date, when it stops being sellable (after the sell-by margin), and its on-hand, reserved, and available units. Earliest expiry first. Lots without stock are left out unless includeEmpty is true.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.lots.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "includeEmpty",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "expiringWithinDays",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only lots that stop being sellable within this many days.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3650
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "sellByMarginDays": {
+                    "type": "number"
+                  },
+                  "partial": {
+                    "type": "boolean"
+                  },
+                  "lots": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "lotId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "expiresOn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "producedOn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sellableUntil": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expired": {
+                          "type": "boolean"
+                        },
+                        "supplierId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "purchaseOrderRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "onHand": {
+                          "type": "string"
+                        },
+                        "reserved": {
+                          "type": "string"
+                        },
+                        "available": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "lotId",
+                        "code",
+                        "expiresOn",
+                        "producedOn",
+                        "sellableUntil",
+                        "expired",
+                        "supplierId",
+                        "purchaseOrderRef",
+                        "onHand",
+                        "reserved",
+                        "available"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "variantId",
+                  "sellByMarginDays",
+                  "partial",
+                  "lots"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

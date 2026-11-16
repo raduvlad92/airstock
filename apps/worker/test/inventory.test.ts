@@ -38,4 +38,33 @@ describe('stock over MCP', () => {
     expect(again.body).toEqual({ ...first.body, replayed: true });
     await mcp.close();
   });
+
+  it('fulfills, lists, and reads stock and lots through the Phase 2 tools', async () => {
+    const mcp = await mcpSession(t, shop, ['inventory:read', 'inventory:write']);
+    const reserved = await mcp.call('manage_reservations', {
+      action: 'reserve',
+      variantId,
+      quantity: '1',
+      externalRef: 'mcp-order-1',
+      idempotency_key: 'mcp-reserve-2',
+    });
+    expect(reserved.error).toBe(false);
+    const shipped = await mcp.call('manage_reservations', {
+      action: 'fulfill',
+      reservationId: reserved.body.reservationId,
+      idempotency_key: 'mcp-fulfill-1',
+    });
+    expect(shipped.body).toMatchObject({ fulfilled: '1', status: 'fulfilled' });
+    const listed = await mcp.call('manage_reservations', {
+      action: 'list',
+      externalRef: 'mcp-order-1',
+      status: 'all',
+    });
+    expect(listed.body.reservations).toHaveLength(1);
+    const lots = await mcp.call('get_stock', { action: 'lots', variantId });
+    expect(lots.body.lots).toEqual([]);
+    const stock = await mcp.call('get_stock', { action: 'stock', variantId });
+    expect(stock.body).toMatchObject({ costVisible: true, totals: { shortage: '0.000000' } });
+    await mcp.close();
+  });
 });

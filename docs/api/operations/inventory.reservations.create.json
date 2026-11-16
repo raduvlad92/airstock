@@ -3,7 +3,7 @@
     "post": {
       "operationId": "inventory.reservations.create",
       "summary": "Reserve sellable stock",
-      "description": "Claims sellable units for an order or other purpose without moving them. Without a location, stock is allocated across fulfillment-eligible locations in location path order. Fails if not enough is available; nothing is partly reserved.",
+      "description": "Use this to hold units for an order or another purpose without moving them. Works for a variant or a bundle (every component is reserved together). Without locationId, the shop’s allocation rule picks positions: earliest expiry first for lots, then oldest stock. Fails whole if not enough is available, unless the caller is a sales channel connector, which records a shortage instead. Expiry is optional; the shop default applies when expiresInSeconds is left out, and null means never.",
       "x-permission": "inventory.reserve",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "inventory.reservation.created",
@@ -42,11 +42,18 @@
                 "quantity": {
                   "type": "string",
                   "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
-                  "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                  "description": "Base units, or bundles for a bundle variant."
                 },
                 "locationId": {
+                  "description": "Take stock only from this location and its sub-locations.",
                   "type": "string",
                   "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "lotCode": {
+                  "description": "Take stock only from this lot.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
                 },
                 "purpose": {
                   "default": "manual",
@@ -62,11 +69,28 @@
                   "minLength": 1,
                   "maxLength": 200
                 },
+                "channel": {
+                  "description": "Which allocation rule applies; \"default\" when left out.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
                 "expiresInSeconds": {
-                  "description": "Release automatically after this many seconds.",
-                  "type": "integer",
-                  "minimum": 60,
-                  "maximum": 7776000
+                  "description": "Release automatically after this many seconds; null never expires.",
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 60,
+                      "maximum": 7776000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "allowShortage": {
+                  "description": "Connectors only: record what is short as a shortage instead of failing.",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -101,8 +125,10 @@
                     "type": "string"
                   },
                   "status": {
-                    "type": "string",
-                    "const": "active"
+                    "type": "string"
+                  },
+                  "channel": {
+                    "type": "string"
                   },
                   "expiresAt": {
                     "type": [
@@ -110,11 +136,18 @@
                       "null"
                     ]
                   },
+                  "shortage": {
+                    "type": "string"
+                  },
                   "allocations": {
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
+                        "allocationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
                         "positionId": {
                           "type": "string",
                           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -123,17 +156,155 @@
                           "type": "string",
                           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                         },
+                        "lotId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serialId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "quantity": {
                           "type": "string"
                         }
                       },
                       "required": [
+                        "allocationId",
                         "positionId",
                         "locationId",
+                        "lotId",
+                        "serialId",
                         "quantity"
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "bundle": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "bundleVersionId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "components": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "reservationId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "variantId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "perBundle": {
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "string"
+                                },
+                                "shortage": {
+                                  "type": "string"
+                                },
+                                "allocations": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "allocationId": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                      },
+                                      "positionId": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                      },
+                                      "locationId": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                      },
+                                      "lotId": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "serialId": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "quantity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "allocationId",
+                                      "positionId",
+                                      "locationId",
+                                      "lotId",
+                                      "serialId",
+                                      "quantity"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "reservationId",
+                                "variantId",
+                                "perBundle",
+                                "quantity",
+                                "shortage",
+                                "allocations"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "bundleVersionId",
+                          "version",
+                          "components"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -142,8 +313,11 @@
                   "variantId",
                   "quantity",
                   "status",
+                  "channel",
                   "expiresAt",
-                  "allocations"
+                  "shortage",
+                  "allocations",
+                  "bundle"
                 ],
                 "additionalProperties": false
               }

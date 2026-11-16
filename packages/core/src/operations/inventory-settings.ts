@@ -99,15 +99,17 @@ export const setAllocationRule = defineOperation({
   },
 });
 
-export const listAllocationRules = defineOperation({
-  id: 'inventory.allocation_rules.list',
-  summary: 'List allocation rules',
+export const getStockSettings = defineOperation({
+  id: 'inventory.settings.get',
+  summary: 'Show the shop’s stock settings and allocation rules',
   description:
-    'Shows, per channel, the ordered warehouses and locations its reservations take stock from. A channel without a rule uses every fulfillment-eligible location.',
+    'Shows whether receipts fill open shortages, the default reservation expiry, and, per channel, the ordered warehouses and locations its reservations take stock from. A channel without a rule uses every fulfillment-eligible location.',
   kind: 'read',
   scope: 'shop',
   input: z.object({}),
   output: z.object({
+    fillShortagesOnReceipt: z.boolean(),
+    reservationExpiryMinutes: z.number().nullable().describe('Null: reservations never expire.'),
     rules: z.array(
       z.object({
         channel: z.string(),
@@ -120,16 +122,15 @@ export const listAllocationRules = defineOperation({
   }),
   permission: 'storage.read',
   connectionScope: 'storage:read',
-  audit: { action: 'inventory.allocation_rules.listed' },
+  audit: { action: 'inventory.settings.viewed' },
   idempotency: 'none',
-  http: { method: 'GET', path: '/shops/{shopId}/allocation-rules' },
-  mcp: {
-    tool: 'manage_storage',
-    action: 'list_allocation_rules',
-    readOnly: true,
-    destructive: false,
-  },
+  http: { method: 'GET', path: '/shops/{shopId}/stock-settings' },
+  mcp: { tool: 'manage_storage', action: 'get_stock_settings', readOnly: true, destructive: false },
   async handler(ctx) {
+    const [shop] = await ctx.tx.query<{ fill: boolean; minutes: number | null }>(
+      `select fill_shortages_on_receipt as fill, reservation_expiry_minutes as minutes
+       from shops where id = app_shop_id()`,
+    );
     const rules = await ctx.tx.query<{
       channel: string;
       version: number;
@@ -146,8 +147,66 @@ export const listAllocationRules = defineOperation({
        from allocation_rules r order by r.channel`,
     );
     return {
-      result: { rules },
-      audit: { targetType: 'shop', targetId: ctx.shopId, context: { count: rules.length } },
+      result: {
+        fillShortagesOnReceipt: shop?.fill ?? true,
+        reservationExpiryMinutes: shop?.minutes ?? null,
+        rules,
+      },
+      audit: { targetType: 'shop', targetId: ctx.shopId, context: { rules: rules.length } },
+    };
+  },
+});
+
+export const updateStockSettings = defineOperation({
+  id: 'inventory.settings.update',
+  summary: 'Change how receipts and reservations behave in this shop',
+  description:
+    'Whether a receipt fills open shortages, oldest first (D6), and the expiry applied to reservations that do not set one (null: never). Connector reservations, such as Shopify orders, never expire.',
+  kind: 'command',
+  scope: 'shop',
+  input: z.object({
+    fillShortagesOnReceipt: z.boolean().optional(),
+    reservationExpiryMinutes: z.number().int().min(1).max(129_600).nullable().optional(),
+  }),
+  output: z.object({
+    fillShortagesOnReceipt: z.boolean(),
+    reservationExpiryMinutes: z.number().nullable(),
+  }),
+  permission: 'shop.manage',
+  connectionScope: 'session',
+  audit: { action: 'inventory.settings.updated' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/stock-settings' },
+  mcp: { exception: 'Shop settings are changed in the dashboard.' },
+  async handler(ctx, input) {
+    const [before] = await ctx.tx.query<{ fill: boolean; minutes: number | null }>(
+      `select fill_shortages_on_receipt as fill, reservation_expiry_minutes as minutes
+       from shops where id = app_shop_id() for update`,
+    );
+    if (!before) throw errors.notFound('Shop');
+    const fill = input.fillShortagesOnReceipt ?? before.fill;
+    const minutes =
+      input.reservationExpiryMinutes === undefined
+        ? before.minutes
+        : input.reservationExpiryMinutes;
+    await ctx.tx.query(
+      `update shops set fill_shortages_on_receipt = $1, reservation_expiry_minutes = $2,
+         version = version + 1
+       where id = app_shop_id()`,
+      [fill, minutes],
+    );
+    const changes: Record<string, unknown> = {};
+    if (fill !== before.fill) changes.fillShortagesOnReceipt = { from: before.fill, to: fill };
+    if (minutes !== before.minutes)
+      changes.reservationExpiryMinutes = { from: before.minutes, to: minutes };
+    return {
+      result: { fillShortagesOnReceipt: fill, reservationExpiryMinutes: minutes },
+      audit: {
+        targetType: 'shop',
+        targetId: ctx.shopId,
+        changes: { fields: changes },
+        outcome: Object.keys(changes).length === 0 ? 'no_change' : 'succeeded',
+      },
     };
   },
 });
@@ -293,6 +352,7 @@ export const setStockSettings = defineOperation({
 /** This module's operations, in registry order: MCP lists a tool's actions in this order. */
 export const inventorySettingsOperations = [
   setAllocationRule,
-  listAllocationRules,
+  getStockSettings,
+  updateStockSettings,
   setStockSettings,
 ] as const;

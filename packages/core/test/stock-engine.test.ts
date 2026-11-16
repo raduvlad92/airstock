@@ -1,4 +1,4 @@
-import { type Caller, ops, sweepExpiredReservations, uuidv7 } from '@airstock/core';
+import { type Caller, ops, sweepExpiredReservations, sweepShortages, uuidv7 } from '@airstock/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   addMember,
@@ -285,13 +285,20 @@ describe('lots and expiry (A37, D4)', () => {
       [r.reservationId],
     );
     expect((await stock(variantId)).totals.available).toBe('5.000000');
+    // Refused whether or not a sweeper (other test files run one) has released it yet.
     await expect(
       h.run(ops.fulfillReservation, { reservationId: r.reservationId }),
-    ).rejects.toMatchObject({ code: 'reservation_expired' });
+    ).rejects.toMatchObject({
+      code: expect.stringMatching(/^reservation_(expired|not_open)$/),
+    });
     const again = await h.run(ops.reserveStock, { variantId, quantity: '5', lotCode: 'b1' });
     expect(again.allocations).toHaveLength(1);
-    // The late sweeper finds nothing left to do.
-    expect(await sweepExpiredReservations(db)).toBe(0);
+    await sweepExpiredReservations(db);
+    const [row] = await ownerQuery<{ status: string }>(
+      'select status from reservations where id = $1',
+      [r.reservationId],
+    );
+    expect(row?.status).toBe('expired');
     expect(await reconcile(shop.shopId)).toEqual([]);
   });
 
@@ -339,20 +346,22 @@ describe('serials (A38, receive and fulfill)', () => {
       }),
     ).rejects.toMatchObject({ code: 'serial_exists', extra: { serials: ['sn-2'] } });
 
-    // Oldest unit first; a picker who grabs the other serial reallocates.
+    // A picker who grabs the other serial reallocates the claim to it.
     const r = await h.run(ops.reserveStock, { variantId, quantity: '1', externalRef: 'order-77' });
-    expect(r.allocations[0].serialId).toBe(res.serials[0].serialId);
+    const held = r.allocations[0].serialId;
+    const other = res.serials.find((x: { serialId: string }) => x.serialId !== held);
+    const kept = res.serials.find((x: { serialId: string }) => x.serialId === held);
     await expect(
       h.run(ops.reallocateReservation, { reservationId: r.reservationId, serial: 'SN-404' }),
     ).rejects.toMatchObject({ code: 'not_found' });
     const moved = await h.run(ops.reallocateReservation, {
       reservationId: r.reservationId,
-      serial: 'sn-2',
+      serial: other.serial.toLowerCase(),
     });
-    expect(moved.to[0].serialId).toBe(res.serials[1].serialId);
+    expect(moved.to[0].serialId).toBe(other.serialId);
     await h.run(ops.fulfillReservation, { reservationId: r.reservationId });
 
-    const sold = await h.run(ops.serialHistory, { variantId, serial: 'SN-2' });
+    const sold = await h.run(ops.serialHistory, { variantId, serial: other.serial });
     expect(sold).toMatchObject({ status: 'sold', current: null });
     expect(
       sold.movements.map((m: { kind: string; quantity: string }) => [m.kind, m.quantity]),
@@ -361,8 +370,8 @@ describe('serials (A38, receive and fulfill)', () => {
       ['fulfillment', '-1.000000'],
     ]);
     expect(sold.movements[1].externalRef).toBe('order-77');
-    const kept = await h.run(ops.serialHistory, { variantId, serial: 'SN-1' });
-    expect(kept).toMatchObject({ status: 'in_stock', current: { locationId: shop.locationId } });
+    const stays = await h.run(ops.serialHistory, { variantId, serial: kept.serial });
+    expect(stays).toMatchObject({ status: 'in_stock', current: { locationId: shop.locationId } });
     expect(await reconcile(shop.shopId)).toEqual([]);
   });
 });
@@ -528,7 +537,7 @@ describe('allocation rules per channel (D3)', () => {
     await expect(
       h.run(ops.reserveStock, { variantId, quantity: '2', channel: 'web' }),
     ).rejects.toMatchObject({ code: 'insufficient_stock', extra: { available: '1.000000' } });
-    const rules = await h.run(ops.listAllocationRules, {});
+    const rules = await h.run(ops.getStockSettings, {});
     expect(rules.rules).toEqual([
       {
         channel: 'web',
@@ -738,9 +747,7 @@ describe('shortages (D6)', () => {
   it('leaves shortages open when the shop turns filling off', async () => {
     const other = await seedShop(db, sink, 'No fill');
     const oh = harness(db, sink, other);
-    await ownerQuery('update shops set fill_shortages_on_receipt = false where id = $1', [
-      other.shopId,
-    ]);
+    await oh.run(ops.updateStockSettings, { fillShortagesOnReceipt: false });
     const variantId = await createVariant(oh);
     const order = await oh.run(
       ops.reserveStock,
@@ -756,15 +763,22 @@ describe('shortages (D6)', () => {
     expect((await oh.run(ops.listShortages, {})).shortages).toEqual([
       expect.objectContaining({ reservationId: order.reservationId, shortage: '2.000000' }),
     ]);
+    // The sweep respects the setting too; once filling is on again it takes the free stock.
+    expect(await sweepShortages(db)).toBe(0);
+    await oh.run(ops.updateStockSettings, { fillShortagesOnReceipt: true });
+    expect(await sweepShortages(db)).toBeGreaterThanOrEqual(1);
+    expect((await oh.run(ops.listShortages, {})).shortages).toEqual([]);
+    expect((await oh.run(ops.getAvailability, { variantId })).totals).toMatchObject({
+      reserved: '2.000000',
+      available: '3.000000',
+    });
     expect(await reconcile(other.shopId)).toEqual([]);
   });
 
   it('applies the shop’s default reservation expiry, which a caller can override with null', async () => {
     const other = await seedShop(db, sink, 'Expiry default');
     const oh = harness(db, sink, other);
-    await ownerQuery('update shops set reservation_expiry_minutes = 30 where id = $1', [
-      other.shopId,
-    ]);
+    await oh.run(ops.updateStockSettings, { reservationExpiryMinutes: 30 });
     const variantId = await createVariant(oh);
     await oh.run(ops.receiveStock, { variantId, locationId: other.locationId, quantity: '5' });
     const timed = await oh.run(ops.reserveStock, { variantId, quantity: '1' });

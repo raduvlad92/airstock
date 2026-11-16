@@ -1,4 +1,4 @@
--- Milestone I1, follow-up to 0017: costs come back at their stored scale (ADR 0003: "5.000000"),
+-- Milestone I1, follow-up to 0017. Costs come back at their stored scale (ADR 0003: "5.000000"),
 -- not with the extra digits of a division.
 
 create or replace function round_half_even(p_value numeric, p_scale integer) returns numeric
@@ -57,3 +57,16 @@ begin
     (c.quantity + p_delta)::numeric(20, 6);
 end
 $$;
+
+-- Shops with open shortages, for the sweep that fills them from stock a receipt could not reach in
+-- its own transaction (a receipt that created a new position while the order was being reserved).
+create function shops_with_open_shortages(p_limit integer) returns setof uuid
+  language sql stable security definer set search_path = public, pg_temp
+as $$
+  select distinct r.shop_id from reservations r
+  where r.shortage_quantity > 0 and r.status in ('active', 'partially_fulfilled')
+  limit least(p_limit, 500)
+$$;
+
+revoke execute on function shops_with_open_shortages(integer) from public;
+grant execute on function shops_with_open_shortages(integer) to airstock_app;

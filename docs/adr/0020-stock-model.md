@@ -38,7 +38,9 @@
 
 - Per shop and channel (`default`, or a sales channel such as `shopify:<connection>`): an ordered list of warehouses or locations (`allocation_rules`, `allocation_rule_locations`). Without a rule, every fulfillment-eligible location takes part as one group.
 - Positions are chosen by the rule's order, then earliest expiry first for lot-tracked variants, then oldest stock first (`received_at`), then location path and position ID. The chosen positions are the allocations.
-- `reallocate` moves an outstanding allocation to another eligible position, for example when a picker scans a different lot.
+- `reallocate` moves an outstanding allocation to another eligible position, for example when a picker scans a different lot. The old allocation records what `moved`; the new one names its `source_allocation_id`.
+- Positions received in the same transaction tie on `received_at`; their order is then the location path and position ID, not the order the serials were typed in.
+- Units of a lot that expires while reserved stay reserved: the allocation is kept until it is released, reallocated, or fulfilled (a shipment that already left must still be recorded). Expired units never become available again.
 
 ### Lock order
 

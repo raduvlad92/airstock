@@ -16,6 +16,10 @@
 
 `packages/core/test/concurrency.test.ts` (50 callers racing for 10 units, mixed releases and receipts), `idempotency.test.ts` (50 replays, 50 concurrent duplicates), and `property.test.ts` (random sequences with reconciliation after each step).
 
+## Update, 16 November 2026 (Phase 2, milestone I1)
+
+The Phase 2 commands keep this lock order ([ADR 0020](0020-stock-model.md)): receipts (also into lots and serials, filling shortages), reservations of variants and bundles, release, fulfillment, and reallocation lock positions by ID, then reservations by ID (a bundle header with its components, and expired reservations with the ones a command acts on, in one ordered statement), then the variant's cost row and anything else. Stock commands also take a key-share lock on the variant first, which only a change of tracking mode conflicts with. The sweeper runs every 30 minutes, not every minute. `reconcile()` now runs the SQL check the scheduled reconciliation uses (`stock_reconciliation_problems`), which also covers reservations, bundle components, serials, and owned quantities. `stock-concurrency.test.ts` races fulfillment against expiry (A08), lots, serials, bundles, one-of-a-kind receipts, and receipts filling shortages.
+
 ## Revisit when
 
-Transfers and fulfillments arrive in Phase 2: they must follow the same lock order.
+Transfers arrive in milestone I2: dispatch and receipt must follow the same lock order.

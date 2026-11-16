@@ -137,6 +137,11 @@ export interface CandidateSpec {
   exclude?: string[];
   /** Only these positions. */
   only?: string[] | null;
+  /**
+   * Also lock empty positions, so a reservation that may record a shortage waits for a receipt
+   * already in progress there instead of missing its units (D6).
+   */
+  includeEmpty?: boolean;
 }
 
 /**
@@ -149,7 +154,7 @@ export async function lockCandidates(tx: Tx, spec: CandidateSpec, lock = true): 
      from inventory_positions p
      join locations l on l.shop_id = p.shop_id and l.id = p.location_id
      where p.variant_id = any($1::uuid[]) and p.condition = 'sellable' and p.transfer_id is null
-       and p.on_hand > 0 and l.kind = 'storage' and l.status = 'active'
+       and (p.on_hand > 0 or $9) and l.kind = 'storage' and l.status = 'active'
        and location_fulfillment_eligible(l.shop_id, l.path_ids)
        and ($2::uuid is null or l.path_ids @> array[$2::uuid])
        and ($3::uuid[] is null or l.path_ids && $3::uuid[])
@@ -168,6 +173,7 @@ export async function lockCandidates(tx: Tx, spec: CandidateSpec, lock = true): 
       spec.ruleScopes,
       spec.exclude ?? [],
       spec.only ?? null,
+      spec.includeEmpty ?? false,
     ],
   );
   return rows.map((r) => r.id);

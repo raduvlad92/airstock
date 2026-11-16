@@ -3,7 +3,7 @@
     "post": {
       "operationId": "inventory.receipts.create",
       "summary": "Receive stock into a location",
-      "description": "Adds units of a variant to a leaf location in a condition. Also used for opening stock. The quantity is in the variant base unit.",
+      "description": "Use this when units arrive: a delivery, opening stock, or a found item. Adds units of a variant to a leaf location in a condition. The quantity is in base units, or in packs when packId is set (for example 3 cases). Lot-tracked variants need lotCode (and expiresOn for lot_expiry); serial-tracked variants need one serial per unit. A unit cost needs costs.read and updates the moving average. Not for reserving or fulfilling orders (use manage_reservations).",
       "x-permission": "inventory.receive",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "inventory.receipt.created",
@@ -46,7 +46,12 @@
                 "quantity": {
                   "type": "string",
                   "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
-                  "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                  "description": "Base units, or the number of packs when packId is set."
+                },
+                "packId": {
+                  "description": "Receive in one of the variant’s packs, such as a case.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                 },
                 "condition": {
                   "default": "sellable",
@@ -54,16 +59,56 @@
                   "enum": [
                     "sellable",
                     "quarantine",
-                    "damaged"
+                    "damaged",
+                    "repair",
+                    "supplier_return"
                   ]
                 },
-                "unitCost": {
+                "lotCode": {
                   "type": "string",
-                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
-                  "description": "Decimal string, zero or more, at most 14 integer digits and 6 decimal places."
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "description": "A lot or batch code. Codes are unique per variant, ignoring case and extra spaces."
+                },
+                "expiresOn": {
+                  "description": "The lot’s expiry date (YYYY-MM-DD).",
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                "producedOn": {
+                  "description": "The lot’s production date (YYYY-MM-DD).",
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                "serials": {
+                  "description": "Serial-tracked variants: one serial (or certificate number) per unit received.",
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "unitCost": {
+                  "description": "Cost per base unit, or per pack with costPer \"pack\". Needs costs.read.",
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                },
+                "costPer": {
+                  "type": "string",
+                  "enum": [
+                    "base_unit",
+                    "pack"
+                  ]
+                },
+                "supplierId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                 },
                 "reference": {
-                  "description": "Supplier or inbound reference.",
+                  "description": "Supplier or inbound reference, such as a delivery note.",
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200
@@ -95,6 +140,106 @@
                     "type": "string",
                     "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                   },
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "quantity": {
+                    "type": "string",
+                    "description": "Base units received."
+                  },
+                  "entered": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "packId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "packName": {
+                            "type": "string"
+                          },
+                          "packVersion": {
+                            "type": "number"
+                          },
+                          "quantity": {
+                            "type": "string"
+                          },
+                          "factor": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "packId",
+                          "packName",
+                          "packVersion",
+                          "quantity",
+                          "factor"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lot": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "lotId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "code": {
+                            "type": "string"
+                          },
+                          "expiresOn": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "lotId",
+                          "code",
+                          "expiresOn"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "serials": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "serialId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "serial": {
+                          "type": "string"
+                        },
+                        "positionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": [
+                        "serialId",
+                        "serial",
+                        "positionId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
                   "position": {
                     "type": "object",
                     "properties": {
@@ -115,7 +260,31 @@
                         "enum": [
                           "sellable",
                           "quarantine",
-                          "damaged"
+                          "damaged",
+                          "repair",
+                          "supplier_return"
+                        ]
+                      },
+                      "lotId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "serialId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
                         ]
                       },
                       "onHand": {
@@ -130,15 +299,133 @@
                       "variantId",
                       "locationId",
                       "condition",
+                      "lotId",
+                      "serialId",
                       "onHand",
                       "allocated"
                     ],
                     "additionalProperties": false
+                  },
+                  "positions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "positionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "condition": {
+                          "type": "string",
+                          "enum": [
+                            "sellable",
+                            "quarantine",
+                            "damaged",
+                            "repair",
+                            "supplier_return"
+                          ]
+                        },
+                        "lotId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serialId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "onHand": {
+                          "type": "string"
+                        },
+                        "allocated": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "positionId",
+                        "variantId",
+                        "locationId",
+                        "condition",
+                        "lotId",
+                        "serialId",
+                        "onHand",
+                        "allocated"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "shortagesFilled": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "unitCost": {
+                    "description": "The cost per base unit recorded; needs costs.read.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "averageCost": {
+                    "description": "The moving average after the receipt.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
                   "operationId",
-                  "position"
+                  "variantId",
+                  "quantity",
+                  "entered",
+                  "lot",
+                  "serials",
+                  "position",
+                  "positions",
+                  "shortagesFilled",
+                  "costVisible",
+                  "unitCost",
+                  "averageCost"
                 ],
                 "additionalProperties": false
               }

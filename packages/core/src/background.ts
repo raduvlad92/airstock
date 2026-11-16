@@ -3,7 +3,8 @@ import { systemCaller } from './accounts.ts';
 import { type AuditEvent, auditEvent, INSERT_AUDIT_EVENTS_SQL } from './audit.ts';
 import { uuidv7 } from './ids.ts';
 import type { HandlerContext } from './registry.ts';
-import { expireClaimsAt } from './stock/engine.ts';
+import { expireClaimsAt, lockCandidates } from './stock/engine.ts';
+import { fillShortages } from './stock/shortages.ts';
 
 /** Writes one queue batch of audit events. Duplicates from redelivery are ignored (A27). */
 export async function ingestAuditEvents(db: Database, events: AuditEvent[]): Promise<number> {
@@ -133,6 +134,82 @@ export async function sweepExpiredReservations(db: Database, maxShops = 50): Pro
     });
   }
   return expired;
+}
+
+/**
+ * Fills open shortages from available stock, shop by shop (D6). Receipts fill shortages in their
+ * own transaction; this catches the one case they cannot see: an order reserved while a receipt
+ * was creating a new position. It respects each shop's setting and allocation rules.
+ */
+export async function sweepShortages(db: Database, maxShops = 50): Promise<number> {
+  const shops = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
+    tx.query<{ shop_id: string }>('select s as shop_id from shops_with_open_shortages($1) s', [
+      maxShops,
+    ]),
+  );
+  let filled = 0;
+  for (const { shop_id: shopId } of shops) {
+    const caller = systemCaller('shortage-fill', shopId);
+    const requestId = uuidv7();
+    filled += await db.transaction({ shopId, userId: null }, async (tx) => {
+      const variants = await tx.query<{ variant_id: string }>(
+        `select distinct variant_id from reservations
+         where shortage_quantity > 0 and status in ('active', 'partially_fulfilled')
+         order by variant_id limit 50`,
+      );
+      const base = { shopId, caller, requestId, attemptId: null, idempotencyKey: null };
+      const ctx: HandlerContext = {
+        tx,
+        shopId,
+        caller,
+        membership: null,
+        requestId,
+        attemptId: null,
+        locationScope: null,
+        newId: () => uuidv7(),
+        event: (fields) => auditEvent(base, { phase: 'outcome', ...fields }),
+      };
+      const events: AuditEvent[] = [];
+      const touched: string[] = [];
+      for (const { variant_id: variantId } of variants) {
+        const positions = await lockCandidates(tx, {
+          variantIds: [variantId],
+          ruleScopes: null,
+          scope: null,
+        });
+        const { fills, events: expired } = await fillShortages(ctx, variantId, positions);
+        events.push(...expired);
+        for (const f of fills) {
+          touched.push(...f.allocations.map((a) => a.positionId));
+          events.push(
+            ctx.event({
+              action: 'inventory.shortage.filled',
+              outcome: 'succeeded',
+              actor_type: 'system',
+              actor_id: 'shortage-fill',
+              target_type: 'reservation',
+              target_id: f.reservationId,
+              changes: { quantity: f.quantity, allocations: f.allocations },
+              context: { trigger: 'sweeper', parentReservationId: f.parentReservationId },
+            }),
+          );
+        }
+      }
+      if (events.length > 0) {
+        await tx.query(INSERT_AUDIT_EVENTS_SQL, [JSON.stringify(events)]);
+      }
+      if (touched.length > 0) {
+        await tx.query(
+          `insert into outbox_events (shop_id, id, topic, payload)
+           select app_shop_id(), $1, 'inventory.availability_changed',
+             jsonb_build_object('reason', 'shortage_fill', 'positionIds', $2::uuid[])`,
+          [uuidv7(), [...new Set(touched)]],
+        );
+      }
+      return events.filter((e) => e.action === 'inventory.shortage.filled').length;
+    });
+  }
+  return filled;
 }
 
 /**

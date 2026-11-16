@@ -1541,8 +1541,23 @@ async function receiveOpeningStock(
       )
     ).map((l) => l.id),
   );
+  // Only plain variants take opening stock: lots, serials, bundles, and one-of-a-kind items go
+  // through receipts (the preview says so). The key-share lock holds off a tracking change.
+  const plain = new Set(
+    (
+      await tx.query<{ id: string }>(
+        `select v.id from variants v
+         where v.id = any($1::uuid[]) and v.status = 'active' and v.tracking_mode = 'none'
+           and not v.one_of_a_kind
+           and not exists (select 1 from bundles b where b.shop_id = v.shop_id and b.variant_id = v.id and b.active)
+         order by v.id
+         for key share`,
+        [[...new Set(receipts.map((r) => r.variant_id))]],
+      )
+    ).map((v) => v.id),
+  );
   const input = receipts
-    .filter((r) => usable.has(r.location_id))
+    .filter((r) => usable.has(r.location_id) && plain.has(r.variant_id))
     .sort((a, b) => (a.variant_id + a.location_id < b.variant_id + b.location_id ? -1 : 1))
     .map((r) => ({
       ...r,

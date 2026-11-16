@@ -79,7 +79,9 @@ export function htmlToText(html: string | null): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(\d{1,7});/g, (_, n: string) => codePoint(Number(n)))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, n: string) => codePoint(Number.parseInt(n, 16)))
     .replace(/&amp;/g, '&')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
@@ -135,7 +137,31 @@ export async function airstockValues(
 }
 
 /** Whether two values of a field are the same. */
+/** A numeric character reference's character; an invalid one stays as written. */
+function codePoint(n: number): string {
+  return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : `&#${n};`;
+}
+
+/**
+ * A description as compared: Shopify stores the HTML Airstock sends in its own form (line breaks
+ * between blocks, entities, non-breaking spaces), so the text read back can differ from
+ * Airstock's in whitespace only. Such differences are not differences.
+ */
+export function comparableText(text: string): string {
+  return text
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function sameValue(field: ListingField, a: unknown, b: unknown): boolean {
+  if (field === 'description' && typeof a === 'string' && typeof b === 'string') {
+    return comparableText(a) === comparableText(b);
+  }
   if (field === 'prices') {
     const x = (a ?? {}) as Record<string, string>;
     const y = (b ?? {}) as Record<string, string>;

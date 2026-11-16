@@ -583,7 +583,7 @@ describe('F-SCOPE-COUNT-POSITIONS: a positions-based count escapes location scop
 // order destined for warehouse A, which ADR 0027 forbids, and the response returns the full order.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-PO-RECEIVE: a scoped member can receive an order for another warehouse', () => {
-  it.fails('refuses a receipt by a member whose scope does not cover the order’s destination', async () => {
+  it('refuses a receipt by a member whose scope does not cover the order’s destination', async () => {
     const supplier = await h.run(ops.createSupplier, { name: `Sup ${uuidv7().slice(-6)}` });
     const variantId = await createVariant(h);
     const po = await h.run(ops.draftPurchaseOrder, {
@@ -662,7 +662,7 @@ describe('F-REALLOCATE-IGNORES-LIMITS: reallocation leaves the reservation’s o
 // case to 12, receive the 10 cases that arrived: 120 units are recorded and 120 stay on order.
 // ---------------------------------------------------------------------------------------------
 describe('F-PO-PACK-RESIZED: a PO receipt in packs uses the pack’s current size', () => {
-  it.fails('records 240 units for 10 cases ordered at 24 per case', async () => {
+  it('records 240 units for 10 cases ordered at 24 per case', async () => {
     const supplier = await h.run(ops.createSupplier, { name: `Sup ${uuidv7().slice(-6)}` });
     const variantId = await createVariant(h);
     const packs = await h.run(ops.setPacks, {

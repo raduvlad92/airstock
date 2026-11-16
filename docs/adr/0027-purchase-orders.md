@@ -18,6 +18,13 @@
 - **Permissions.** `purchasing.manage` (owners and managers) drafts, changes, sends, closes, and cancels; reading orders needs `inventory.read`; receiving needs `inventory.receive`, so inventory operators receive deliveries. Over the API and MCP, commands need `inventory:write`. Orders are visible and changeable only when the caller's location scope covers the destination warehouse or the order's receiving location.
 - **MCP.** `manage_purchasing` with `action` (list, get, draft, update, send, receive, close, cancel); the PDF itself is not an MCP result, the send emails it.
 
+## Update, 16 November 2026: receipts after the inventory review
+
+- **Packs convert at the size ordered.** A receipt in packs converts with the line's stored `pack_factor` (and records the line's `pack_version`), not the pack's current size. The supplier ships what was ordered: ten cases ordered at 24 are 240 units even if the case was resized to 12 afterwards. Refusing a receipt by pack once the pack's version changed was the alternative; it was rejected because it blocks the person at the dock with goods in hand, and the stored factor is exactly what the order meant. `inBaseUnits` still receives base units.
+- **Receiving checks the destination.** `purchasing.orders.receive` checks the order's destination against the caller's location scope (`forbidden`, like reading or changing the order), and refuses a receiving location outside the order's warehouse (`location_not_in_warehouse`). Before, only the receiving location was checked, so a member limited to warehouse B could receive an order for warehouse A into B.
+- **Archiving does not strand a sent order.** A receipt against an order already sent goes through when its supplier was archived since (archiving stops new work only) or its pack was archived (the line's stored size is used). A variant still on order from a sent or partially received order cannot be archived (`open_purchase_orders`); receive or close the order first. Before, each of these made the order impossible to receive.
+- **Low stock after unsellable receipts.** A PO receipt always runs the low-stock check for its variant: on order goes down even when the units arrive quarantined or damaged and availability does not change, so available plus on order can fall to the reorder point (PRD 6.9).
+
 ## Consequences
 
 - The Worker bundle grows by pdf-lib and fontkit (about 4.8 MB uncompressed, 1.2 MB gzipped in total), under the Workers size limit. Noto Sans SC (10.5 MB) is read only for an order that needs CJK.

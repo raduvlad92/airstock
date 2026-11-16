@@ -3,7 +3,7 @@
     "post": {
       "operationId": "catalog.variants.archive",
       "summary": "Archive a variant",
-      "description": "Hides one variant. The last active variant cannot be archived (archive the product). A variant with open reservations cannot be archived.",
+      "description": "Hides one variant. The last active variant cannot be archived (archive the product). A variant with open reservations, or still on order from a sent purchase order, cannot be archived.",
       "x-permission": "catalog.write",
       "x-connection-scope": "catalog:write",
       "x-audit-action": "catalog.variant.archived",

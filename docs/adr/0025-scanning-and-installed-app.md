@@ -1,4 +1,4 @@
-# 0023. Scanning and the installed app
+# 0025. Scanning and the installed app
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D13 and Section 5.12 (milestone I4).
 

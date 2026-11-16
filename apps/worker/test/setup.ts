@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { type Caller, execute, ops, uuidv7 } from '@airstock/core';
 import type { Database } from '@airstock/db';
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWTVerifyGetKey, SignJWT } from 'jose';
@@ -100,6 +101,7 @@ export interface TestOptions {
   runJobNow?: AppDeps['runJobNow'];
   rateLimiter?: AppDeps['rateLimiter'];
   webhookSecrets?: AppDeps['webhookSecrets'];
+  fonts?: AppDeps['fonts'];
 }
 
 export interface TestApp {
@@ -111,6 +113,10 @@ export interface TestApp {
   sign(claims: Record<string, unknown>): Promise<string>;
   close(): Promise<void>;
 }
+
+/** The PDF fonts from the Worker's static assets on disk, as the ASSETS binding serves them. */
+const diskFonts = async (file: string) =>
+  new Uint8Array(await readFile(new URL(`../public/assets/fonts/${file}`, import.meta.url)));
 
 export async function testApp(options: TestOptions = {}): Promise<TestApp> {
   const db = appDatabase();
@@ -181,6 +187,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     runJobNow: options.runJobNow,
     rateLimiter: options.rateLimiter,
     webhookSecrets: options.webhookSecrets ?? null,
+    fonts: options.fonts ?? diskFonts,
     logger: { error: () => {} },
   });
   return {

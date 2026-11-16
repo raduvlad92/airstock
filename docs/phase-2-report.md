@@ -26,7 +26,7 @@ Two independent reviews, of the inventory engine and of the Shopify connector, c
   - G5: no quantity can be typed into the grid as a count;
   - G6: the lot trace has no export;
   - G17: purchasing and picking commands have no fault-injection tests;
-  - G18: two load cases were over target, one is fixed, the other has a fix in review (PR #92); Shopify latencies and Neon compute were not measured.
+  - G18: two load cases were over target and both are fixed (PRs #89, #92), except 10 simultaneous readers of the inventory list on the 20,000-variant shop, which is limited by the database size; Shopify latencies and Neon compute were not measured.
 - **Waiting for the owner's run (4):** G11 iPhone, G14 n8n, G15 Shopify development stores and the rehearsal, G16 ChatGPT.
 
 **Left before the pilot:**
@@ -36,7 +36,7 @@ Two independent reviews, of the inventory engine and of the Shopify connector, c
    - reconnecting both Shopify development stores, then the rehearsal with the owner's product export;
    - the ChatGPT run of the Phase 2 prompts;
    - the production decision ([Section 2.2](phase-2-status.md#22-production-decision-i7)).
-2. **The build's own gaps:** the G5, G6, and G17 items above, merging PR #92, and a real-browser run of every flow on staging (Section 8).
+2. **The build's own gaps:** the G5, G6, and G17 items above, and a real-browser run of every flow on staging (Section 8).
 3. **I8 go-live:** production as decided, a restore test (A22), then onboarding the owner's store.
 
 ### 1.1 What was built
@@ -51,7 +51,7 @@ Two independent reviews, of the inventory engine and of the Shopify connector, c
 | I5 Webhooks, activity, reports | #47, #52, #71 | Signed webhooks with subscriptions, retries, a log, and replay; activity views with the PRD 7.4 filters on a shop-first audit key; the eight reports, saved reports, CSV export, and `run_report` (ADRs 0023, 0032, 0034). |
 | I6 Shopify connector | #67, #70, #74, #76, #79 | Mapping and onboarding; the order lifecycle; batched compare-and-set push and the reconciler; sync health and `shopify_sync`; listings in both directions with per-field ownership (ADRs 0033, 0035–0038). |
 | I7 MVP gate | #73, #77, #78, #82, #90, #91 | The two reviews and their fixes (Section 5). |
-| | #80, #86, #89; #92 open | The volume run and its fixes: idempotency retention, the staging connection limit, the inventory list, and the reservation contention (in review). |
+| | #80, #86, #89, #92 | The volume run and its fixes: idempotency retention, the staging connection limit, the inventory list, and the reservation contention. |
 | | #83, #87 | The CI deploy fix and the test-stability work (Section 6). |
 | Across milestones | #66 | MCP server instructions that route by task (D16). |
 
@@ -78,7 +78,7 @@ Two independent reviews, of the inventory engine and of the Shopify connector, c
 | G15 | Shopify: onboarding from a store (the owner's export, rehearsed on a development store), mapping with packs and bundles, the full order flow, shortages, the reconciler, listings both ways with field ownership, sync health in the dashboard and MCP | Waiting for the owner's run | Against the fake store in `apps/worker/test/shopify-*.test.ts`: onboarding "reads with a bulk operation, previews matches, commits, maps, receives, and references pictures"; A28 "3 cases of 24, then Shopify sells 5 singles and a 6-pack: 61 left, the 6-pack shows 10"; A29, A30, A36, A41; edits, cancellations, fulfillments and their cancellation, refunds into returns, Shopify returns; the four listing cases; sync health. Review findings F1–F12 and L1–L2 are fixed (PRs #90, #91). **Not yet run on the development stores with the new scopes, and no rehearsal.** Sync health is not tested through an MCP client. |
 | G16 | Parity holds; ChatGPT picks the right tool and action for the Phase 2 prompts, inside its grant | Waiting for the owner's run | `pnpm parity`: 201 operations, 22 MCP tools. A23 in `registry.test.ts`; the tool list in `apps/worker/test/mcp-tools.test.ts`. The 14 prompts are in `docs/chatgpt-runs/phase-2.json`; no run is recorded. |
 | G17 | The failure contract holds for every new command: a rollback leaves no stock effect; a lost acknowledgement leaves a durable attempt and no duplicate | Partly | A11, A12, A26, and 50 replays (A05) for every case in `stock-failures.test.ts` (6 commands), `transfer-failures.test.ts` (7), `return-failures.test.ts` (4), and `count-failures.test.ts` (7), plus the pipeline in `failures.test.ts`. **Missing:** no such suite for purchasing (including the PO receipt replay A05 names), picking, alerts, or the stock-check repair. They run through the same pipeline, but no test proves it for them. |
-| G18 | The volume run on the persona shops meets its targets; the cost per shop is updated | Partly | Section 3 and Section 4. Stock commands, availability, activity search, reports, and webhooks met their targets. The inventory list is within target for one reader, but not for 10 readers on the 20,000-variant shop. Ten reservations of one variant were over target; the fix (PR #92) is in review. Shopify latencies and Neon compute with the new crons were not measured. |
+| G18 | The volume run on the persona shops meets its targets; the cost per shop is updated | Partly | Section 3 and Section 4. Stock commands, availability, activity search, reports, and webhooks met their targets. The inventory list is within target for one reader, but not for 10 readers on the 20,000-variant shop. Ten reservations of one variant were over target; the per-variant lock (PR #92) brought the bench server p95 from 1,045 to 427 ms. Shopify latencies and Neon compute with the new crons were not measured. |
 
 ## 3. Measurements
 
@@ -87,7 +87,7 @@ All from the [measurements doc](phase-2-measurements.md): the `airstock-bench` N
 | Measurement (plan Section 8) | Target | Result | Status |
 | --- | --- | --- | --- |
 | Stock commands with 10 concurrent callers | p95 under 500 ms | Bench, 10 callers: 13–31 statements, 2–8 ms of database time, 81–193 ms estimated in the Worker. Staging, one caller at a time: server p95 235 ms (receive) to 335 ms (count submit). | Met. Staging was not run with 10 callers after its out-of-memory restart (Section 6). |
-| Reservation with earliest expiry, 200 lots | p95 under 500 ms | One caller: staging p95 349 ms. Ten callers on that variant: staging p95 851 ms (1 unit) and 1,062 ms (12 units). PR #92: bench server p95 1,045 → 427 ms; locally with 6 ms per statement, p95 328–337 ms. | One caller met. Ten callers over target until #92 merges; staging not re-run. |
+| Reservation with earliest expiry, 200 lots | p95 under 500 ms | One caller: staging p95 349 ms. Ten callers on that variant: staging p95 851 ms (1 unit) and 1,062 ms (12 units). PR #92: bench server p95 1,045 → 427 ms; locally with 6 ms per statement, p95 328–337 ms. | Met on the bench after #92 (merged); the 10-caller staging run is to be repeated. |
 | Availability for one variant | p95 under 200 ms | Staging p95 164 ms, of which 87 ms is the audit-queue send. Bench estimate 37–49 ms. | Met |
 | Inventory list, 50 rows, lot and condition columns | p95 under 1 s | After PR #89, one caller: 10–177 ms of database time; the 20,000-variant shop's server p95 is 196 ms (was 1.4 s). Ten callers: under 0.3 s in five shops; 1.9 s p95 in the 20,000-variant shop while the compute scales up, and 1.04 s server p95 held at 2 CU. | Met for one caller; over for 10 callers on the largest shop |
 | Activity search, 1 million events, two filters | p95 under 1 s | Warm server p95 9.3 ms. Cold (compute just woken) server p95 534 ms, client p95 685 ms. 2 of 90 cold searches took over 1 s (1.3 s and 5.3 s). | Met |
@@ -208,7 +208,7 @@ The PRD is not edited here. The owner applies these, as with P16–P23 after Pha
 - the production decision.
 
 **Build work before the pilot:**
-- **Merge PR #92**, the per-variant lock for reservations of one variant (release-day orders). Then run the 10-caller staging phases again on the new Hyperdrive limit.
+- **Run the 10-caller staging phases again** with the per-variant reservation lock (PR #92, merged) and the new Hyperdrive limit.
 - **G5:** a stock quantity typed in the catalog grid, as a one-line count, with its test.
 - **G6:** an export of the lot trace (or a lot filter on the movements report, which already exports).
 - **G17:** fault-injection and replay suites for purchasing (including the PO receipt replay), picking, alerts, and the stock-check repair.

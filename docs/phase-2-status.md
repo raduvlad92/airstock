@@ -1,7 +1,7 @@
 # Phase 2 status
 
 **Updated:** 16 November 2026  
-**Plan:** [Phase 2 build plan](phase-2-build-plan.md)
+**Plan:** [Phase 2 build plan](phase-2-build-plan.md) · **Report:** [Phase 2 report](phase-2-report.md)
 
 Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Every merge to `main` migrates and deploys it. Large seeds and timings run in the separate bench project (Section 4), never on staging.
 
@@ -16,7 +16,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I4 Scanning and picking | Done | The scanner at `/app/scan` and the installed app (PR #54, [ADR 0025](adr/0025-scanning-and-installed-app.md)); look up, receive, and unknown codes (PR #58); pick lists on the phone and as PDF (PR #60, [ADR 0026](adr/0026-picking.md)). Count, move, receive against a PO, quick add with pictures, and short pick to count (PR #69, ADR 0025 update). |
 | I5 Webhooks, activity, reports | Done for January | Webhooks (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views with the PRD 7.4 filters, location-scoped history, lifecycle, ingestion delay, and export; a shop-first audit key with no default partition, so a two-filter search over 1 million events is 9 ms p95 warm and 534 ms cold (PR #52, [ADR 0032](adr/0032-activity-views.md), [measurements](phase-2-measurements.md)). The eight standard reports with filters, saved reports, CSV export, and `run_report` (PR #71, [ADR 0034](adr/0034-reports.md)). Scheduled report emails come after January. |
 | I6 Shopify connector | Done | Mapping and onboarding (PR #67, [ADR 0033](adr/0033-shopify-mapping-and-onboarding.md)); the order flow with shortages, edits, cancellations, fulfillments, and refunds into returns (PR #70, [ADR 0035](adr/0035-shopify-order-lifecycle.md)); batched compare-and-set push and the reconciler (PR #74, [ADR 0036](adr/0036-shopify-push-and-reconciler.md)); sync health and `shopify_sync` (PR #76, [ADR 0037](adr/0037-shopify-sync-health.md)); listings in both directions with per-field ownership (PR #79, [ADR 0038](adr/0038-shopify-listings.md)). The staging app's configuration is in `config/shopify/shopify.app.staging.toml`. An independent review of the connector is in progress. |
-| I7 MVP gate | In progress | **Correctness review done:** an independent review of the inventory engine confirmed 21 defects (8 high: for example a serial on hand in two places, a pick list shipping bundle parts nobody picked, counts escaping location scope and the one-of-a-kind limit, PO receipts converting with a resized pack). Each has a test (PR #73); all are fixed (PRs #77, #78), plus 13 suspected issues the fixers proved and fixed, including three deadlocks. The volume run on the persona shops is in progress. The ChatGPT run and the owner's checks follow when I6 lands. |
+| I7 MVP gate | Report drafted | The two reviews and their fixes, the volume run and its fixes, the flaky-test work, and the CI deploy fix are done ([report](phase-2-report.md)). Left: the owner's checks (Section 2), the ChatGPT run, three small build gaps (G5 grid counts, G6 lot-trace export, G17 fault tests), and the production decision (Section 2.2). |
 | I8 Pilot go-live | Not started | |
 | I9 After January | Not started | |
 

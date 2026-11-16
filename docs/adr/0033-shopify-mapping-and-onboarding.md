@@ -30,3 +30,11 @@
 ## Revisit when
 
 A merchant needs one Airstock location shown at two Shopify locations, onboarding must import orders open at install, pictures must be edited in Airstock (then copy them), or Shopify changes the bulk operation format.
+
+## Update, 16 November 2026: orders during the preview (PR #90)
+
+Opening stock is Shopify's `available` at the catalog read, but variants were mapped only after a person committed the preview. An order placed in between (the preview can wait hours) was recorded as unmapped for good, and the first push wrote the opening stock over Shopify's lower number: the sold units were sold twice.
+
+Maps made by the onboarding now carry `orders_from`, the onboarding's start (the read starts with it). A line recorded as unmapped of an order created since then is applied as if first seen once its variant is mapped: held, or, if Shopify already shipped it, taken out of stock (the fulfillments recorded meanwhile are applied to it). The finish step queues each such order as an order job and runs it right away; the job runner retries one that fails. The first push still processes orders and then reads Shopify (ADR 0008), and the line's record is dated at the order's creation, older than that read, so nothing is counted twice. Orders placed before the read stay Shopify's, as above; other maps (manual, by SKU, listings) have no `orders_from`. Evidence: F8 in `apps/worker/test/shopify-review-findings.test.ts` and the onboarding test in `apps/worker/test/shopify-order-sync-fixes.test.ts`.
+
+A store installed again in the same shop keeps its maps: the new connection takes them over with its orders (ADR 0035).

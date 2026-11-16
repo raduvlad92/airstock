@@ -41,3 +41,11 @@ The connector review ([#82](https://github.com/raduvlad92/airstock/pull/82)) fou
 - **Mapping again** (`shopify.mappings.set`) no longer resets every level's record and conflict; only levels whose map changed (the location's scope, the variant's target, or its item) are read from Shopify again. A conflict stays until someone chooses a side, as decided above.
 
 Revisit also if Shopify shortens how long it keeps idempotency keys, or if refused pushes on busy stores read many changed orders (step 2).
+
+## Update, 16 November 2026: the order pass never stalls (PR #90)
+
+- **One order does not stop a store.** An order the sync cannot apply no longer throws out of the run before the cursor moves. It is queued as an order job (once while one waits; the job runner's backoff and the cron sweep retry it), the run goes on, and the connection's last error names it in sync health until a clean run. The push's catch-up skips such an order the same way.
+- **Shopify's page cursor.** A run that stops early (250 orders or its budget) keeps the search's start and Shopify's page cursor (`orders_page_since`, `orders_page_after`); the next run continues that search instead of starting 5 minutes before the last order read, which re-read the same orders forever when more than one run's worth were updated within 5 minutes (a bulk fulfillment, the backlog after an outage). A run that reaches the last page clears the cursor and moves `orders_synced_through` as before; a cursor Shopify refuses restarts from the time cursor.
+- **Locations.** The daily run reads the store's locations again, so one added in Shopify is shown as unmapped and its orders' lines are read, not guessed (ADR 0035).
+
+Evidence: F2 and F11 in `apps/worker/test/shopify-review-findings.test.ts`, and `apps/worker/test/shopify-order-sync-fixes.test.ts`.

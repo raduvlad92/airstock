@@ -756,7 +756,7 @@ function purchasing(c: Ctx): Built {
     join warehouses w on w.shop_id = o.shop_id and w.id = o.warehouse_id
     left join locations ol on ol.shop_id = o.shop_id and ol.id = o.location_id
     where ${conds.join(' and ')})`;
-  const overdueOnly = c.f.overdueOnly ? 'where x.overdue' : '';
+  const overdueOnly = c.f.overdueOnly ? 'where pl.overdue' : '';
   const head = `${variantCte(c, { supplierItems: false })}, ${pl},
     x as (select pl.*, pl.open * pl.unit_cost as open_value,
       case when pl.overdue then ${today} - pl.expected_on else 0 end as days_overdue

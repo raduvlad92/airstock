@@ -71,3 +71,13 @@ export async function decodeGrey(image: {
   );
   return found.filter((f) => f.isValid).map((f) => ({ format: f.format, text: f.text }));
 }
+
+/** Decodes an RGBA frame with the scanner's own options (apps/web/src/scan/formats.ts). */
+export async function decodeFrame(
+  frame: { data: Uint8ClampedArray; width: number; height: number },
+  options: Record<string, unknown>,
+): Promise<Array<{ format: string; text: string }>> {
+  const zxing = await load();
+  const found = await zxing.readBarcodes({ ...frame, colorSpace: 'srgb' }, options);
+  return found.filter((f) => f.isValid).map((f) => ({ format: f.format, text: f.text }));
+}

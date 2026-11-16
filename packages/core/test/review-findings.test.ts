@@ -445,3 +445,35 @@ describe('F-PICK-COMPLETE-WHOLE-BUNDLE: completing a list ships bundle component
     expect(view.totals.onHand).toBe('1.000000');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-COST-RESET-ON-MOVE (valuation). stock/adjust.ts applies all of a variant's units out first and
+// then its units in, as separate apply_stock_cost calls. When the outs take the owned quantity to
+// zero, the ins are costed as "no stock": the default cost replaces the moving average, although no
+// unit entered or left the shop. ADR 0022 allows the default cost only while there is no stock.
+// ---------------------------------------------------------------------------------------------
+describe('F-COST-RESET-ON-MOVE: a count that moves all units to another shelf resets the average', () => {
+  it.fails('keeps the moving average when a count finds the same five units on another shelf', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, defaultCost: '4' });
+    await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '5',
+      unitCost: '10',
+    });
+    const shelf = await createLeafLocation(h, shop.warehouseId, `Shelf ${uuidv7().slice(-4)}`);
+    await h.run(ops.quickCount, {
+      locationId: shop.locationId,
+      counts: [
+        { variantId, counted: '0' },
+        { variantId, locationId: shelf, counted: '5' },
+      ],
+    });
+    const view = await h.run(ops.getAvailability, { variantId });
+    expect({ owned: view.totals.ownedTotal, average: view.cost.averageCost }).toEqual({
+      owned: '5.000000',
+      average: '10.000000',
+    });
+  });
+});

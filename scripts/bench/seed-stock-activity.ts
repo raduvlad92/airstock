@@ -605,11 +605,12 @@ const shopRows = await q<{ id: string; name: string; timezone: string; currency:
 const now = Date.now() - 2 * 3_600_000;
 
 for (const shopRow of shopRows) {
-  const profile = PROFILES[shopRow.name];
-  if (!profile) {
+  const found = PROFILES[shopRow.name];
+  if (!found) {
     console.log(`${shopRow.name}: no profile, skipped`);
     continue;
   }
+  const profile: Profile = found;
   rand = rng(`${args.seed}:${shopRow.name}`);
   const t0 = Date.now();
   const s = new Shop(shopRow.id, shopRow.name, profile);

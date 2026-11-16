@@ -14,10 +14,12 @@ import {
   type AuditEvent,
   dispatchOutbox,
   ensureUser,
+  handleWebhookOutbox,
   ingestAuditEvents,
   runExportJob,
   runImportJob,
   uuidv7,
+  WebhookSecretCipher,
 } from '@airstock/core';
 import { PgDatabase, poolSource } from '@airstock/db';
 import { bootstrap, migrate } from '@airstock/db/migrate';
@@ -106,6 +108,26 @@ const files = {
   },
 };
 const jobDeps = { db, audit, files: { get: files.get, put: files.put, delete: files.delete } };
+// Webhooks: deliveries go to an in-memory endpoint that answers 200 (GET /__e2e/webhooks lists
+// what it received), so a test can create a webhook and send a test without the internet.
+const webhookCipher = await WebhookSecretCipher.fromBase64(
+  'e2e',
+  Buffer.alloc(32, 7).toString('base64'),
+);
+const webhookRequests: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+const webhookDeps = {
+  db,
+  cipher: webhookCipher,
+  fetch: async (url: string, init: RequestInit) => {
+    webhookRequests.push({
+      url,
+      headers: init.headers as Record<string, string>,
+      body: String(init.body),
+    });
+    return new Response('ok', { status: 200 });
+  },
+  schedule: async () => {},
+};
 const app = createApp({
   database: () => ({ transaction: (ctx, fn) => db.transaction(ctx, fn), close: async () => {} }),
   audit,
@@ -119,8 +141,10 @@ const app = createApp({
         }
         if (m.topic === 'catalog.export.run' && payload.exportId)
           await runExportJob(jobDeps, m.shopId, payload.exportId);
+        await handleWebhookOutbox(webhookDeps, m);
       }
     }),
+  webhookSecrets: webhookCipher,
   mcp: null,
   web: {
     publicUrl: ORIGIN,
@@ -166,6 +190,11 @@ const server = createServer(async (req, res) => {
     if (file.startsWith(PUBLIC_DIR) && existsSync(file) && statSync(file).isFile()) {
       res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
       createReadStream(file).pipe(res);
+      return;
+    }
+    if (url.pathname === '/__e2e/webhooks') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(webhookRequests));
       return;
     }
     if (url.pathname === '/__e2e/login') {

@@ -1,0 +1,30 @@
+# 0020. Outgoing webhooks
+
+**Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D14 and Section 5.13 (milestone I5).
+
+**Summary:** Event types from a registry in code; per-shop subscriptions with encrypted, rotatable secrets; events written to the outbox with the change and fanned out per subscription at dispatch; signed POSTs with retries through the jobs queue; REST only
+
+## Decision
+
+- **Registry, nothing hard-coded (owner, 16 Nov).** `packages/core/src/webhooks/events.ts` lists every event type: ID, description, the permission its fields need, the filters that apply, a Zod schema and sample for `data`, and a builder. The API lists it, the dashboard renders its checklist from that list, and `docs/webhooks.md`'s catalog is generated from it (a test fails when stale). Four types are available now (`stock.changed`, `catalog.item.changed`, `job.completed`, `webhook.test`); the seven planned for I1–I6 are registered as `coming`, listed by the API, hidden in the dashboard, and refused when subscribing. `docs/webhooks.md` says how a milestone adds one.
+- **Emitting.** Events reach the outbox in the same transaction as the change (A11). A command returns `webhooks: [webhookEvent(type, input)]`; jobs call `insertWebhookEvents(tx, …)`. Either way the row is written only when the shop has an active subscription to that type, in the same statement as the success event, so a shop without webhooks pays one index probe. `catalog.item.changed` is derived by the pipeline from a catalog command's committed product and variant events, so no catalog command changed. `stock.changed` is read from the existing `inventory.availability_changed` outbox row at dispatch, so stock commands write nothing extra. `job.completed` is written where imports and exports finish.
+- **Snapshots at dispatch.** Commands emit references; the type's builder reads the snapshot when the event is sent (positions with SKU, location, on hand, reserved, available, version). Snapshots carry versions, so a consumer can drop an older update that arrives late. Order of arrival is not guaranteed.
+- **Fan-out and delivery.** The dispatcher stores the event once (`webhook_events`; its ID is the outbox row's ID) and one `webhook_deliveries` row per active subscription whose types and filters match; a redelivered outbox message fans out once. Deliveries are POSTed right after the request's own outbox run (the Phase 1 pattern). A failure is retried through the jobs queue with `delaySeconds` after 1 minute, 5 minutes, 30 minutes, 2 hours, 6 hours, 12 hours, and 24 hours, then marked failed. The queue delays at most 12 hours, so a longer wait arrives early and is queued again for the rest. A lease stops two senders from sending one delivery at once; the 30-minute cron requeues deliveries whose message was lost or whose sender stopped.
+- **Same event ID everywhere (A19).** Retries and replays send the same envelope `id` (also `Airstock-Event-Id`); a replay is a new delivery row (`replay_of`) with its own retries. Consumers deduplicate by the ID.
+- **Signing.** `Airstock-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, keyed with the whole secret. During a rotation each delivery carries one `v1` per active secret for the chosen overlap (0 to 168 hours, 24 by default). Consumers check a 5-minute timestamp tolerance.
+- **Secrets.** Generated (`whsec_` and 32 random bytes), returned once by create and rotate, stored AES-256-GCM encrypted with the Worker secret `WEBHOOK_SECRET_KEY`, with associated data naming the shop and subscription, as for Shopify tokens (ADR 0008). Create and rotate take no idempotency key, so the secret is never stored in an idempotency record; history records only that a secret was rotated, and URLs appear in history with their path masked after the first segment.
+- **Safety.** HTTPS only, no credentials before the host, no IP literal in private, loopback, link-local, shared, documentation, multicast, or reserved ranges (IPv4 and IPv6, including IPv4-mapped), no internal host names. Checked on save and before every attempt. Redirects are not followed, requests time out after 10 seconds, and at most 1 KB of a response is kept. Host names are not resolved: a Worker cannot look up DNS, and Cloudflare's fetch does not reach private networks.
+- **Health.** A failure starts a streak (`failing_since`); any success clears it. A subscription failing for 3 days is disabled and its owners are emailed through Resend (ADR 0009); pending retries are cancelled when they come due. Test sends are tried once and never count.
+- **Access.** Owners and managers hold `webhooks.manage`; API credentials need the new `webhooks:manage` scope. MCP is a documented exception: no tool covers webhooks and an MCP connection cannot be granted the scope, so a connected AI client cannot open a channel that sends shop data out. Subscribing to a type needs the permission its fields need. A member limited to some locations must filter to them and sees only such subscriptions (A42).
+- **History.** Configuration changes are audit events through the pipeline. Each attempt's outcome is one event, `webhook.delivery`, written by the system with the new source `webhooks`, in the same transaction as the delivery row. Events and deliveries are kept 30 days (daily sweep); the audit events stay.
+
+## Consequences
+
+- A delivery that succeeds right after the request costs no queue operations; each retry is one queue message. The dispatcher builds a `stock.changed` snapshot only when someone subscribes to it.
+- Slow endpoints share the after-request time budget with other outbox work (up to 10 seconds each, sent in parallel per event). Acceptable at pilot volume.
+- `stock.changed` names at most 1,000 positions and `catalog.item.changed` at most 200 records per event, with `truncated: true` beyond that.
+- Imports announce `job.completed`, not one `catalog.item.changed` per row.
+
+## Revisit when
+
+Delivery volume makes inline POSTs delay other outbox work (move delivery to its own queue), a consumer needs ordering per record, or a shop needs payload shaping per subscription.

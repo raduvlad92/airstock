@@ -31,19 +31,24 @@ export const SCOPE_LABELS: Record<(typeof CONNECTION_SCOPES)[number], string> = 
   'inventory:read': 'Read stock and availability',
   'inventory:write': 'Receive and reserve stock',
   'activity:read': 'Read the activity history',
+  'webhooks:manage': 'Manage webhooks and see their deliveries',
 };
 
 export function IntegrationsLayout() {
   const { shopId } = useParams({ from: '/shops/$shopId' });
   return (
     <>
-      <PageHeader title="Integrations" subtitle="Sales channels, AI assistants, and API access." />
+      <PageHeader
+        title="Integrations"
+        subtitle="Sales channels, AI assistants, API access, and webhooks."
+      />
       <div className="tabs">
         {(
           [
             ['/shops/$shopId/integrations/shopify', 'Shopify'],
             ['/shops/$shopId/integrations/ai', 'AI assistants'],
             ['/shops/$shopId/integrations/api', 'API credentials'],
+            ['/shops/$shopId/integrations/webhooks', 'Webhooks'],
           ] as const
         ).map(([to, label]) => (
           <Link

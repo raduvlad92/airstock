@@ -77,7 +77,7 @@ function put(url: string, bytes: Uint8Array, contentType: string, bearer = token
 interface Intent {
   intentId: string;
   mediaId: string;
-  uploads: Array<{ part: string; url: string }>;
+  uploads: Array<{ part: string; url: string; maxSide?: number | null }>;
 }
 
 async function startUpload(
@@ -731,9 +731,7 @@ describe('D19: the largest original a shop keeps', () => {
       sha256: sha256Hex(bytes),
     });
     expect(res.status).toBe(201);
-    return (await json(res)) as Intent & {
-      uploads: Array<{ part: string; maxSide: number | null }>;
-    };
+    return (await json(res)) as Intent;
   }
 
   const setLimit = (mediaOriginalMaxSide: number | null, caller = limited.caller) =>

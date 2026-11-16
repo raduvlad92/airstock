@@ -37,6 +37,8 @@ describe('dashboard shell (ADR 0010)', () => {
       '/app/',
       '/app/shops/x/products',
       '/app/shops/x/settings/members?tab=1',
+      '/app/scan',
+      '/app/scan?flow=receive',
     ]) {
       const res = await t.app.request(path, { headers: { cookie } });
       expect(res.status, path).toBe(200);
@@ -46,10 +48,13 @@ describe('dashboard shell (ADR 0010)', () => {
       expect(body).toContain('data-email="shell@example.test"');
       expect(body).not.toMatch(/<script>|<style|style="/);
       const csp = res.headers.get('content-security-policy') ?? '';
-      expect(csp).toContain("script-src 'self'");
-      expect(csp).toContain("style-src 'self'");
+      // WebAssembly compilation for the scanner (plan D13) is the only addition: no eval, no
+      // inline scripts or styles.
+      expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval';");
+      expect(csp).toContain("style-src 'self';");
       expect(csp).not.toContain('unsafe-inline');
-      expect(csp).not.toContain('wasm');
+      expect(csp).not.toMatch(/'unsafe-eval'/);
+      expect(csp.match(/wasm/g)).toHaveLength(1);
       expect(res.headers.get('cache-control')).toBe('no-store');
     }
   });

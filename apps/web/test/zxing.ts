@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 
 /**
- * The vendored zxing-wasm 3.1.6 reader (the build /scan-test loads in phones), run in Node. The
- * same script and wasm decode here as in the browser; only the wasm comes from disk instead of a
- * fetch. The dashboard's CSP has no 'wasm-unsafe-eval', so the decode test runs outside its page.
+ * The vendored zxing-wasm 3.1.6 reader (the build the scanner at /app/scan loads in phones), run
+ * in Node. The same script and wasm decode here as in the browser; only the wasm comes from disk
+ * instead of a fetch.
  */
 
 interface ZXing {

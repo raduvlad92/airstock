@@ -1,4 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#9333ea"/>
-  <text x="32" y="32" dy="0.35em" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="32" font-weight="600" fill="#ffffff">A</text>
+<rect width="64" height="64" rx="14.08" fill="#1f5f4a"/>
+<text x="32" y="33.126400000000004" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="34.9184" font-weight="700" fill="#ffffff">A</text>
+<rect x="14.5408" y="39.8848" width="1.9839999999999993" height="11.264000000000001" fill="#ffffff"/>
+<rect x="19.3024" y="39.8848" width="0.9919999999999997" height="11.264000000000001" fill="#ffffff"/>
+<rect x="25.651199999999996" y="39.8848" width="0.9919999999999997" height="11.264000000000001" fill="#ffffff"/>
+<rect x="30.412799999999994" y="39.8848" width="0.9919999999999997" height="11.264000000000001" fill="#ffffff"/>
+<rect x="33.587199999999996" y="39.8848" width="1.9839999999999993" height="11.264000000000001" fill="#ffffff"/>
+<rect x="41.523199999999996" y="39.8848" width="0.9919999999999997" height="11.264000000000001" fill="#ffffff"/>
+<rect x="44.6976" y="39.8848" width="1.9839999999999993" height="11.264000000000001" fill="#ffffff"/>
 </svg>

@@ -1,22 +1,60 @@
 {
   "name": "Airstock (staging)",
   "short_name": "Airstock",
-  "description": "Stock across shops, warehouses, and partners.",
+  "description": "Scan, receive, pick, and look up stock across your shops and warehouses.",
   "id": "/app",
-  "start_url": "/app",
+  "start_url": "/app/scan",
   "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#f6f5f2",
   "theme_color": "#1f5f4a",
   "icons": [
     { "src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     {
-      "src": "/assets/icon-512.png",
+      "src": "/assets/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    }
+    },
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
-  "shortcuts": [{ "name": "Scan test", "url": "/scan-test" }]
+  "shortcuts": [
+    {
+      "name": "Receive",
+      "short_name": "Receive",
+      "description": "Receive stock into the current location",
+      "url": "/app/scan?flow=receive",
+      "icons": [{ "src": "/assets/shortcut-receive.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Count",
+      "short_name": "Count",
+      "description": "Count stock at a location",
+      "url": "/app/scan?flow=count",
+      "icons": [{ "src": "/assets/shortcut-count.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Move",
+      "short_name": "Move",
+      "description": "Move stock between locations",
+      "url": "/app/scan?flow=move",
+      "icons": [{ "src": "/assets/shortcut-move.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Pick",
+      "short_name": "Pick",
+      "description": "Work a pick list",
+      "url": "/app/scan?flow=pick",
+      "icons": [{ "src": "/assets/shortcut-pick.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Quick add",
+      "short_name": "Quick add",
+      "description": "Add a one-of-a-kind item",
+      "url": "/app/scan?flow=quick-add",
+      "icons": [{ "src": "/assets/shortcut-quick-add.png", "sizes": "96x96", "type": "image/png" }]
+    }
+  ]
 }

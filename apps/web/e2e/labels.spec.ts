@@ -7,8 +7,8 @@ import { decodeGrey } from '../test/zxing.ts';
 
 // F8, A33 in a real browser: labels drawn by the dashboard under its CSP, saved as a PDF, and
 // every barcode in that file decoded with the vendored zxing-wasm and resolved to its record.
-// The dashboard's CSP has no 'wasm-unsafe-eval', so decoding runs in the test process with the
-// same zxing-reader.js and zxing_reader.wasm that /scan-test serves to phones.
+// Decoding runs in the test process with the same zxing-reader.js and zxing_reader.wasm that the
+// scanner at /app/scan loads, so the check reads the PDF file itself.
 
 function api(page: Page, shopId: string) {
   return async <T>(path: string, body?: unknown): Promise<T> => {

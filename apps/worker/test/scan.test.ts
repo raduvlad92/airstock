@@ -48,7 +48,8 @@ describe('scan test', () => {
     expect(page.status).toBe(200);
     expect(page.headers.get('content-security-policy')).toContain("'wasm-unsafe-eval'");
     const dashboard = await t.app.request('/app', { headers: { cookie } });
-    expect(dashboard.headers.get('content-security-policy')).not.toContain('wasm');
+    // The dashboard allows WebAssembly too since the scanner moved into it (plan D13).
+    expect(dashboard.headers.get('content-security-policy')).toContain("'wasm-unsafe-eval'");
 
     const attempt = { target: 'qr', decoder: 'zxing', success: true, correct: true, ms: 420 };
     const saved = await t.app.request('/scan-test/results', {

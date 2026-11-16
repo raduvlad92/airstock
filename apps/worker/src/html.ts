@@ -41,7 +41,7 @@ export interface PageOptions {
   formActions?: string[];
   scripts?: string[];
   status?: number;
-  /** Allows WebAssembly compilation (the barcode decoder on the scan test page). */
+  /** Allows WebAssembly compilation (the barcode decoder in the app and on the scan test page). */
   wasm?: boolean;
 }
 
@@ -237,18 +237,22 @@ export function landingPage(): Response {
 /**
  * The dashboard shell (ADR 0010): the React app at /app, built by apps/web into the Worker's
  * static assets. The page carries no shop data, only who is signed in; everything else comes
- * from /api/v1. Same CSP as every other page: no inline scripts or styles.
+ * from /api/v1. Same CSP as every other page (no inline scripts or styles), plus
+ * 'wasm-unsafe-eval' so the scanner at /app/scan can compile the vendored zxing-wasm decoder
+ * (plan D13). It allows WebAssembly compilation only, not eval().
  */
 export function appShellPage(input: { email: string; mcpUrl: string }): Response {
   const doc = html`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="same-origin">
 <title>Airstock</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1f5f4a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Airstock">
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/icon-180.png">
 <link rel="stylesheet" href="${APP_ASSETS}/app.css">
@@ -262,7 +266,7 @@ export function appShellPage(input: { email: string; mcpUrl: string }): Response
   return new Response(doc.value, {
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'content-security-policy': contentSecurityPolicy(),
+      'content-security-policy': contentSecurityPolicy({ wasm: true }),
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'same-origin',
       'cache-control': 'no-store',

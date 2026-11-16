@@ -7,11 +7,12 @@ import {
   normalize,
   subtract,
 } from '@airstock/core/catalog/decimal';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { formatDecimal } from '../components/ui.tsx';
 import { can } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { type ScanEnv, useScanHandler } from './flows.ts';
 import { ItemTitle } from './lookup.tsx';
 import { type Resolved, resolveScan, type ScanItem } from './resolve.ts';

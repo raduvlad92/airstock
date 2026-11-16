@@ -47,6 +47,26 @@
           }
         }
       }
+    },
+    {
+      "includes": ["apps/web/src/**", "!apps/web/src/mutation.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@tanstack/react-query": {
+                    "importNames": ["useMutation"],
+                    "message": "Use useMutation from apps/web/src/mutation.ts: TanStack's own copies new callbacks in a passive effect, so a tap right after an update runs stale ones."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

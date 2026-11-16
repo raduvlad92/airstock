@@ -1,4 +1,3 @@
-import { useMutation } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   type ClipboardEvent,
@@ -10,6 +9,7 @@ import {
   useState,
 } from 'react';
 import { ApiError, command, errorMessage } from '../api.ts';
+import { useMutation } from '../mutation.ts';
 import { parseTsv, toTsv } from './clipboard.ts';
 import {
   type Cell,

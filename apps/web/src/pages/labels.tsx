@@ -9,7 +9,7 @@ import {
   type LabelLayoutKey,
   LOCATION_LABEL_FIELDS,
 } from '@airstock/core/labels';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -32,6 +32,7 @@ import {
   type PrintLabel,
 } from '../labels/content.ts';
 import type { LabelsSearch } from '../labels/search.ts';
+import { useMutation } from '../mutation.ts';
 import { useLocations } from './warehouses.tsx';
 
 type Templates = Out<typeof ops.listLabelTemplates>;

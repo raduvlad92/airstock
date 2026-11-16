@@ -1,6 +1,6 @@
 import type { ops } from '@airstock/core';
 import { FIELD_TYPES } from '@airstock/core/catalog/fields';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { command, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 
 type Schema = Out<typeof ops.describeCatalog>;
 type Family = Schema['families'][number];

@@ -1,11 +1,12 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useState } from 'react';
 import { api, type Out } from '../api.ts';
 import { CurrencySelect, TimeZoneSelect } from '../components/pickers.tsx';
 import { Card, Empty, ErrorNotice, Field, Loading, Notice, PageHeader } from '../components/ui.tsx';
 import { useShops } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 
 /** The shops the user belongs to, and a form to create one. */
 export function ShopsPage() {

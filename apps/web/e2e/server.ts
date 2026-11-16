@@ -29,8 +29,9 @@ import {
   WebhookSecretCipher,
 } from '@airstock/core';
 import { PgDatabase, poolSource } from '@airstock/db';
-import { bootstrap, migrate } from '@airstock/db/migrate';
+import { migrate } from '@airstock/db/migrate';
 import pg from 'pg';
+import { prepareAppRole } from '../../../test/cluster-roles.ts';
 import { createApp } from '../../worker/src/app.ts';
 import { memoryMediaStore, nodeHasher } from '../../worker/src/media-memory.ts';
 import {
@@ -70,12 +71,8 @@ async function prepareDatabase() {
   await client.query(`drop database if exists ${E2E_DB} with (force)`);
   await client.query(`create database ${E2E_DB}`);
   await client.end();
-  await bootstrap(ownerUrl.toString());
+  await prepareAppRole(admin, ownerUrl.toString());
   await migrate(ownerUrl.toString());
-  const owner = new pg.Client({ connectionString: ownerUrl.toString() });
-  await owner.connect();
-  await owner.query(`alter role airstock_app password 'airstock_app'`);
-  await owner.end();
 }
 
 const workos: WorkosClient = {

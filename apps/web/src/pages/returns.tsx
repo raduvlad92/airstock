@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { type LineDraft, LinesEditor, useStockLocations, variantsBySku } from './transfers.tsx';
 
 // Returns (plan D9, PRD 6.5): request, authorize, receive into quarantine, inspect. No refunds:

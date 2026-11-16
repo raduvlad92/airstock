@@ -1,8 +1,9 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, command, type Out } from '../api.ts';
 import { Badge, ErrorNotice, Field, formatDateTime, Loading, Notice } from '../components/ui.tsx';
+import { useMutation } from '../mutation.ts';
 
 // Sync health for one connected store (plan Section 5.14, ADR 0037): is Shopify in step, and if
 // not, why. Conflicts are resolved here by choosing a side; Airstock never overwrites a quantity

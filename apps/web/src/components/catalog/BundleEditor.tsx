@@ -1,8 +1,9 @@
 import type { ops } from '@airstock/core';
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, command, type Out } from '../../api.ts';
 import { can, useShopContext } from '../../context.tsx';
+import { useMutation } from '../../mutation.ts';
 import { useLocations } from '../../pages/warehouses.tsx';
 import { Badge, ErrorNotice, Field, formatDecimal, Loading } from '../ui.tsx';
 import {

@@ -1,12 +1,13 @@
 import type { ops } from '@airstock/core';
 import { DEFAULT_ORIGINAL_MAX_SIDE } from '@airstock/core/media';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { type CatalogSchema, useCatalogSchema } from '../catalog/schema.ts';
 import { type PreparedFile, prepareFile } from '../components/media/derivatives.ts';
 import { uploadToProduct } from '../components/media/upload.ts';
 import { can } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { type ScanEnv, useScanHandler } from './flows.ts';
 import { ItemTitle } from './lookup.tsx';
 import type { ScanItem } from './resolve.ts';

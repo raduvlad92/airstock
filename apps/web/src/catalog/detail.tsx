@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { ReorderRulesPanel } from '../components/reorder-rules.tsx';
@@ -14,6 +14,7 @@ import {
   Tabs,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { ActivityTable, useActivity } from '../pages/activity.tsx';
 import { StockPanel, StockSettingsForm } from '../pages/inventory.tsx';
 import { telemetry } from '../telemetry.ts';

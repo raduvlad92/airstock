@@ -1,6 +1,6 @@
 import type { ops } from '@airstock/core';
 import { LABEL_LIMITS } from '@airstock/core/labels';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
@@ -19,6 +19,7 @@ import {
 import { type CellValue, type Row, requestedFields } from '../catalog/values.ts';
 import { ErrorNotice, Field, Notice } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { telemetry } from '../telemetry.ts';
 import { ExportButton } from './imports.tsx';
 

@@ -1,8 +1,9 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
 import { Badge, Card, ErrorNotice, Field, formatDateTime, Notice } from '../components/ui.tsx';
+import { useMutation } from '../mutation.ts';
 import { SyncHealth } from './shopify-health.tsx';
 
 // A connected Shopify store: its location maps, matching by SKU, and the onboarding import

@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { type FormEvent, useMemo, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, type ShopContext, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 
 type Locations = Out<typeof ops.listLocations>;
 type Location = Locations['locations'][number];

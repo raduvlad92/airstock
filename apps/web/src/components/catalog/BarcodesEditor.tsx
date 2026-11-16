@@ -7,10 +7,10 @@ import {
   SYMBOLOGY_LABELS,
   type Symbology,
 } from '@airstock/core/barcodes';
-import { useMutation } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { ApiError, command } from '../../api.ts';
+import { useMutation } from '../../mutation.ts';
 import { Badge, ErrorNotice, Field, Loading } from '../ui.tsx';
 import {
   ConflictNotice,

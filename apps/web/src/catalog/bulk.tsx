@@ -1,8 +1,8 @@
 import type { ops } from '@airstock/core';
-import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, command, errorMessage, type Out } from '../api.ts';
 import { ErrorNotice } from '../components/ui.tsx';
+import { useMutation } from '../mutation.ts';
 import type { BulkEdit } from './grid.tsx';
 import type { CatalogSchema } from './schema.ts';
 

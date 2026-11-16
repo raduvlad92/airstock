@@ -598,12 +598,22 @@ export const reverseOperation = defineOperation({
   async handler(ctx, input) {
     const [op] = await ctx.tx.query<{
       kind: string;
+      reason: string | null;
       transfer_id: string | null;
       return_id: string | null;
-    }>('select kind, transfer_id, return_id from inventory_operations where id = $1', [
+    }>('select kind, reason, transfer_id, return_id from inventory_operations where id = $1', [
       input.operationId,
     ]);
     if (!op) throw errors.notFound('Operation');
+    // A stock-check repair is a ledger-only entry: the balance already held those units, so
+    // reversing it would change real stock. A wrong repair is corrected with a count.
+    if (op.reason === 'reconciliation') {
+      throw errors.unprocessable(
+        'not_reversible',
+        'A stock check repair only explains the balance in the history and cannot be reversed. Count the shelf to correct the stock.',
+        { kind: op.kind, reason: op.reason },
+      );
+    }
     if (
       !['adjustment', 'count', 'condition_change'].includes(op.kind) ||
       op.transfer_id ||

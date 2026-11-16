@@ -495,7 +495,7 @@ describe('F-COST-RESET-ON-MOVE: a count that moves all units to another shelf re
 // repair removes units that are on the shelf and leaves history and balance disagreeing again.
 // ---------------------------------------------------------------------------------------------
 describe('F-REVERSE-REPAIR: reversing a stock-check repair changes on hand', () => {
-  it.fails('refuses to reverse a ledger-only repair (or reverses only the ledger entry)', async () => {
+  it('refuses to reverse a ledger-only repair (or reverses only the ledger entry)', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '10' });
     const [pos] = await ownerQuery<{ id: string }>(
@@ -878,7 +878,7 @@ describe('F-PICK-BUNDLE-SPLIT-LINE: a bundle whose line was split by a lot resca
 // receipt lands: stock ends up at an archived location, unsellable and refused by counts.
 // ---------------------------------------------------------------------------------------------
 describe('F-TRANSFER-DEST-UNLOCKED: a transfer receipt can land stock at a location being archived', () => {
-  it.fails('never leaves stock at an archived location', async () => {
+  it('never leaves stock at an archived location', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '3' });
     const wh = await h.run(ops.createWarehouse, { name: `Closing ${uuidv7().slice(-4)}` });

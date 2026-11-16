@@ -314,11 +314,16 @@ export interface LocationInfo {
   leaf: boolean;
 }
 
-export async function loadLocation(tx: Tx, id: string): Promise<LocationInfo> {
+/**
+ * A storage location. With `share`, the row is share-locked like every command that brings stock
+ * in (stockLocation), so an archive, which locks it FOR UPDATE and then checks it holds no
+ * stock, waits for this command instead of passing that check while units land.
+ */
+export async function loadLocation(tx: Tx, id: string, share = false): Promise<LocationInfo> {
   const [row] = await tx.query<LocationInfo>(
     `select l.id, l.warehouse_id, l.path, l.path_ids, l.status, l.kind,
        not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as leaf
-     from locations l where l.id = $1`,
+     from locations l where l.id = $1${share ? ' for share of l' : ''}`,
     [id],
   );
   if (row?.kind !== 'storage') throw errors.notFound('Location');
@@ -357,7 +362,7 @@ export async function destinationLeaf(
   t: TransferRow,
   locationId: string | undefined,
 ): Promise<LocationInfo> {
-  const loc = await loadLocation(tx, locationId ?? t.to_location_id);
+  const loc = await loadLocation(tx, locationId ?? t.to_location_id, true);
   if (!loc.path_ids.includes(t.to_location_id)) {
     throw errors.unprocessable(
       'outside_destination',

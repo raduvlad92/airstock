@@ -76,6 +76,7 @@ describe('receive, reserve, release, availability', () => {
       inTransit: '0',
       ownedTotal: '154.000000',
       shortage: '0.000000',
+      onOrder: '0',
     });
     // Per location: one catalog identity, three sites (PRD 5.4).
     const sellable = view.positions.filter(

@@ -39,7 +39,7 @@
     {
       "prompt": 7,
       "text": "Order 1001's LEGO set came back damaged.",
-      "expect": [{ "tool": "manage_returns" }]
+      "expect": [{ "tool": "manage_returns", "action": "create" }]
     },
     {
       "prompt": 8,

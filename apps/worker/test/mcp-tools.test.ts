@@ -29,6 +29,7 @@ describe('MCP tools', () => {
       'manage_media',
       'manage_purchasing',
       'manage_reservations',
+      'manage_returns',
       'manage_storage',
       'manage_suppliers',
       'receive_stock',

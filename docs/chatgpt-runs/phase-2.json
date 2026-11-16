@@ -1,20 +1,20 @@
 {
-  "title": "Phase 2 ChatGPT run (plan Section 7.4)",
-  "note": "Tool names are the ones planned in plan Section 5.16; most do not exist yet. Actions use the plan's words and are provisional: the milestone that adds a tool sets them to its real action names. A step without an action accepts any action of its tool. Prompts 1 to 10 and 12 to 14 run on a full-access connection to a persona shop; prompt 11 on a read-only connection. Check with: pnpm chatgpt-run --shop <shop> --from <start> --expect docs/chatgpt-runs/phase-2.json",
+  "title": "Phase 2 ChatGPT run (plan Section 7.4, milestone I7)",
+  "note": "Concrete for the staging shop \"ChatGPT run 2\", filled by scripts/chatgpt-run-shop.ts; the expected answers are in docs/phase-2-status.md Section 6. Tool and action names are the current ones (apps/worker/test/mcp-tools.test.ts). A step without an action accepts any action of its tool; `or` lists other calls that also do. Prompts 1 to 14 run on a full-access connection, in one chat, in this order; 13 and 14 are optional (they need a Shopify development store connected to the shop). Prompt 15 runs on a read-only connection. Check with: pnpm chatgpt-run --shop \"ChatGPT run 2\" --from <start> --expect docs/chatgpt-runs/phase-2.json",
   "prompts": [
     {
       "prompt": 1,
-      "text": "How many Prismatic Evolutions booster boxes do I have, and how many are reserved?",
+      "text": "How many Surging Sparks booster boxes do I have, and how many are reserved?",
       "expect": [{ "tool": "get_stock" }]
     },
     {
       "prompt": 2,
-      "text": "Receive 3 cases of 6 booster boxes from the distributor into the warehouse, at 95 euros a box.",
-      "expect": [{ "tool": "receive_stock" }]
+      "text": "Receive 3 cases of 6 Surging Sparks booster boxes from Nordwind TCG Distribution onto shelf A1, at 95 euros a box.",
+      "expect": [{ "tool": "receive_stock", "action": "receive" }]
     },
     {
       "prompt": 3,
-      "text": "Move 2 Elite Trainer Boxes from shelf A1 to B2.",
+      "text": "Move 2 Prismatic Evolutions Elite Trainer Boxes from shelf A1 to B2.",
       "expect": [{ "tool": "transfer_stock", "action": "move" }]
     },
     {
@@ -22,18 +22,30 @@
       "text": "What's running low? Draft purchase orders for it.",
       "ordered": true,
       "expect": [
-        { "tool": "stock_alerts", "action": "list" },
-        { "tool": "manage_purchasing", "action": "suggest_from_low_stock" }
+        {
+          "tool": "stock_alerts",
+          "action": ["list", "summary"],
+          "or": [{ "tool": "run_report", "action": "run" }]
+        },
+        { "tool": "manage_purchasing", "action": "suggest_from_low_stock" },
+        { "tool": "manage_purchasing", "action": "draft" }
       ]
     },
     {
       "prompt": 5,
       "text": "Which food lots expire in the next 30 days, and which orders got lot L-2311?",
-      "expect": [{ "tool": "get_stock" }, { "tool": "get_stock", "action": "lot_trace" }]
+      "expect": [
+        {
+          "tool": "run_report",
+          "action": "run",
+          "or": [{ "tool": "get_stock", "action": "lots" }]
+        },
+        { "tool": "get_stock", "action": "lot_trace" }
+      ]
     },
     {
       "prompt": 6,
-      "text": "I counted shelf B2: 4 of SKU X and none of SKU Y.",
+      "text": "I counted shelf B2: 4 of LEGO-10316 and none of LEGO-42143.",
       "expect": [{ "tool": "adjust_stock", "action": "count" }]
     },
     {
@@ -43,7 +55,7 @@
     },
     {
       "prompt": 8,
-      "text": "What is my stock worth today, and what was it worth on 1 December?",
+      "text": "What is my stock worth now, and what was it worth on 16 November at 4 pm?",
       "expect": [
         { "tool": "run_report", "action": "run" },
         { "tool": "run_report", "action": "run" }
@@ -51,38 +63,41 @@
     },
     {
       "prompt": 9,
-      "text": "Are there any Shopify sync problems?",
-      "expect": [{ "tool": "shopify_sync", "action": "health" }]
+      "text": "Add a PSA 10 Charizard, Base Set 4/102, certificate 12345678, priced at 450 euros, on shelf A1.",
+      "expect": [{ "tool": "receive_stock", "action": "quick_add" }]
     },
     {
       "prompt": 10,
-      "text": "Add a PSA 10 Charizard, certificate 12345678, at 450 euros, and list it on Shopify.",
-      "ordered": true,
-      "expect": [
-        { "tool": "receive_stock", "action": "quick_add" },
-        { "tool": "shopify_sync", "action": "list_product" }
-      ]
-    },
-    {
-      "prompt": 11,
-      "text": "On a read-only connection: \"Set SKU X to zero.\" Refused (A15).",
-      "orNoCall": true,
-      "expect": [{ "tool": "adjust_stock", "outcome": "denied" }]
-    },
-    {
-      "prompt": 12,
-      "text": "Make a pick list for the manual orders reserved today in the main warehouse.",
+      "text": "Make a pick list for the open orders in the main warehouse.",
       "expect": [{ "tool": "warehouse_work", "action": "create_pick_list" }]
     },
     {
-      "prompt": 13,
-      "text": "On pick list 3, the picker found only 1 of the 2 Pikachu boxes at A-03. Record that.",
+      "prompt": 11,
+      "text": "On pick list 1, the picker found only 1 of the 2 Pikachu ex Boxes on shelf A1. Record that.",
       "expect": [{ "tool": "warehouse_work", "action": "short_pick" }]
     },
     {
-      "prompt": 14,
+      "prompt": 12,
       "text": "Someone scanned 84731629 in the warehouse. Which item is that and where is it?",
       "expect": [{ "tool": "warehouse_work", "action": "scan" }]
+    },
+    {
+      "prompt": 13,
+      "text": "Optional: Are there any Shopify sync problems?",
+      "optional": true,
+      "expect": [{ "tool": "shopify_sync", "action": "health" }]
+    },
+    {
+      "prompt": 14,
+      "text": "Optional: List the Charizard on Shopify as a draft.",
+      "optional": true,
+      "expect": [{ "tool": "shopify_sync", "action": "list_product" }]
+    },
+    {
+      "prompt": 15,
+      "text": "On a read-only connection: Set PKM-PRE-ETB on shelf A1 to zero. Refused (A15).",
+      "orNoCall": true,
+      "expect": [{ "tool": "adjust_stock", "outcome": "denied" }]
     }
   ]
 }

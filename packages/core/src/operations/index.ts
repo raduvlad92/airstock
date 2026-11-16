@@ -9,6 +9,7 @@
 import type { AnyOperation } from '../registry.ts';
 import { accessOperations } from './access.ts';
 import { activityOperations } from './activity.ts';
+import { alertsOperations } from './alerts.ts';
 import { catalogOperations } from './catalog.ts';
 import { catalogBulkOperations } from './catalog-bulk.ts';
 import { catalogBundlesOperations } from './catalog-bundles.ts';
@@ -31,6 +32,7 @@ import { mediaOperations } from './media.ts';
 import { membersOperations } from './members.ts';
 import { pickingOperations } from './picking.ts';
 import { purchasingOperations } from './purchasing.ts';
+import { reorderOperations } from './reorder.ts';
 import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopsOperations } from './shops.ts';
@@ -43,6 +45,7 @@ import { webhooksOperations } from './webhooks.ts';
 export const operations: readonly AnyOperation[] = [
   ...accessOperations,
   ...activityOperations,
+  ...alertsOperations,
   ...catalogOperations,
   ...catalogBulkOperations,
   ...catalogBundlesOperations,
@@ -65,6 +68,7 @@ export const operations: readonly AnyOperation[] = [
   ...membersOperations,
   ...pickingOperations,
   ...purchasingOperations,
+  ...reorderOperations,
   ...returnsOperations,
   ...shopifyOperations,
   ...shopsOperations,
@@ -86,6 +90,7 @@ export const integrationCallbacks: readonly AnyOperation[] = [...shopifyIntegrat
 
 export * from './access.ts';
 export * from './activity.ts';
+export * from './alerts.ts';
 export * from './catalog.ts';
 export * from './catalog-bulk.ts';
 export * from './catalog-bundles.ts';
@@ -108,6 +113,7 @@ export * from './media.ts';
 export * from './members.ts';
 export * from './picking.ts';
 export * from './purchasing.ts';
+export * from './reorder.ts';
 export * from './returns.ts';
 export * from './shopify.ts';
 export * from './shops.ts';

@@ -216,7 +216,7 @@ describe('Shopify connector review findings', () => {
   // shopify.sync_conflict webhook go out, and the level is not pushed until the reconciler or a
   // person clears it. A cancellation of an order created before the record's as-of time is not
   // even listed by ordersSince, so it is always called a conflict.
-  it.fails('F3: a push refused because of an unprocessed cancellation is not a conflict', async () => {
+  it('F3: a push refused because of an unprocessed cancellation is not a conflict', async () => {
     const s = await setup('Cancel race', 6);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 4 }]);
     await event(s, 'orders/create', s.store.webhookBody(order));
@@ -313,7 +313,7 @@ describe('Shopify connector review findings', () => {
   // and a conflict is recorded although Shopify already shows Airstock's number. The reconciler
   // compares Shopify with the (old) record, not with Airstock's target, so the conflict never
   // clears by itself: the level stops syncing until a person resolves an alert about nothing.
-  it.fails('F7: a push whose response was lost is not a conflict on retry', async () => {
+  it('F7: a push whose response was lost is not a conflict on retry', async () => {
     const s = await setup('Lost response', 5);
     await h.receive(s.m, s.variantId, 1);
     // Shopify applies the write, then the response is lost.
@@ -432,7 +432,7 @@ describe('Shopify connector review findings', () => {
   // level was pushed in between (any stock change does that), Shopify's quantity is lower than
   // the record, the next push is refused, no order created since the record explains it, and a
   // conflict freezes the level.
-  it.fails('F10: a line added by an order edit is not a conflict', async () => {
+  it('F10: a line added by an order edit is not a conflict', async () => {
     const s = await setupItems('Added line', [5, 5]);
     const [first, second] = s.items as [Many['items'][0], Many['items'][0]];
     const order = s.store.placeOrder([{ variant: first.shopify, quantity: 1 }]);
@@ -495,7 +495,7 @@ describe('Shopify connector review findings', () => {
   // location deactivated) makes every push that includes it fail: the queue retries the same
   // batch until it gives up, and the reconciler's pending push throws on every run (before it
   // records `reconciled_at`). Other items stop syncing until someone unmaps the bad one.
-  it.fails('F12: one level Shopify refuses does not stop the other levels', async () => {
+  it('F12: one level Shopify refuses does not stop the other levels', async () => {
     const s = await setupItems('Deleted item', [5, 5]);
     const [gone, kept] = s.items as [Many['items'][0], Many['items'][0]];
     // The merchant deletes the first product in Shopify; it is still mapped here.

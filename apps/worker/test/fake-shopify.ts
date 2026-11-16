@@ -489,7 +489,7 @@ export class FakeStore implements ShopifyAdmin {
         });
       }
     });
-    if (stale.length > 0) return { kind: 'stale' as const, stale };
+    if (stale.length > 0) return { kind: 'refused' as const, stale, failed: [] };
     for (const q of input.quantities) {
       this.levels.set(this.key(q.inventoryItemId, q.locationId), q.quantity);
       this.sets.push({

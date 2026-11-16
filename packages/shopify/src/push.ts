@@ -12,7 +12,14 @@ import {
   webhookEvent,
 } from '@airstock/core';
 import type { Tx } from '@airstock/db';
-import { MAX_READ_ITEMS, MAX_SET_QUANTITIES, type SetQuantity } from './admin.ts';
+import {
+  IDEMPOTENCY_KEY_ERRORS,
+  MAX_READ_ITEMS,
+  MAX_SET_QUANTITIES,
+  type SetQuantity,
+  type SetResult,
+  ShopifyApiError,
+} from './admin.ts';
 import { type ConnectedStore, catchUpOrders, connectedStore, type SyncDeps } from './sync.ts';
 
 // The availability push (plan Section 5.14, ADR 0008, ADR 0036): for each mapped Shopify item at
@@ -28,7 +35,19 @@ export interface PushLevel {
   shopifyLocationId: string;
 }
 
-export type PushOutcome = 'pushed' | 'unchanged' | 'conflict' | 'not_stocked' | 'unmapped';
+/**
+ * `failed`: Shopify refused the level for a reason other than its quantity (its item deleted in
+ * Shopify, say); `deferred`: refused as stale and not explained yet (more orders to apply than
+ * one push reads), left for the reconciler.
+ */
+export type PushOutcome =
+  | 'pushed'
+  | 'unchanged'
+  | 'conflict'
+  | 'not_stocked'
+  | 'unmapped'
+  | 'failed'
+  | 'deferred';
 
 export type PushResult = PushLevel & { outcome: PushOutcome };
 
@@ -180,7 +199,15 @@ interface Write {
   from: number;
   to: number;
   asOf: Date | null;
+  checkedAt: Date | null;
   variantId: string;
+}
+
+/** A level Shopify refused for a reason other than a stale quantity. */
+interface Failure {
+  write: Write;
+  code: string | null;
+  message: string;
 }
 
 /** Shopify's available for these levels, read MAX_READ_ITEMS items at a time. */
@@ -198,15 +225,88 @@ export async function readShopify(
 }
 
 /**
+ * User errors that refuse one quantity of `inventorySetQuantities` (Shopify's
+ * InventorySetQuantitiesUserErrorCode, less the stale and idempotency codes). When Shopify does
+ * not say which quantity, the batch is split to find it.
+ */
+const QUANTITY_ERRORS = new Set([
+  'INVALID_INVENTORY_ITEM',
+  'INVALID_LOCATION',
+  'NON_MUTABLE_INVENTORY_ITEM',
+  'INVALID_QUANTITY_NEGATIVE',
+  'INVALID_QUANTITY_TOO_HIGH',
+  'INVALID_QUANTITY_TOO_LOW',
+  'NO_DUPLICATE_INVENTORY_ITEM_ID_GROUP_ID_PAIR',
+  'ITEM_NOT_STOCKED_AT_LOCATION',
+]);
+
+/**
+ * The idempotency key of one write: the same quantities from the same record give the same key,
+ * so a retry after a lost response is the same request to Shopify, which returns the first
+ * result instead of refusing it as stale (Shopify's guidance: a deterministic key from the
+ * request's parameters). A record that changed (a push, an order, a check) gives a new key.
+ */
+async function writeKey(connectionId: string, attempt: number, writes: Write[]): Promise<string> {
+  const text = [
+    connectionId,
+    attempt,
+    ...writes.map(
+      (w) =>
+        `${levelKey(w.level)}:${w.from}:${w.to}:${w.asOf ? new Date(w.asOf).getTime() : ''}:${
+          w.checkedAt ? new Date(w.checkedAt).getTime() : ''
+        }`,
+    ),
+  ].join('|');
+  const hash = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)),
+  ).slice(0, 16);
+  // A UUID (version 8, custom) from the hash.
+  hash[6] = (hash[6]! & 0x0f) | 0x80;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  const hex = [...hash].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+type SetOutcome = SetResult | { kind: 'unplaced'; code: string | null; message: string };
+
+/**
+ * One `inventorySetQuantities` call. A refusal Shopify did not tie to one quantity comes back as
+ * `unplaced` (nothing was applied); an idempotency key Shopify will not take again is replaced
+ * once.
+ */
+async function setQuantities(
+  store: ConnectedStore,
+  input: { quantities: SetQuantity[]; idempotencyKey: string; reference: string },
+  fresh = false,
+): Promise<SetOutcome> {
+  try {
+    return await store.admin.setAvailable(input);
+  } catch (error) {
+    if (!(error instanceof ShopifyApiError) || error.retryable || !error.code) throw error;
+    if (IDEMPOTENCY_KEY_ERRORS.includes(error.code) && !fresh) {
+      return setQuantities(store, { ...input, idempotencyKey: uuidv7() }, true);
+    }
+    if (!QUANTITY_ERRORS.has(error.code)) throw error;
+    return { kind: 'unplaced', code: error.code, message: error.message };
+  }
+}
+
+/**
  * Sets Shopify's available quantity for up to MAX_SET_QUANTITIES levels of one connection in one
  * compare-and-set call, holding the level rows' locks during the call so order lines for the same
  * levels apply one at a time.
  *
  * Shopify lowers its own quantity when it accepts an order, so a refused quantity usually means an
  * order Airstock has not processed yet, not an edit. Before calling it a conflict, the push
- * processes any such orders and tries again; only a difference that remains unexplained is
- * recorded as a conflict, and Shopify is left untouched (ADR 0008, P1). A level with an open
+ * applies orders Shopify created or changed since the record and tries again. A level whose record
+ * and target are unchanged after that would be refused again: Shopify is read, and if it already
+ * shows Airstock's number (a write whose response was lost), the write is recorded; otherwise the
+ * difference is a conflict, and Shopify is left untouched (ADR 0008, P1). A level with an open
  * conflict is not pushed until the conflict is resolved (ADR 0036).
+ *
+ * A level Shopify refuses for another reason (its item deleted in Shopify, say) is recorded as
+ * failed (sync health shows it as a pending push and the connection's last error), and the other
+ * levels of the batch are written without it.
  */
 async function pushBatch(
   deps: SyncDeps,
@@ -217,6 +317,8 @@ async function pushBatch(
   const connectionId = batch[0]!.connectionId;
   const outcomes = new Map<string, PushOutcome>();
   const refused = new Map<string, number>();
+  // The quantities each level was last refused with: sent unchanged, they would be refused again.
+  const refusedWith = new Map<string, { from: number; to: number }>();
   let ordersCaughtUp = 0;
   let pending = batch;
   for (let attempt = 0; attempt < 4 && pending.length > 0; attempt++) {
@@ -246,10 +348,11 @@ async function pushBatch(
         location: string;
         expected_available: number | null;
         expected_as_of: Date | null;
+        checked_at: Date | null;
         conflict_at: Date | null;
       }>(
         `select shopify_inventory_item_id as item, shopify_location_id as location,
-           expected_available, expected_as_of, conflict_at
+           expected_available, expected_as_of, checked_at, conflict_at
          from shopify_inventory_levels
          where connection_id = $1 and (shopify_inventory_item_id, shopify_location_id) in
            (select * from unnest($2::text[], $3::text[]))
@@ -269,6 +372,8 @@ async function pushBatch(
       const done = new Map<string, PushOutcome>();
       const init: PushLevel[] = [];
       const writes: Write[] = [];
+      const unexplained: Write[] = [];
+      const none = { done, init, unexplained, stale: [] as Write[], failed: [] as Failure[] };
       for (const level of pending) {
         const k = levelKey(level);
         const target = targets.get(k);
@@ -278,30 +383,58 @@ async function pushBatch(
         else if (row.expected_available === null) init.push(level);
         else if (row.expected_available === target.target) done.set(k, 'unchanged');
         else {
-          writes.push({
+          const write = {
             level,
             from: row.expected_available,
             to: target.target,
             asOf: row.expected_as_of,
+            checkedAt: row.checked_at,
             variantId: target.variantId,
-          });
+          };
+          const last = refusedWith.get(k);
+          // Refused before with these same quantities: the orders applied since did not explain
+          // the difference, so the same write would be refused again.
+          if (last && last.from === write.from && last.to === write.to) unexplained.push(write);
+          else writes.push(write);
         }
       }
-      if (writes.length === 0) return { done, init, stale: [] as Write[] };
+      if (writes.length === 0) return { ...none, split: [] as Write[] };
       const quantities: SetQuantity[] = writes.map((w) => ({
         inventoryItemId: w.level.inventoryItemId,
         locationId: w.level.shopifyLocationId,
         quantity: w.to,
         from: w.from,
       }));
-      const set = await store.admin.setAvailable({
+      const set = await setQuantities(store, {
         quantities,
-        idempotencyKey: uuidv7(),
+        idempotencyKey: await writeKey(connectionId, attempt, writes),
         reference: `airstock://shops/${shopId}/shopify-connections/${connectionId}`,
       });
-      if (set.kind === 'stale') {
-        // Nothing was applied: the stale levels are explained (or not) below, the rest retried.
-        return { done, init, stale: set.stale.map((i) => writes[i]!) };
+      if (set.kind === 'unplaced') {
+        // Shopify refused one of these quantities without saying which: nothing was applied.
+        // One level alone is the one; several are split to find it.
+        return writes.length === 1
+          ? {
+              ...none,
+              split: [],
+              failed: [{ write: writes[0]!, code: set.code, message: set.message }],
+            }
+          : { ...none, split: writes };
+      }
+      if (set.kind === 'refused') {
+        // Nothing was applied: the failed levels are recorded, the stale ones are explained (or
+        // not) below, and the rest are retried.
+        const failed = new Set(set.failed.map((f) => f.index));
+        return {
+          ...none,
+          split: [],
+          stale: set.stale.filter((i) => !failed.has(i)).map((i) => writes[i]!),
+          failed: set.failed.map((f) => ({
+            write: writes[f.index]!,
+            code: f.code,
+            message: f.message,
+          })),
+        };
       }
       // now() is when this transaction began, before Shopify accepted the write: an order that
       // Shopify created after it is not in `to` and still lowers the record.
@@ -337,15 +470,32 @@ async function pushBatch(
         ),
       ]);
       for (const w of writes) done.set(levelKey(w.level), 'pushed');
-      return { done, init, stale: [] as Write[] };
+      return { ...none, split: [] as Write[] };
     });
 
     for (const [k, outcome] of step.done) outcomes.set(k, outcome);
 
+    if (step.failed.length > 0) {
+      await recordFailures(deps, store, step.failed);
+      for (const f of step.failed) outcomes.set(levelKey(f.write.level), 'failed');
+    }
+
+    if (step.split.length > 0) {
+      const half = Math.ceil(step.split.length / 2);
+      for (const part of [step.split.slice(0, half), step.split.slice(half)]) {
+        const sub = await pushBatch(
+          deps,
+          store,
+          part.map((w) => w.level),
+        );
+        for (const [k, outcome] of sub) outcomes.set(k, outcome);
+      }
+    }
+
     if (step.init.length > 0) {
       // First push for these levels: process orders Shopify already counted, then read Shopify's
       // quantities as the starting point.
-      ordersCaughtUp += await catchUpOrders(deps, store, store.createdAt);
+      ordersCaughtUp += (await catchUpOrders(deps, store, store.createdAt)).applied;
       const readAt = new Date();
       const actual = await readShopify(store, step.init);
       const known = step.init.filter((l) => actual.has(levelKey(l)));
@@ -375,35 +525,153 @@ async function pushBatch(
       }
     }
 
-    if (step.stale.length > 0) {
-      // Explain the differences with orders Airstock has not processed yet (P1).
-      for (const w of step.stale) {
-        refused.set(levelKey(w.level), (refused.get(levelKey(w.level)) ?? 0) + 1);
-      }
-      const asOf = Math.min(...step.stale.map((w) => (w.asOf ? new Date(w.asOf).getTime() : 0)));
-      const since = new Date(Math.max(store.createdAt.getTime(), asOf - 60_000));
-      const processed = await catchUpOrders(deps, store, since);
-      ordersCaughtUp += processed;
-      if (processed === 0) {
-        const actual = await readShopify(
-          store,
-          step.stale.map((w) => w.level),
-        );
-        for (const w of step.stale) {
+    if (step.unexplained.length > 0) {
+      // Shopify is read: a level that already shows Airstock's number is recorded as pushed (the
+      // write whose response was lost, F7); one that shows the record is tried again; the rest
+      // are conflicts.
+      const readAt = new Date();
+      const actual = await readShopify(
+        store,
+        step.unexplained.map((w) => w.level),
+      );
+      const confirmed: Write[] = [];
+      for (const w of step.unexplained) {
+        const k = levelKey(w.level);
+        const shopify = actual.get(k);
+        if (shopify === w.to) confirmed.push(w);
+        else if (shopify === w.from) refusedWith.delete(k);
+        else {
           await recordConflict(deps, store, w.level, w.variantId, {
             expected: w.from,
             airstock: w.to,
-            actual: actual.get(levelKey(w.level)) ?? null,
+            actual: shopify ?? null,
           });
-          outcomes.set(levelKey(w.level), 'conflict');
+          outcomes.set(k, 'conflict');
         }
+      }
+      if (confirmed.length > 0) {
+        for (const k of await confirmWrites(deps, store, confirmed, readAt)) {
+          outcomes.set(k, 'pushed');
+        }
+      }
+    }
+
+    if (step.stale.length > 0) {
+      // Apply the orders Shopify created or changed since the record (P1); the next attempt
+      // sends what changed, and finds the rest unexplained.
+      for (const w of step.stale) {
+        const k = levelKey(w.level);
+        refused.set(k, (refused.get(k) ?? 0) + 1);
+        refusedWith.set(k, { from: w.from, to: w.to });
+      }
+      const asOf = Math.min(...step.stale.map((w) => (w.asOf ? new Date(w.asOf).getTime() : 0)));
+      const since = new Date(Math.max(store.createdAt.getTime(), asOf - 60_000));
+      const caught = await catchUpOrders(deps, store, since);
+      ordersCaughtUp += caught.applied;
+      if (!caught.complete) {
+        // More orders than one catch-up reads: decided later, by the reconciler.
+        for (const w of step.stale) outcomes.set(levelKey(w.level), 'deferred');
       }
     }
     pending = pending.filter((l) => !outcomes.has(levelKey(l)));
   }
   // Still refused after three rounds of new orders: left for the reconciler.
-  for (const l of pending) outcomes.set(levelKey(l), 'conflict');
+  for (const l of pending) outcomes.set(levelKey(l), 'deferred');
   return outcomes;
+}
+
+/**
+ * Records writes Shopify had already applied: Shopify shows Airstock's number, as of `readAt`.
+ * Only levels whose record is still the one the write was made from; returns their keys.
+ */
+async function confirmWrites(
+  deps: SyncDeps,
+  store: ConnectedStore,
+  writes: Write[],
+  readAt: Date,
+): Promise<string[]> {
+  return deps.db.transaction({ shopId: store.shopId, userId: null }, async (tx) => {
+    const rows = await tx.query<{ item: string; location: string }>(
+      `update shopify_inventory_levels l set expected_available = x.qty, expected_as_of = $6,
+         last_pushed_available = x.qty, last_pushed_at = now(), updated_at = now()
+       from unnest($2::text[], $3::text[], $4::integer[], $5::integer[])
+         as x(item, location, qty, was)
+       where l.connection_id = $1 and l.shopify_inventory_item_id = x.item
+         and l.shopify_location_id = x.location and l.expected_available = x.was
+         and l.conflict_at is null
+       returning l.shopify_inventory_item_id as item, l.shopify_location_id as location`,
+      [
+        store.connectionId,
+        writes.map((w) => w.level.inventoryItemId),
+        writes.map((w) => w.level.shopifyLocationId),
+        writes.map((w) => w.to),
+        writes.map((w) => w.from),
+        readAt.toISOString(),
+      ],
+    );
+    const keys = new Set(rows.map((r) => `${r.item}@${r.location}`));
+    const done = writes.filter((w) => keys.has(levelKey(w.level)));
+    if (done.length > 0) {
+      await tx.query('update shopify_connections set last_pushed_at = now() where id = $1', [
+        store.connectionId,
+      ]);
+      await tx.query(INSERT_AUDIT_EVENTS_SQL, [
+        JSON.stringify(
+          done.map((w) =>
+            syncEvent(store, w.level, w.variantId, {
+              action: 'shopify.inventory.pushed',
+              outcome: 'succeeded',
+              changes: { available: { from: w.from, to: w.to }, alreadyInShopify: true },
+              reason: 'Shopify already showed Airstock’s quantity (an earlier write was applied).',
+            }),
+          ),
+        ),
+      ]);
+    }
+    return [...keys];
+  });
+}
+
+/**
+ * Records levels Shopify refused for a reason other than a stale quantity: an audit event per
+ * level, and the connection's last error, which sync health shows with the level's pending push.
+ * The level is tried again with the next push.
+ */
+async function recordFailures(
+  deps: SyncDeps,
+  store: ConnectedStore,
+  failures: Failure[],
+): Promise<void> {
+  for (const f of failures) {
+    deps.logger?.error('shopify_push_refused', {
+      ...f.write.level,
+      code: f.code,
+      error: f.message,
+    });
+  }
+  const first = failures[0]!;
+  const message =
+    `Shopify refused the quantity of inventory item ${first.write.level.inventoryItemId} at ` +
+    `location ${first.write.level.shopifyLocationId}: ${first.message}` +
+    (failures.length > 1 ? ` (and ${failures.length - 1} more)` : '');
+  await deps.db.transaction({ shopId: store.shopId, userId: null }, async (tx) => {
+    await tx.query(INSERT_AUDIT_EVENTS_SQL, [
+      JSON.stringify(
+        failures.map((f) =>
+          syncEvent(store, f.write.level, f.write.variantId, {
+            action: 'shopify.inventory.push_failed',
+            outcome: 'failed',
+            changes: { available: { from: f.write.from, to: f.write.to }, code: f.code },
+            reason: f.message.slice(0, 1000),
+          }),
+        ),
+      ),
+    ]);
+    await tx.query(
+      'update shopify_connections set last_error = $2, last_error_at = now() where id = $1',
+      [store.connectionId, message.slice(0, 1000)],
+    );
+  });
 }
 
 /** The alert key of a level's conflict: one open alert per level. */

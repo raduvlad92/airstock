@@ -61,9 +61,56 @@ describe('Shopify Admin client', () => {
     ]);
     const admin = httpShopifyAdmin('a.myshopify.com', 'token', fetch);
     const input = { quantities, idempotencyKey: 'k', reference: 'r' };
-    expect(await admin.setAvailable(input)).toEqual({ kind: 'stale', stale: [1] });
+    expect(await admin.setAvailable(input)).toEqual({ kind: 'refused', stale: [1], failed: [] });
     // Without a path, every quantity is a suspect; the push reads Shopify before deciding.
-    expect(await admin.setAvailable(input)).toEqual({ kind: 'stale', stale: [0, 1] });
+    expect(await admin.setAvailable(input)).toEqual({
+      kind: 'refused',
+      stale: [0, 1],
+      failed: [],
+    });
+  });
+
+  it('names quantities refused for another reason, and fails a refusal tied to none', async () => {
+    const refused = (errors: unknown[]) => ({
+      data: { inventorySetQuantities: { userErrors: errors } },
+    });
+    const { fetch } = fakeFetch([
+      {
+        body: refused([
+          {
+            code: 'INVALID_INVENTORY_ITEM',
+            field: ['input', 'quantities', '0', 'inventoryItemId'],
+            message: 'The specified inventory item could not be found.',
+          },
+          {
+            code: 'CHANGE_FROM_QUANTITY_STALE',
+            field: ['input', 'quantities', '1', 'changeFromQuantity'],
+            message: 'stale',
+          },
+        ]),
+      },
+      {
+        body: refused([{ code: 'INVALID_INVENTORY_ITEM', field: null, message: 'Not found.' }]),
+      },
+    ]);
+    const admin = httpShopifyAdmin('a.myshopify.com', 'token', fetch);
+    const input = { quantities, idempotencyKey: 'k', reference: 'r' };
+    expect(await admin.setAvailable(input)).toEqual({
+      kind: 'refused',
+      stale: [1],
+      failed: [
+        {
+          index: 0,
+          code: 'INVALID_INVENTORY_ITEM',
+          message: 'The specified inventory item could not be found.',
+        },
+      ],
+    });
+    // Shopify did not say which quantity: the push splits the batch to find it.
+    await expect(admin.setAvailable(input)).rejects.toMatchObject({
+      code: 'INVALID_INVENTORY_ITEM',
+      retryable: false,
+    });
   });
 
   it('waits for the cost bucket when throttled, then retries', async () => {

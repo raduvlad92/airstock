@@ -926,7 +926,7 @@ describe('F-TRANSFER-DEST-UNLOCKED: a transfer receipt can land stock at a locat
 // manager limited to one warehouse learns the units and value held everywhere else.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-COST-TOTALS: get_stock shows shop-wide owned quantity and value to scoped members', () => {
-  it.fails('shows a scoped member no cost figures beyond their own locations', async () => {
+  it('shows a scoped member no cost figures beyond their own locations', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, {
       variantId,

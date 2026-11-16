@@ -12,7 +12,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I0 Groundwork | Done | Bench seeds and baseline timings (PR #48, [measurements](phase-2-measurements.md)). Originals shrink to 2,048 px, re-consent revokes earlier connections, and the ChatGPT harness (PR #46). Research (Section 5). The bench seed found a crash in the catalog grid on names outside Latin-1 ("ș", "€"); fixed in PR #50. |
 | I1 Stock engine | Mostly done | Schema, receipts, reservations, fulfillment, allocation rules, bundles, shortages, and valuation (PRs #45, #49). One-of-a-kind items, quick add, starter families for cards and sets, and the dashboard stock panel (PR #51). The scheduled reconciliation job is in progress. |
 | I2 Transfers, returns, counts | In progress | Restarted 16 November, 07:30 UTC |
-| I3 Purchasing and alerts | In progress | Restarted 16 November, 07:30 UTC |
+| I3 Purchasing and alerts | In progress | Purchase orders in review (PDF, email, receipts, on order); reorder rules and alerts next |
 | I4 Scanning and picking | In progress | Restarted 16 November, 07:30 UTC. The scanning screen and installed app land first, for the iPhone check. |
 | I5 Webhooks, activity, reports | In progress | Webhooks done (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views are being finished. Reports wait for I3. |
 | I6 Shopify connector | Waiting for I2 | |
@@ -42,6 +42,7 @@ ADRs are numbered when they merge. This table links each decision as it lands.
 | D5 | One-of-a-kind items, both ways | [ADR 0024](adr/0024-one-of-a-kind-items.md) |
 | D6 | Shortages | [ADR 0021](adr/0021-shortages.md) |
 | D7 | Valuation | [ADR 0022](adr/0022-valuation.md) |
+| D11 | Purchase orders: per-line quantities, receipts at the line cost, PDF in the Worker, send log | [ADR 0027](adr/0027-purchase-orders.md) |
 | D14 | Webhooks: registry of event types, per-shop subscriptions, signed deliveries with retries | [ADR 0023](adr/0023-outgoing-webhooks.md), [docs/webhooks.md](webhooks.md) |
 | D16 | MCP tools: measured tool choice, not a count | [ADR 0005, update](adr/0005-operation-registry.md) and Section 5.1 |
 | D19 | Media originals shrink above 2,048 px | [ADR 0015, update](adr/0015-media.md) |

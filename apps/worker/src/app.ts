@@ -11,11 +11,13 @@ import {
   type WebhookSecretCipher,
 } from '@airstock/core';
 import type { Database, DatabaseHooks } from '@airstock/db';
+import type { FontLoader } from '@airstock/pdf';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { mountFileRoutes } from './files.ts';
 import { type McpAuthConfig, mountMcp } from './mcp.ts';
 import { isUploadRequest, type MediaConfig, mountMedia } from './media.ts';
+import { mountPurchasingRoutes } from './purchasing.ts';
 import { limitKindFor, type RateLimiter, RequestLimits } from './rate-limit.ts';
 import { mountRestRoutes } from './rest.ts';
 import { type FileStore, mountScanTest } from './scan.ts';
@@ -46,6 +48,8 @@ export interface AppDeps {
   media?: MediaConfig;
   /** Request rate limits per caller (ADR 0011); none when absent. */
   rateLimiter?: RateLimiter;
+  /** Loads the PDF fonts (ADR 0019) for purchase order PDFs; the download is off when absent. */
+  fonts?: FontLoader;
   /** Encrypts webhook signing secrets (D14); creating a webhook is refused when absent. */
   webhookSecrets?: WebhookSecretCipher | null;
   logger: Logger;
@@ -210,6 +214,7 @@ export function createApp(deps: AppDeps) {
   });
 
   mountFileRoutes(app, deps);
+  mountPurchasingRoutes(app, deps);
   mountRestRoutes(app, deps);
   mountMedia(app, deps);
   mountMcp(app, deps, limits);

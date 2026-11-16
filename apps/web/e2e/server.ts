@@ -7,6 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,6 +150,8 @@ const app = createApp({
       }
     }),
   webhookSecrets: webhookCipher,
+  // Purchase order PDFs read the label fonts, as the Worker does through its ASSETS binding.
+  fonts: async (file) => new Uint8Array(await readFile(join(PUBLIC_DIR, 'assets', 'fonts', file))),
   mcp: null,
   web: {
     publicUrl: ORIGIN,

@@ -324,6 +324,7 @@ describe('event-type registry (plan 7.1, webhook settings)', () => {
       'catalog.item.changed',
       'job.completed',
       'webhook.test',
+      'purchase_order.status_changed',
     ]);
     expect(() => webhookEvent('stock.change', {})).toThrow(/Unknown webhook event type/);
   });

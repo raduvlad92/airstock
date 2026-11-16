@@ -106,6 +106,21 @@ export {
   type PipelineDeps,
 } from './pipeline.ts';
 export {
+  type EmailRecipients,
+  type PurchaseOrderEmailDeps,
+  type PurchaseOrderEmailOutcome,
+  sendPurchaseOrderEmail,
+} from './purchasing/email.ts';
+export {
+  loadPurchaseOrder,
+  OPEN_PO_STATUSES,
+  PO_STATUSES,
+  type PoStatus,
+  type PurchaseOrderLineView,
+  type PurchaseOrderView,
+  poNumber,
+} from './purchasing/orders.ts';
+export {
   type AnyOperation,
   type FileAccess,
   isMcpExposure,

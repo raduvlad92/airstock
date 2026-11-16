@@ -10,6 +10,7 @@
   "dependencies": {
     "@airstock/core": "workspace:*",
     "@airstock/db": "workspace:*",
+    "@airstock/pdf": "workspace:*",
     "@airstock/shopify": "workspace:*",
     "@modelcontextprotocol/server": "2.4.0",
     "hono": "4.13.16",

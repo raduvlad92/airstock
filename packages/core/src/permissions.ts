@@ -34,6 +34,10 @@ export const PERMISSIONS = [
   'exports.run',
   /** Create and change outgoing webhook subscriptions, and see their deliveries (D14). */
   'webhooks.manage',
+  /** Draft, send, close, and cancel purchase orders, and set reorder rules (D11). */
+  'purchasing.manage',
+  /** Acknowledge alerts (D12). Seeing alerts needs inventory.read, within the location scope. */
+  'alerts.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

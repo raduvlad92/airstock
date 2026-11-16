@@ -656,13 +656,36 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   },
   {
     id: 'purchase_order.status_changed',
-    description: 'A purchase order moved to another state, such as sent or received (I3).',
-    status: 'coming',
+    description:
+      'A purchase order was drafted or moved to another state: sent, partially received, received, closed, or cancelled. Names the order, its supplier and destination, and its version.',
+    status: 'available',
     permission: 'inventory.read',
     filters: ['locations'],
-    data: z.object({ purchaseOrder: z.record(z.string(), z.unknown()), status: ComingStatus }),
+    data: z.object({
+      purchaseOrder: z.object({
+        id: z.string(),
+        number: z.string(),
+        supplierId: z.string(),
+        warehouseId: z.string(),
+        locationId: z.string().nullable(),
+        version: z.number().int(),
+      }),
+      status: ComingStatus.extend({
+        from: z
+          .enum(['draft', 'sent', 'partially_received', 'received', 'closed', 'cancelled'])
+          .nullable(),
+        to: z.enum(['draft', 'sent', 'partially_received', 'received', 'closed', 'cancelled']),
+      }),
+    }),
     sample: {
-      purchaseOrder: { id: SAMPLE_IDS.purchaseOrder, number: 'PO-0001' },
+      purchaseOrder: {
+        id: SAMPLE_IDS.purchaseOrder,
+        number: 'PO-0001',
+        supplierId: '0193a1b2-0000-7000-8000-0000000000b0',
+        warehouseId: SAMPLE_IDS.warehouse,
+        locationId: SAMPLE_IDS.location,
+        version: 4,
+      },
       status: { from: 'sent', to: 'partially_received' },
     },
     build: passthrough,

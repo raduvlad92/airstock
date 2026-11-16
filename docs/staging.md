@@ -63,6 +63,7 @@ Values are never committed. Names only:
 | Worker secret | `INTERNAL_SECRET` | Authenticates the jobs consumer's calls to `/internal/jobs` through the `SELF` service binding |
 | Worker secret | `SHOPIFY_API_SECRET` | Shopify app client secret: verifies webhooks and the install redirect |
 | Worker secret | `RESEND_API_KEY` | Resend key `airstock-staging`: sending access to the `EMAIL_FROM` domain only (ADR 0009) |
+| Worker variable | `EMAIL_RECIPIENTS` | `members`: staging emails only addresses of a shop's own members, so test suppliers never get a purchase order (ADR 0009, update for I3) |
 | Worker secret | `SHOPIFY_TOKEN_KEY` | 32 random bytes (Base64) that encrypt stored Shopify tokens; key ID `k1` in `SHOPIFY_TOKEN_KEY_ID` |
 | Worker secret | `WORKOS_API_KEY` | WorkOS key `airstock-staging-worker` |
 | Worker secret | `SESSION_SECRET` | Seals the session cookie |

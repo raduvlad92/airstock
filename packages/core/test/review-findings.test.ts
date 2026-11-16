@@ -523,3 +523,125 @@ describe('F-REVERSE-REPAIR: reversing a stock-check repair changes on hand', () 
     expect(view.totals.onHand).toBe('13.000000');
   });
 });
+
+/** Runs a command and returns 'succeeded' or the error code. */
+async function outcomeOf(p: Promise<unknown>): Promise<string> {
+  return p.then(
+    () => 'succeeded',
+    (e: { code?: string }) => e.code ?? String(e),
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// F-SCOPE-COUNT-POSITIONS (scope bypass). startCount with positionIds stores location_id = null;
+// sessionLocation (inventory-counts.ts) then returns [] and the pipeline's scope check passes on
+// an empty list. getCount/listCounts show a null-location session to everyone, and submitCount
+// posts stock changes at positions outside the member's scope.
+// ---------------------------------------------------------------------------------------------
+describe('F-SCOPE-COUNT-POSITIONS: a positions-based count escapes location scope', () => {
+  it.fails('refuses an out-of-scope member reading and submitting a positions-based count', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '6' });
+    const [pos] = await ownerQuery<{ id: string }>(
+      'select id from inventory_positions where shop_id = $1 and variant_id = $2',
+      [shop.shopId, variantId],
+    );
+    const session = await h.run(ops.startCount, { positionIds: [pos!.id] });
+    await h.run(ops.recordCount, {
+      sessionId: session.sessionId,
+      counts: [{ variantId, locationId: shop.locationId, counted: '2' }],
+    });
+    const scoped = await addMember(shop.shopId, 'inventory_operator', [store]);
+    const read = await outcomeOf(
+      h.run(ops.getCount, { sessionId: session.sessionId }, { caller: scoped.caller }),
+    );
+    const submit = await outcomeOf(
+      h.run(ops.submitCount, { sessionId: session.sessionId }, { caller: scoped.caller }),
+    );
+    const view = await h.run(ops.getAvailability, { variantId });
+    expect({ read, submit, onHand: view.totals.onHand }).toEqual({
+      read: 'not_found',
+      submit: 'location_out_of_scope',
+      onHand: '6.000000',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-SCOPE-PO-RECEIVE (scope bypass). purchasing.ts receivePurchaseOrderLine never calls
+// assertDestinationInScope (every other PO command does) and never checks that the receiving
+// location is in the order's warehouse. A member limited to warehouse B can receive (change) an
+// order destined for warehouse A, which ADR 0027 forbids, and the response returns the full order.
+// ---------------------------------------------------------------------------------------------
+describe('F-SCOPE-PO-RECEIVE: a scoped member can receive an order for another warehouse', () => {
+  it.fails('refuses a receipt by a member whose scope does not cover the order’s destination', async () => {
+    const supplier = await h.run(ops.createSupplier, { name: `Sup ${uuidv7().slice(-6)}` });
+    const variantId = await createVariant(h);
+    const po = await h.run(ops.draftPurchaseOrder, {
+      supplierId: supplier.supplier.id,
+      warehouseId: shop.warehouseId,
+      lines: [{ variantId, quantity: '5', unitCost: '2' }],
+    });
+    await h.run(ops.sendPurchaseOrder, { purchaseOrderId: po.id, email: false });
+    const scoped = await addMember(shop.shopId, 'inventory_operator', [store]);
+    const read = await outcomeOf(
+      h.run(ops.getPurchaseOrder, { purchaseOrderId: po.id }, { caller: scoped.caller }),
+    );
+    expect(read).not.toBe('succeeded');
+    const receive = await outcomeOf(
+      h.run(
+        ops.receivePurchaseOrderLine,
+        { purchaseOrderId: po.id, lineId: po.lines[0].id, quantity: '5', locationId: store },
+        { caller: scoped.caller },
+      ),
+    );
+    expect(receive).toBe(read);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-FRACTIONAL-FULFILL (stock wrong). assertScale runs on reserve, receipts, adjustments and POs
+// only; fulfillReservation, releaseReservation, reallocateReservation and picks accept 6 decimals.
+// Fulfilling 0.5 of a whole-unit variant leaves 4.5 units on hand.
+// ---------------------------------------------------------------------------------------------
+describe('F-FRACTIONAL-FULFILL: fulfillment ignores the variant’s quantity precision', () => {
+  it.fails('refuses to fulfill half a unit of a whole-unit variant', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '5' });
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '2' });
+    const outcome = await outcomeOf(
+      h.run(ops.fulfillReservation, { reservationId: r.reservationId, quantity: '0.5' }),
+    );
+    const view = await h.run(ops.getAvailability, { variantId });
+    expect({ outcome, onHand: view.totals.onHand }).toEqual({
+      outcome: 'quantity_precision',
+      onHand: '5.000000',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-REALLOCATE-IGNORES-LIMITS (wrong stock promised). reallocateReservation builds its candidates
+// from the input only (ruleScopes: null, lot and location from the request) and never applies the
+// reservation's own lot_id, location_id, or channel rule, unlike fillShortages and adjust.ts. A
+// reservation limited to lot K can be moved to lot L (a picker rescan, or the API).
+// ---------------------------------------------------------------------------------------------
+describe('F-REALLOCATE-IGNORES-LIMITS: reallocation leaves the reservation’s own lot', () => {
+  it.fails('refuses to move a lot-limited reservation to another lot', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
+    for (const lotCode of ['K', 'L']) {
+      await h.run(ops.receiveStock, {
+        variantId,
+        locationId: shop.locationId,
+        quantity: '3',
+        lotCode,
+      });
+    }
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '2', lotCode: 'K' });
+    const outcome = await outcomeOf(
+      h.run(ops.reallocateReservation, { reservationId: r.reservationId, lotCode: 'L' }),
+    );
+    expect(outcome).not.toBe('succeeded');
+  });
+});

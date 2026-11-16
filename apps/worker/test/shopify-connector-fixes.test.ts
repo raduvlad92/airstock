@@ -2,6 +2,7 @@ import { uuidv7 } from '@airstock/core';
 import {
   catchUpOrders,
   connectedStore,
+  publishListing,
   pushChanges,
   reconcileConnection,
   ShopifyApiError,
@@ -353,5 +354,79 @@ describe('Shopify connector fixes', () => {
       await sync.end();
     }
     expect(await h.available(s.m, only.variantId)).toBe('8.000000');
+  });
+
+  describe('publishing a listing whose SKU Shopify already has', () => {
+    async function listed(name: string, code: string) {
+      const m = await h.merchant(name);
+      const store = h.newStore('fixes');
+      const connectionId = await h.install(m, store);
+      await h.command(
+        m.cookie,
+        `/shops/${m.shopId}/shopify/connections/${connectionId}/locations`,
+        { connectionId, locations: [{ shopifyLocationId: '1001', locationId: m.locationId }] },
+      );
+      await h.flushTogether(m.shopId);
+      const made = await h.item(m, 'Booster box', code, { price: '12.00' });
+      const res = await h.command(
+        m.cookie,
+        `/shops/${m.shopId}/products/${made.productId}/shopify-listing`,
+        { productId: made.productId, status: 'active' },
+      );
+      expect(res.status, await res.clone().text()).toBe(200);
+      return { m, store, connectionId, made };
+    }
+
+    it('does not adopt someone else’s product carrying the SKU', async () => {
+      const code = `BOX-${uuidv7().slice(-6)}`;
+      const s = await listed('Taken SKU', code);
+      s.store.addProduct({
+        title: 'Merchant’s own bundle',
+        variants: [
+          { sku: code, price: '30.00' },
+          { sku: `OTHER-${uuidv7().slice(-6)}`, price: '5.00' },
+        ],
+      });
+      const calls = s.store.productCalls.length;
+      expect(await publishListing(h.deps(), s.m.shopId, s.connectionId, s.made.productId)).toBe(
+        'failed',
+      );
+      expect(s.store.productCalls.length).toBe(calls);
+      const [listing] = await ownerQuery<{ state: string; last_error: string; product: string }>(
+        `select state, last_error, shopify_product_id as product from shopify_listings
+         where shop_id = $1`,
+        [s.m.shopId],
+      );
+      expect(listing).toMatchObject({ state: 'failed', product: null });
+      expect(listing?.last_error).toContain(code);
+      const maps = await ownerQuery('select 1 from shopify_variant_maps where shop_id = $1', [
+        s.m.shopId,
+      ]);
+      expect(maps).toEqual([]);
+    });
+
+    it('adopts the product an earlier attempt created, and shows where it differs', async () => {
+      const code = `BOX-${uuidv7().slice(-6)}`;
+      const s = await listed('Crashed create', code);
+      // The earlier attempt created the product, then the Worker stopped; the item has been
+      // renamed in Airstock since.
+      s.store.addProduct({
+        title: 'Booster box (old name)',
+        variants: [{ sku: code, price: '12.00' }],
+      });
+      expect(await publishListing(h.deps(), s.m.shopId, s.connectionId, s.made.productId)).toBe(
+        'adopted',
+      );
+      const differences = await ownerQuery<{ field: string; shopify: unknown }>(
+        'select field, shopify from shopify_listing_differences where shop_id = $1',
+        [s.m.shopId],
+      );
+      expect(differences).toEqual([{ field: 'title', shopify: 'Booster box (old name)' }]);
+      const [map] = await ownerQuery<{ variant_id: string }>(
+        'select variant_id from shopify_variant_maps where shop_id = $1',
+        [s.m.shopId],
+      );
+      expect(map?.variant_id).toBe(s.made.variantId);
+    });
   });
 });

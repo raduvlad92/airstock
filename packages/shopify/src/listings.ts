@@ -26,6 +26,9 @@ export interface MediaReader {
 
 export const PRODUCT_JOB = 'shopify.product_sync';
 
+/** A listing Airstock will not publish as it stands; the person sees why in sync health. */
+class ListingRefused extends Error {}
+
 /** A decimal without trailing zeros, as Shopify shows prices ("49.90" → "49.9"). */
 function decimalText(value: string): string {
   return value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value;
@@ -211,11 +214,40 @@ export async function publishListing(
       let variants: Array<{ variantId: string; inventoryItemId: string; sku: string | null }>;
       let pictures: Record<string, string> = {};
       let outcome: PublishOutcome;
+      let read: Awaited<ReturnType<typeof store.admin.product>> = null;
+      const differences: Array<{ field: ListingField; airstock: unknown; shopify: unknown }> = [];
       if (existing.length > 0) {
-        // Shopify already has these SKUs (an earlier attempt created the product): adopt it.
-        shopifyProductId = existing[0]!.productId;
+        // Shopify already has these SKUs. Only a product an earlier attempt of this publish
+        // created is adopted: one product carrying exactly this product's SKUs. Any other is
+        // someone else's product, which a person maps instead.
+        const products = [...new Set(existing.map((v) => v.productId))];
+        const candidate = products.length === 1 ? await store.admin.product(products[0]!) : null;
+        const ours = new Set(skus.map(skuKey));
+        const theirs = (candidate?.variants ?? []).map((v) => (v.sku ? skuKey(v.sku) : ''));
+        if (
+          !candidate ||
+          theirs.length !== ours.size ||
+          !theirs.every((k) => ours.has(k)) ||
+          new Set(theirs).size !== theirs.length
+        ) {
+          const taken = [...new Set(existing.map((v) => v.sku))].slice(0, 5).join(', ');
+          throw new ListingRefused(
+            `Shopify already has a product with SKU ${taken}. Map that product to this item in sync health, or change the SKU, instead of creating another.`,
+          );
+        }
+        shopifyProductId = candidate.productId;
         variants = existing.filter((v) => v.productId === shopifyProductId);
         pictures = Object.fromEntries(detail.pictures.map((p) => [p.mediaId, 'adopted']));
+        read = candidate;
+        // Where it differs from Airstock (Airstock changed since that attempt), a person
+        // decides: shown as differences, not recorded as agreed.
+        const there = shopifyValues(candidate);
+        for (const field of LISTING_FIELDS) {
+          if (field === 'pictures') continue;
+          if (!sameValue(field, airstock[field], there[field])) {
+            differences.push({ field, airstock: airstock[field], shopify: there[field] });
+          }
+        }
         outcome = 'adopted';
       } else {
         const staged = await stagePictures(deps, store, detail.pictures);
@@ -246,7 +278,7 @@ export async function publishListing(
         pictures = Object.fromEntries(staged.map((s) => [s.mediaId, s.source]));
         outcome = 'created';
       }
-      const read = await store.admin.product(shopifyProductId);
+      read ??= await store.admin.product(shopifyProductId);
       const bySku = new Map(detail.variants.map((v) => [skuKey(v.sku), v.variantId]));
       await record({
         shopifyProductId,
@@ -265,6 +297,7 @@ export async function publishListing(
         pictures,
         airstockValues: airstock,
         shopifyValues: read ? shopifyValues(read) : undefined,
+        differences,
       });
       return outcome;
     }

@@ -10,10 +10,10 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | Milestone | State | Notes |
 | --- | --- | --- |
 | I0 Groundwork | Done | Bench seeds and baseline timings (PR #48, [measurements](phase-2-measurements.md)). Originals shrink to 2,048 px, re-consent revokes earlier connections, and the ChatGPT harness (PR #46). Research (Section 5). The bench seed found a crash in the catalog grid on names outside Latin-1 ("ș", "€"); fixed in PR #50. |
-| I1 Stock engine | Mostly done | Schema, receipts, reservations, fulfillment, allocation rules, bundles, shortages, and valuation (PRs #45, #49). One-of-a-kind items, quick add, starter families for cards and sets, and the dashboard stock panel (PR #51). The scheduled reconciliation job is in progress. |
+| I1 Stock engine | Done | Schema, receipts, reservations, fulfillment, allocation rules, bundles, shortages, and valuation (PRs #45, #49). One-of-a-kind items, quick add, starter families for cards and sets, and the dashboard stock panel (PR #51). The scheduled stock check with a reviewed repair (PR #55, Settings › Stock check). |
 | I2 Transfers, returns, counts | In progress | Restarted 16 November, 07:30 UTC |
-| I3 Purchasing and alerts | In progress | Purchase orders in review (PDF, email, receipts, on order); reorder rules and alerts next |
-| I4 Scanning and picking | In progress | Restarted 16 November, 07:30 UTC. The scanning screen and installed app land first, for the iPhone check. |
+| I3 Purchasing and alerts | In progress | Purchase orders done (PR #59, [ADR 0027](adr/0027-purchase-orders.md)): PDF, email, receipts against lines, on order. Reorder rules and alerts next. |
+| I4 Scanning and picking | First half done | The scanner at `/app/scan` and the installed app (PR #54, [ADR 0025](adr/0025-scanning-and-installed-app.md)); look up, receive, and unknown codes (PR #58); pick lists on the phone and as PDF (PR #60, [ADR 0026](adr/0026-picking.md)). Next (I4b), once I2 and I3 land: count, move, receive against a PO, quick add, and short pick to count. |
 | I5 Webhooks, activity, reports | In progress | Webhooks done (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views are being finished. Reports wait for I3. |
 | I6 Shopify connector | Waiting for I2 | |
 | I7 MVP gate | Not started | |
@@ -27,10 +27,37 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | When | Step | State |
 | --- | --- | --- |
 | I0 | Create the `airstock-bench` Neon project and a project-scoped API key | Done, 16 November |
-| I4, early | Scan on the iPhone in Safari and as an installed app, close up and in dim light, including a graded-card slab label | Later |
+| I4, now | Scan on the iPhone in Safari and as an installed app, close up and in dim light, including a graded-card slab label: the script in Section 2.1 | **Ready** |
 | I5 | Give an n8n webhook URL and set up a subscription in the dashboard | Later |
 | I6 | Give the store's Shopify product export, for the rehearsal on a development store | Later |
 | I7 | Decide production: domain, Neon plan, WorkOS production environment, email sender | Later |
+
+### 2.1 iPhone check (I4)
+
+The scanner has only been tested in browsers on a computer. This run checks the camera, torch, sounds, and home-screen install on the iPhone.
+
+1. **Open the scanner.** In Safari on the iPhone, open https://airstock.deletecookies.dev/app/scan and sign in. Tap **Start camera** and allow it. The line under the camera should say "zxing decoder".
+2. **Print test labels.** On the laptop, go to Labels and print a location label for a shelf, and labels for one or two products. Real product barcodes work too.
+3. **Location label.** Scan it. The green bar should read "Location: Main stock/…".
+4. **Look up.** Scan a product barcode. The item and its stock per location should appear.
+5. **Close and dim.** Repeat step 4 close up (5–10 cm) and in dim light. Try **Light on** and **Zoom** if they appear.
+6. **Graded-card slab.** Scan the slab's barcode close up, then in dim light, through the plastic.
+   - If it's unknown, tap **Create new item** or **Attach to an item**.
+   - Scan it again; it should now find the item.
+7. **Receive.**
+   - Open the **Receive** tab.
+   - Scan the item twice; it should show 2 units.
+   - Tap **Receive 2**; you should hear a beep.
+   - Check the stock in **Look up**.
+8. **Install.** While on `/app/scan`, tap Share, then **Add to Home Screen**. Open Airstock from the home screen; it should start on the scanner. Repeat steps 3 and 4. Put the ringer on silent and check the beep still plays (the button in the header turns sounds off).
+9. **Pick.**
+   - On the laptop, reserve a few units on the Inventory page.
+   - Go to Picking, then **Build pick list**, then **Download PDF**.
+   - On the phone, open **Pick**, choose the list, scan the shelf label, scan the item, and tap **Confirm**.
+   - On one line, try **Short…**.
+   - Tap **Finish and fulfill**. Stock should drop only at the end.
+
+Note anything that fails, and at which step.
 
 ## 3. Decisions
 

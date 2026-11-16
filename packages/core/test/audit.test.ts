@@ -103,10 +103,16 @@ describe('activity history (PRD 7)', () => {
     expect(next.events.map((e: { action: string }) => e.action)).toContain('catalog.item.created');
   });
 
-  it('keeps the default audit partition empty', async () => {
-    const [row] = await ownerQuery<{ n: string }>(
-      'select count(*)::text as n from audit_events_default',
+  it('has monthly partitions only, months ahead, and no default partition', async () => {
+    const rows = await ownerQuery<{ name: string; is_default: boolean }>(
+      `select c.relname as name, pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT' as is_default
+       from pg_inherits i join pg_class c on c.oid = i.inhrelid
+       where i.inhparent = 'audit_events'::regclass`,
     );
-    expect(row?.n).toBe('0');
+    expect(rows.some((r) => r.is_default)).toBe(false);
+    const inThreeMonths = new Date();
+    inThreeMonths.setUTCMonth(inThreeMonths.getUTCMonth() + 3, 1);
+    const name = `audit_events_${inThreeMonths.getUTCFullYear()}_${String(inThreeMonths.getUTCMonth() + 1).padStart(2, '0')}`;
+    expect(rows.map((r) => r.name)).toContain(name);
   });
 });

@@ -266,7 +266,7 @@ export async function sweepUnboundConnectionGrants(db: Database, maxShops = 50):
   return expired;
 }
 
-/** Keeps future monthly audit partitions in place so the default partition stays empty. */
+/** Keeps three months of audit partitions ahead: there is no default partition (migration 0061). */
 export async function ensureAuditPartitions(db: Database, monthsAhead = 3): Promise<number> {
   const [row] = await db.transaction({ shopId: null, userId: null }, (tx) =>
     tx.query<{ created: number }>('select ensure_audit_partitions($1) as created', [monthsAhead]),

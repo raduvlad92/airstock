@@ -34,6 +34,14 @@
                           "type": "string",
                           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                         },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "catalog",
+                            "activity"
+                          ],
+                          "description": "catalog: products or variants; activity: the activity history."
+                        },
                         "status": {
                           "type": "string"
                         },
@@ -74,6 +82,7 @@
                       },
                       "required": [
                         "exportId",
+                        "kind",
                         "status",
                         "rowCount",
                         "error",

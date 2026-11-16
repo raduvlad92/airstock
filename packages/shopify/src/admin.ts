@@ -96,11 +96,30 @@ export interface SetQuantity {
   from: number;
 }
 
+/** A quantity Shopify refused for a reason other than a stale `from` (a deleted item, say). */
+export interface SetFailure {
+  index: number;
+  code: string | null;
+  message: string;
+}
+
 /**
- * A batched write: Shopify applies all quantities or none. `stale` lists the indexes refused
- * because Shopify's quantity was not `from` (all of them when Shopify did not say which).
+ * A batched write: Shopify applies all quantities or none. When it refuses, `stale` lists the
+ * indexes refused because Shopify's quantity was not `from` (all of them when Shopify did not say
+ * which), and `failed` those refused for another reason, by the error's field path.
  */
-export type SetResult = { kind: 'set' } | { kind: 'stale'; stale: number[] };
+export type SetResult =
+  | { kind: 'set' }
+  | { kind: 'refused'; stale: number[]; failed: SetFailure[] };
+
+/**
+ * Idempotency errors of `inventorySetQuantities`: the key was used with other quantities, or
+ * its first use failed. Nothing was applied; the call can be made again with a new key.
+ */
+export const IDEMPOTENCY_KEY_ERRORS = [
+  'IDEMPOTENCY_KEY_PARAMETER_MISMATCH',
+  'IDEMPOTENCY_PREVIOUS_ATTEMPT_FAILED',
+];
 
 /** Most quantities in one `inventorySetQuantities` call. */
 export const MAX_SET_QUANTITIES = 100;
@@ -812,24 +831,43 @@ export function httpShopifyAdmin(
       });
       const errors = data.inventorySetQuantities.userErrors;
       if (errors.length === 0) return { kind: 'set' };
-      const stale = errors.filter((e) => e.code === 'CHANGE_FROM_QUANTITY_STALE');
-      if (stale.length === errors.length) {
-        // The field path names the quantity: ["input", "quantities", "3", "changeFromQuantity"].
-        const indexes = stale.map((e) => Number(e.field?.[2]));
-        return {
-          kind: 'stale',
-          stale: indexes.every((i) => Number.isInteger(i) && i >= 0 && i < input.quantities.length)
-            ? [...new Set(indexes)]
-            : input.quantities.map((_, i) => i),
-        };
+      // The field path names the quantity: ["input", "quantities", "3", "changeFromQuantity"].
+      const indexOf = (e: { field: string[] | null }) => {
+        const i = e.field?.[1] === 'quantities' ? Number(e.field[2]) : Number.NaN;
+        return Number.isInteger(i) && i >= 0 && i < input.quantities.length ? i : null;
+      };
+      const isStale = (e: { code: string | null }) => e.code === 'CHANGE_FROM_QUANTITY_STALE';
+      const other = errors.filter((e) => !isStale(e));
+      // An error Shopify did not tie to one quantity (a whole-call refusal) fails the call.
+      const unplaced = other.find((e) => indexOf(e) === null);
+      if (unplaced) {
+        throw new ShopifyApiError(
+          unplaced.message,
+          200,
+          unplaced.code === 'IDEMPOTENCY_CONCURRENT_REQUEST',
+          unplaced.code ?? undefined,
+        );
       }
-      const first = errors.find((e) => e.code !== 'CHANGE_FROM_QUANTITY_STALE')!;
-      throw new ShopifyApiError(
-        first.message,
-        200,
-        first.code === 'IDEMPOTENCY_CONCURRENT_REQUEST',
-        first.code ?? undefined,
-      );
+      const stale = errors.filter(isStale);
+      const staleIndexes = stale.map(indexOf);
+      return {
+        kind: 'refused',
+        // Without a path, every quantity not refused otherwise is a suspect; the push reads
+        // Shopify before deciding.
+        stale:
+          stale.length === 0
+            ? []
+            : staleIndexes.every((i) => i !== null)
+              ? [...new Set(staleIndexes as number[])]
+              : input.quantities
+                  .map((_, i) => i)
+                  .filter((i) => !other.some((e) => indexOf(e) === i)),
+        failed: other.map((e) => ({
+          index: indexOf(e)!,
+          code: e.code,
+          message: e.message,
+        })),
+      };
     },
 
     async ordersSince(since) {

@@ -23,3 +23,10 @@
 ## Revisit when
 
 Merchants need bulk resolution, "take Shopify's" for packs or bundles, or listing differences (part 5, D21) join the same view.
+
+## Update, 16 November 2026: review fixes
+
+- **Refused levels.** A level Shopify refuses for a reason other than staleness ([ADR 0036](0036-shopify-push-and-reconciler.md), F12) shows as a pending push, and the connection's last error names it. A reconciler run keeps that error while a level is still refused, and clears it after a run without one.
+- **Agreement is not a conflict.** When Shopify shows Airstock's number, the reconciler updates the record and resolves an open conflict (`explained`).
+- **"Take Shopify's" lock order.** `take_shopify` reads the level, changes the stock, and only then locks the level row and checks it again, following the stock engine's lock order (positions, reservations, then everything else) as an order sync does; before, it locked the level first and could deadlock with an order sync. If the conflict changed in between, the resolve is refused (`conflict_changed`) and undone.
+- **Stale alerts.** Only a changed map clears a level's conflict; mapping the same variants again leaves it open.

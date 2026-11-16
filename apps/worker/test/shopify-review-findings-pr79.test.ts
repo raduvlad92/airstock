@@ -80,7 +80,7 @@ describe('Shopify connector review findings (listings, from PR #79)', () => {
   // stock sees it sold out seconds later. PRD 8.5: a Shopify-side quantity no order explains is
   // shown as a conflict, not silently replaced (or it should come in as opening stock, as the
   // onboarding import does).
-  it.fails('L1: a product created in Shopify with stock keeps its quantity', async () => {
+  it('L1: a product created in Shopify with stock keeps its quantity', async () => {
     const s = await setup('Created stock');
     const code = sku('NEWQ');
     const [v] = s.store.addProduct({
@@ -97,7 +97,7 @@ describe('Shopify connector review findings (listings, from PR #79)', () => {
   // the read after the update fails (throttled, a timeout, the Worker stopped), nothing is
   // recorded, so the next publish uploads the same pictures again: the storefront shows each one
   // twice. The create path guards against this (it adopts by SKU); the update path does not.
-  it.fails('L2: a picture is uploaded once even when the publish fails after the update', async () => {
+  it('L2: a picture is uploaded once even when the publish fails after the update', async () => {
     const s = await setup('Picture twice');
     const made = await h.item(s.m, 'Booster bundle', sku('BB'));
     await addPicture(s.m, made.productId, 0);

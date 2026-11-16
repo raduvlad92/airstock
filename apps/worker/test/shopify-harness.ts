@@ -186,7 +186,7 @@ export async function shopifyHarness() {
     domain: string,
     topic: string,
     body: string,
-    opts: { eventId?: string; secret?: string } = {},
+    opts: { eventId?: string; secret?: string; triggeredAt?: string } = {},
   ) {
     const bytes = new TextEncoder().encode(body);
     return t.app.request('/shopify/webhooks', {
@@ -198,6 +198,7 @@ export async function shopifyHarness() {
         'x-shopify-event-id': opts.eventId ?? uuidv7(),
         'x-shopify-webhook-id': uuidv7(),
         'x-shopify-hmac-sha256': await signWebhook(bytes, opts.secret ?? SECRET),
+        ...(opts.triggeredAt ? { 'x-shopify-triggered-at': opts.triggeredAt } : {}),
       },
       body: bytes,
     });

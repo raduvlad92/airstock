@@ -381,12 +381,14 @@ export async function receiveWebhook(
     },
   });
   const result = recorded.result as { jobId: string | null; duplicate: boolean };
-  if (input.topic === 'app/uninstalled' && !result.duplicate) {
+  if (input.topic === 'app/uninstalled') {
+    // Marked for a duplicate too: an earlier delivery may have recorded the receipt and failed
+    // before this step, and Shopify retries with the same event. Marking twice changes nothing.
     await execute(deps, ops.markShopifyUninstalled, {
       caller,
       shopId,
       requestId: input.requestId,
-      input: { connectionId },
+      input: { connectionId, triggeredAt },
     });
   }
   return { status: 'recorded', shopId, jobId: result.jobId, duplicate: result.duplicate };
@@ -555,20 +557,79 @@ export async function processOrder(
   return synced.result as OrderResult;
 }
 
-/** Processes orders Shopify created since `since` that Airstock has not seen. */
+/** What a catch-up read and applied. */
+export interface CatchUp {
+  /** Orders read and applied (each idempotently). */
+  orders: number;
+  /** Changes applied: lines reserved or short, units released, fulfilled, or returned. */
+  applied: number;
+  /** False when more orders changed than one catch-up reads. */
+  complete: boolean;
+}
+
+/** Orders one catch-up reads at most (one Admin read each). */
+const CATCH_UP_ORDERS = 100;
+/** The reconciler's overlap with its cursor (reconcile.ts): Shopify's search index trails. */
+const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
+
+/** The changes an order sync applied. */
+export const changesOf = (r: OrderResult) =>
+  r.reserved +
+  r.shortage +
+  (r.released ?? 0) +
+  (r.fulfilled ?? 0) +
+  (r.fulfillmentsReversed ?? 0) +
+  (r.returns?.length ?? 0);
+
+/**
+ * Applies orders Shopify created since `since` that Airstock may not have seen (the newest page),
+ * and with `changed`, also the orders Shopify changed since then: edits, cancellations,
+ * fulfillments, refunds, and returns of older orders (their restocks raise Shopify's quantity),
+ * a page at a time up to `maxOrders`. Orders changed before the reconciler's cursor are already
+ * applied, so changes are read from there at the earliest.
+ */
 export async function catchUpOrders(
   deps: SyncDeps,
   store: ConnectedStore,
   since: Date,
-): Promise<number> {
-  const orders = await store.admin.ordersSince(since.toISOString());
-  let processed = 0;
-  for (const order of [...orders].reverse()) {
-    if (Date.parse(order.createdAt) < store.createdAt.getTime()) continue;
+  opts: { changed?: boolean; maxOrders?: number } = {},
+): Promise<CatchUp> {
+  const out: CatchUp = { orders: 0, applied: 0, complete: true };
+  const seen = new Set<string>();
+  const apply = async (order: ShopifyOrder) => {
+    if (seen.has(order.orderId)) return;
+    seen.add(order.orderId);
+    if (Date.parse(order.createdAt) < store.createdAt.getTime()) return;
     const result = await processOrder(deps, store.shopId, store.connectionId, order);
-    processed += result.reserved + result.shortage;
+    out.orders += 1;
+    out.applied += changesOf(result);
+  };
+  // New orders, oldest first: Shopify's search by update time can trail a new order.
+  for (const order of [...(await store.admin.ordersSince(since.toISOString()))].reverse()) {
+    await apply(order);
   }
-  return processed;
+  if (!opts.changed) return out;
+  const [conn] = await deps.db.transaction(
+    { shopId: store.shopId, userId: null, readOnly: true },
+    (tx) =>
+      tx.query<{ orders_synced_through: Date | null }>(
+        'select orders_synced_through from shopify_connections where id = $1',
+        [store.connectionId],
+      ),
+  );
+  const cursor = conn?.orders_synced_through
+    ? new Date(conn.orders_synced_through).getTime() - CURSOR_OVERLAP_MS
+    : 0;
+  const changedSince = new Date(Math.max(since.getTime(), cursor)).toISOString();
+  const maxOrders = opts.maxOrders ?? CATCH_UP_ORDERS;
+  let after: string | null = null;
+  do {
+    const page = await store.admin.ordersUpdatedSince(changedSince, after);
+    for (const order of page.orders) await apply(order);
+    after = page.next;
+  } while (after && seen.size < maxOrders);
+  out.complete = after === null;
+  return out;
 }
 
 // Mapping by SKU --------------------------------------------------------------------------

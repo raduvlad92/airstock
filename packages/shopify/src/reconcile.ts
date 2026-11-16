@@ -244,8 +244,10 @@ export async function reconcileConnection(
     (l, i, all) =>
       all.findIndex((x) => key(x) === key(l)) === i && !compared.conflicted.has(key(l)),
   );
+  let pushFailed = false;
   if (toPush.length > 0) {
     const pushed = await pushLevels(deps, shopId, toPush, new Map([[connectionId, store]]));
+    pushFailed = pushed.some((p) => p.outcome === 'failed');
     result.pushed = pushed.filter((p) => p.outcome === 'pushed').length;
     result.conflicts += pushed.filter(
       (p) => p.outcome === 'conflict' && !compared.conflicted.has(key(p)),
@@ -285,9 +287,10 @@ export async function reconcileConnection(
     tx.query(
       `update shopify_connections set reconciled_at = now(),
          levels_compared_at = case when $2 then now() else levels_compared_at end,
-         last_error = null, last_error_at = null
+         last_error = case when $3 then last_error end,
+         last_error_at = case when $3 then last_error_at end
        where id = $1`,
-      [connectionId, opts.daily],
+      [connectionId, opts.daily, pushFailed],
     ),
   );
   return result;
@@ -381,6 +384,7 @@ async function compareLevels(
   const { shopId } = store;
   let suspects = levels;
   for (let round = 0; round < 2 && suspects.length > 0; round++) {
+    const readAt = new Date();
     const { records, actual } = await readLocked(deps, store, suspects);
     if (round === 0) out.compared = suspects.length;
     const differing: Array<{ level: PushLevel; expected: number; asOf: Date | null }> = [];
@@ -411,11 +415,13 @@ async function compareLevels(
     }
     if (differing.length === 0) break;
     if (round === 0) {
-      // Orders Shopify accepted after the record and not applied yet explain a lower quantity.
+      // Orders Shopify accepted after the record and not applied yet explain the difference
+      // (every change an order sync applies counts, cancellations and restocks too).
       const asOf = Math.min(...differing.map((d) => (d.asOf ? new Date(d.asOf).getTime() : 0)));
       const since = new Date(Math.max(store.createdAt.getTime(), asOf - 60_000));
-      const processed = await catchUpOrders(deps, store, since);
-      if (processed > 0) {
+      // (Orders changed since the cursor were applied in step 1; new ones may trail its search.)
+      const caught = await catchUpOrders(deps, store, since);
+      if (caught.applied > 0) {
         suspects = differing.map((d) => d.level);
         continue;
       }
@@ -431,6 +437,16 @@ async function compareLevels(
     const targetOf = new Map(targets.map((t) => [key(t), t]));
     for (const d of differing) {
       const t = targetOf.get(key(d.level));
+      const shopify = actual.get(key(d.level));
+      if (t && shopify === t.target) {
+        // Shopify already shows Airstock's number (a push whose response was lost, or the same
+        // number set by hand): nothing to resolve. The record becomes Shopify's, as of the read.
+        if (await agree(deps, store, d.level, d.expected, shopify, readAt)) {
+          out.explained += 1;
+          out.conflicted.delete(key(d.level));
+        }
+        continue;
+      }
       const wasOpen = out.conflicted.has(key(d.level));
       await recordConflict(deps, store, d.level, t?.variantId ?? null, {
         expected: d.expected,
@@ -443,4 +459,39 @@ async function compareLevels(
     break;
   }
   return out;
+}
+
+/**
+ * Shopify shows Airstock's number while the record says otherwise: the record becomes Shopify's
+ * (as of the read), and an open conflict is resolved (`explained`). Only when the record is still
+ * the one compared. Returns whether it changed.
+ */
+async function agree(
+  deps: SyncDeps,
+  store: ConnectedStore,
+  level: PushLevel,
+  expected: number,
+  shopify: number,
+  readAt: Date,
+): Promise<boolean> {
+  return deps.db.transaction({ shopId: store.shopId, userId: null }, async (tx) => {
+    const changed = await tx.query(
+      `update shopify_inventory_levels set expected_available = $4, expected_as_of = $6,
+         updated_at = now()
+       where connection_id = $1 and shopify_inventory_item_id = $2 and shopify_location_id = $3
+         and expected_available = $5
+       returning 1`,
+      [
+        level.connectionId,
+        level.inventoryItemId,
+        level.shopifyLocationId,
+        shopify,
+        expected,
+        readAt.toISOString(),
+      ],
+    );
+    if (changed.length === 0) return false;
+    await clearConflict(tx, store, level, 'explained', { shopify });
+    return true;
+  });
 }

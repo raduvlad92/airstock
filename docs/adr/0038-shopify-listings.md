@@ -37,3 +37,10 @@
 ## Revisit when
 
 Merchants need multi-variant products created automatically from Shopify, per-field owners changed from the dashboard, Shopify-side picture changes copied back, or listing changes faster than the 30-minute sync (then queue a publish from catalog commands).
+
+## Update, 16 November 2026: review fixes
+
+- **Products created in Shopify keep their quantity (L1).** Before applying a new single-variant product, the job reads its available in Shopify. When the product is created here, that quantity comes in as opening stock at each mapped Shopify location's receiving location (a `count_correction` adjustment, as "take Shopify's" does), and the read becomes Airstock's record of Shopify as of the read, so the push that follows the map changes nothing. If a mapped location holding units has no receiving location, the item is created but left unmapped for a person.
+- **Pictures uploaded once (L2).** Pictures added with `productUpdate` are recorded as soon as Shopify accepts the update, so a failure after it (the read back, a price) does not upload them again on the retry.
+- **Adopting by SKU.** Only one Shopify product carrying exactly the listing's SKUs (what a crashed create leaves) is adopted. Any other product with one of the SKUs belongs to someone else: the listing fails with a message to map that product, and nothing is written to Shopify. Where an adopted product differs from Airstock, the fields are recorded as differences instead of as agreed.
+- **Descriptions.** Shopify keeps the HTML it is sent in its own form (blocks on separate lines, other entities, non-breaking spaces). Each side is still compared with its own last values; where Airstock's text meets Shopify's (a first match, an adoption), whitespace-only differences are not differences, and numeric entities are decoded.

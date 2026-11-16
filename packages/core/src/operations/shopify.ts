@@ -201,13 +201,9 @@ export const setShopifyMappings = defineOperation({
       variants.map((v) => ({ ...v, source: 'sku' as const })),
       true,
     );
-    // Every level is read from Shopify again before the next push (ADR 0008).
-    await ctx.tx.query(
-      `update shopify_inventory_levels set expected_available = null, expected_as_of = null,
-         conflict_at = null, conflict_shopify_available = null, updated_at = now()
-       where connection_id = $1`,
-      [input.connectionId],
-    );
+    // Levels whose map changed are read from Shopify again before the next push (the helpers
+    // reset them). Unchanged ones keep their record and any open conflict: mapping again does not
+    // choose a side for a person (ADR 0036; conflicts are resolved in sync health, ADR 0037).
     return {
       result: {
         connectionId: input.connectionId,
@@ -433,7 +429,11 @@ export const markShopifyUninstalled = defineOperation({
   summary: 'Mark a Shopify store as uninstalled and forget its tokens',
   kind: 'command',
   scope: 'shop',
-  input: z.object({ connectionId: Id }),
+  input: z.object({
+    connectionId: Id,
+    /** When Shopify sent the event: one sent before this connection was made is ignored. */
+    triggeredAt: z.string().nullable().optional(),
+  }),
   output: z.object({ connectionId: Id, status: z.literal('uninstalled') }),
   permission: 'integrations.sync',
   connectionScope: 'inventory:write',
@@ -446,8 +446,10 @@ export const markShopifyUninstalled = defineOperation({
       `update shopify_connections set status = 'uninstalled', uninstalled_at = now(),
          access_token_ciphertext = null, refresh_token_ciphertext = null,
          updated_at = now(), version = version + 1
-       where id = $1 and status = 'active' returning id`,
-      [input.connectionId],
+       where id = $1 and status = 'active'
+         and ($2::timestamptz is null or created_at <= $2::timestamptz)
+       returning id`,
+      [input.connectionId, input.triggeredAt ?? null],
     );
     return {
       result: { connectionId: input.connectionId, status: 'uninstalled' as const },

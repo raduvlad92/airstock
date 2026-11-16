@@ -41,3 +41,7 @@ change Shopify makes itself, so the compare-and-set push stays quiet for those.
 
 Also on 16 November 2026: the temporary MCP exception for `shopify.connections.list` ends. It is the `connections` action of the `shopify_sync` tool, with sync health and conflict resolution ([ADR 0037](0037-shopify-sync-health.md)); `shopify.mappings.set` keeps an exception because mapping happens in the dashboard (ADR 0033).
 
+
+## Update, 16 November 2026: review fixes
+
+The push contract changes in three ways ([ADR 0036](0036-shopify-push-and-reconciler.md)): the idempotency key is derived from the write and the record it was made from, so a retry after a lost response is the same request to Shopify; a refused write is a conflict only if Shopify shows neither Airstock's number nor the record's after new and changed orders are applied; and mapping again no longer takes Shopify's quantity as a new start for unchanged maps, since sync health resolves conflicts ([ADR 0037](0037-shopify-sync-health.md)). `app/uninstalled` marks the connection uninstalled even when Shopify's retry is a duplicate receipt (the first delivery may have failed after recording it); an event Shopify sent before the connection was made, such as a retry arriving after a reinstall, leaves it alone.

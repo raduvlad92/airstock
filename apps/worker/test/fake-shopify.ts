@@ -3,6 +3,7 @@ import {
   type BulkOperationState,
   SHOPIFY_SCOPES,
   type ShopifyAdmin,
+  ShopifyApiError,
   type ShopifyAuth,
   type ShopifyLocation,
   type ShopifyOrder,
@@ -23,6 +24,14 @@ export class FakeStore implements ShopifyAdmin {
   readonly sets: Array<{ item: string; location: string; from: number; to: number }> = [];
   readonly refused: Array<{ item: string; location: string; from: number; actual: number }> = [];
   readonly webhooks: Array<{ uri: string; topic: string }> = [];
+  /** Quantities per accepted or refused `inventorySetQuantities` call. */
+  readonly setCalls: number[] = [];
+  /** Level reads. */
+  reads = 0;
+  /** The next writes fail as throttled (Shopify's cost limit). */
+  throttleNext = 0;
+  /** Orders Shopify's search by updated time does not list yet (its index trails). */
+  readonly searchLag = new Set<string>();
   locationList: ShopifyLocation[] = [
     { id: '1001', name: 'Shop location', active: true },
     { id: '1002', name: 'Warehouse', active: true },
@@ -424,33 +433,52 @@ export class FakeStore implements ShopifyAdmin {
   async variantsWithSku() {
     return this.variants;
   }
-  async getAvailable(item: string, location: string) {
-    return this.levels.get(this.key(item, location)) ?? null;
-  }
-  async setAvailable(input: {
-    inventoryItemId: string;
-    locationId: string;
-    quantity: number;
-    from: number;
-  }) {
-    const k = this.key(input.inventoryItemId, input.locationId);
-    const actual = this.levels.get(k) ?? 0;
-    if (actual !== input.from) {
-      this.refused.push({
-        item: input.inventoryItemId,
-        location: input.locationId,
-        from: input.from,
-        actual,
-      });
-      return { kind: 'stale' as const };
+  async getAvailable(items: string[]) {
+    this.reads++;
+    const out = new Map<string, number>();
+    for (const [k, v] of this.levels) {
+      if (items.includes(k.split('@')[0]!)) out.set(k, v);
     }
-    this.levels.set(k, input.quantity);
-    this.sets.push({
-      item: input.inventoryItemId,
-      location: input.locationId,
-      from: input.from,
-      to: input.quantity,
+    return out;
+  }
+  /** Shopify's batched compare-and-set: every quantity applies, or none (refused as stale). */
+  async setAvailable(input: {
+    quantities: Array<{
+      inventoryItemId: string;
+      locationId: string;
+      quantity: number;
+      from: number;
+    }>;
+    idempotencyKey: string;
+  }) {
+    if (this.throttleNext > 0) {
+      this.throttleNext--;
+      throw new ShopifyApiError('Throttled', 200, true, 'THROTTLED');
+    }
+    this.setCalls.push(input.quantities.length);
+    const stale: number[] = [];
+    input.quantities.forEach((q, i) => {
+      const actual = this.levels.get(this.key(q.inventoryItemId, q.locationId)) ?? 0;
+      if (actual !== q.from) {
+        stale.push(i);
+        this.refused.push({
+          item: q.inventoryItemId,
+          location: q.locationId,
+          from: q.from,
+          actual,
+        });
+      }
     });
+    if (stale.length > 0) return { kind: 'stale' as const, stale };
+    for (const q of input.quantities) {
+      this.levels.set(this.key(q.inventoryItemId, q.locationId), q.quantity);
+      this.sets.push({
+        item: q.inventoryItemId,
+        location: q.locationId,
+        from: q.from,
+        to: q.quantity,
+      });
+    }
     return { kind: 'set' as const };
   }
   async ordersSince(since: string) {
@@ -462,7 +490,7 @@ export class FakeStore implements ShopifyAdmin {
   }
   async ordersUpdatedSince(since: string) {
     const orders = this.orders
-      .filter((o) => (o.updatedAt ?? o.createdAt) >= since)
+      .filter((o) => (o.updatedAt ?? o.createdAt) >= since && !this.searchLag.has(o.orderId))
       .sort((a, b) => ((a.updatedAt ?? '') < (b.updatedAt ?? '') ? -1 : 1));
     return { orders: structuredClone(orders), next: null };
   }

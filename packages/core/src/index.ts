@@ -10,6 +10,7 @@ export {
   ALERT_OPENED,
   ALERT_RESOLVED,
   type AlertKind,
+  applyAlertChanges,
   checkReorderRules,
 } from './alerts/check.ts';
 export { checkShop as checkShopAlerts, runDailyAlertChecks } from './alerts/daily.ts';

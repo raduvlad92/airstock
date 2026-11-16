@@ -933,18 +933,24 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   {
     id: 'shopify.sync_conflict',
     description:
-      'Shopify and Airstock disagree on a quantity or field that no order explains (I6).',
-    status: 'coming',
+      'Shopify and Airstock disagree on a quantity or field that no order explains; Shopify is left as it is.',
+    status: 'available',
     permission: 'inventory.read',
     filters: ['locations'],
     data: z.object({ conflict: z.record(z.string(), z.unknown()) }),
     sample: {
       conflict: {
         kind: 'quantity',
+        connectionId: '0193a1b2-0000-7000-8000-000000000041',
+        shopDomain: 'example.myshopify.com',
+        inventoryItemId: '44012345678',
+        shopifyLocationId: '1001',
+        variantId: SAMPLE_IDS.variant,
         sku: 'ETB-PRE-01',
         locationId: SAMPLE_IDS.location,
-        airstock: '9',
-        shopify: '11',
+        expected: 9,
+        airstock: 9,
+        shopify: 11,
       },
     },
     build: passthrough,

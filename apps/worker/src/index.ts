@@ -23,7 +23,6 @@ import {
   runImportJob,
   runReportExportJob,
   SHOPIFY_PUSH_TOPIC,
-  type ShopifyPushPayload,
   sendInvitationEmail,
   sendPurchaseOrderEmail,
   sendWebhookDisabledEmail,
@@ -42,14 +41,15 @@ import {
 import { type Database, type DatabaseHooks, PgDatabase } from '@airstock/db';
 import type { FontLoader } from '@airstock/pdf';
 import {
-  type AvailabilityChanged,
   httpShopifyAdmin,
   httpShopifyAuth,
   NotConnectedError,
-  pushAvailability,
-  pushConnection,
+  type PushChange,
+  pushChanges,
+  reconcileShopify,
   runJob,
   runOnboarding,
+  type ShopifyReconcileResult,
   type SyncDeps,
   TokenCipher,
 } from '@airstock/shopify';
@@ -446,9 +446,34 @@ async function runReconciliation(env: Env, db: Database, daily: boolean): Promis
   try {
     const result = await reconcileStock(db, { daily, logger });
     logger.info?.('stock_reconciliation', { daily, ...result });
+    await runShopifyReconciliation(env, db, daily);
     await deliverOutbox(env, db);
   } catch (error) {
     logger.error('stock_reconciliation_failed', { error: String(error) });
+  }
+}
+
+/**
+ * The Shopify reconciler (ADR 0036), after the stock check in the same cron: orders Shopify
+ * changed since each connection's cursor, then its levels (all of them daily).
+ */
+async function runShopifyReconciliation(
+  env: Env,
+  db: Database,
+  daily: boolean,
+): Promise<ShopifyReconcileResult | null> {
+  const shopify = await shopifyConfigFromEnv(env);
+  if (!shopify) return null;
+  try {
+    const result = await reconcileShopify(
+      { db, audit: queueSink(env), logger, shopify },
+      { daily, budgetMs: 20_000 },
+    );
+    logger.info?.('shopify_reconciliation', { daily, ...result });
+    return result;
+  } catch (error) {
+    logger.error('shopify_reconciliation_failed', { error: String(error) });
+    return null;
   }
 }
 
@@ -468,10 +493,11 @@ async function internalReconcile(request: Request, env: Env): Promise<Response> 
   try {
     const result = await reconcileStock(db, { daily, logger });
     logger.info?.('stock_reconciliation', { daily, ...result });
+    const shopify = await runShopifyReconciliation(env, db, daily);
     await deliverOutbox(env, db).catch((error) =>
       logger.error('outbox_dispatch_failed', { error: String(error) }),
     );
-    return Response.json(result);
+    return Response.json({ ...result, shopify });
   } finally {
     await db.close();
   }
@@ -601,8 +627,26 @@ async function runJobsBatch(env: Env, db: Database, items: JobsItem[]): Promise<
       }
     : null;
   const outcomes: JobsOutcome[] = [];
+  // Shopify pushes of this batch's stock and map changes run together per shop, after each
+  // message's own work: one batched compare-and-set call covers many changes (ADR 0036).
+  const pushes = new Map<string, { items: JobsItem[]; changes: PushChange[] }>();
   for (const item of items) {
-    outcomes.push({ id: item.id, retryAfter: await runJobsMessage(env, db, deps, item) });
+    outcomes.push({ id: item.id, retryAfter: await runJobsMessage(env, db, deps, item, pushes) });
+  }
+  for (const [shopId, batch] of pushes) {
+    if (!deps) break;
+    try {
+      await pushChanges(deps, shopId, batch.changes);
+    } catch (error) {
+      if (error instanceof NotConnectedError) continue;
+      logger.error('shopify_push_failed', { shopId, error: String(error) });
+      for (const item of batch.items) {
+        const outcome = outcomes.find((o) => o.id === item.id);
+        if (outcome && outcome.retryAfter === null) {
+          outcome.retryAfter = Math.min(300, 30 * Math.max(1, item.attempts));
+        }
+      }
+    }
   }
   return outcomes;
 }
@@ -612,7 +656,14 @@ async function runJobsMessage(
   db: Database,
   deps: SyncDeps | null,
   item: JobsItem,
+  pushes: Map<string, { items: JobsItem[]; changes: PushChange[] }>,
 ): Promise<number | null> {
+  const queuePush = (shopId: string, change: PushChange) => {
+    const batch = pushes.get(shopId) ?? { items: [], changes: [] };
+    batch.items.push(item);
+    batch.changes.push(change);
+    pushes.set(shopId, batch);
+  };
   const { body } = item;
   try {
     if ('job' in body) {
@@ -718,9 +769,10 @@ async function runJobsMessage(
       return null;
     }
     if (body.topic === SHOPIFY_PUSH_TOPIC) {
-      // A mapping changed: push those levels (or all of the connection's).
+      // A mapping or an order changed: push those levels (or all of the connection's), with the
+      // batch's other pushes.
       if (!deps) return 300;
-      await pushConnection(deps, body.shopId, body.payload as ShopifyPushPayload);
+      queuePush(body.shopId, { topic: body.topic, payload: body.payload });
       return null;
     }
     if (body.topic === ONBOARDING_RUN_TOPIC) {
@@ -755,7 +807,7 @@ async function runJobsMessage(
       await announceStockChanged(await webhookDeps(env, db), body).catch((error) => {
         webhookError = error;
       });
-      if (deps) await pushAvailability(deps, body.shopId, body.payload as AvailabilityChanged);
+      if (deps) queuePush(body.shopId, { topic: body.topic, payload: body.payload });
       if (webhookError) throw webhookError;
       return null;
     }

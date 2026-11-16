@@ -3,8 +3,11 @@ export {
   CATALOG_BULK_QUERY,
   gid,
   httpShopifyAdmin,
+  MAX_READ_ITEMS,
+  MAX_SET_QUANTITIES,
   parseCatalogJsonl,
   parseOrder,
+  type SetQuantity,
   type SetResult,
   type ShopifyAdmin,
   ShopifyApiError,
@@ -38,14 +41,26 @@ export {
 export { type OnboardingStep, runOnboarding } from './onboarding.ts';
 export {
   type AvailabilityChanged,
+  changedLevels,
+  clearConflict,
+  conflictKey,
+  type PushChange,
   type PushLevel,
   type PushOutcome,
+  type PushResult,
   pushAvailability,
+  pushChanges,
   pushConnection,
-  pushLevel,
   pushLevels,
+  readShopify,
   recordConflict,
 } from './push.ts';
+export {
+  reconcileConnection,
+  reconcileShopify,
+  type ShopifyReconcileOptions,
+  type ShopifyReconcileResult,
+} from './reconcile.ts';
 export {
   type ConnectedStore,
   catchUpOrders,

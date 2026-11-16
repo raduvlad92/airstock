@@ -9,16 +9,18 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 
 | Milestone | State | Notes |
 | --- | --- | --- |
-| I0 Groundwork | In progress | Three parts are running in parallel: bench seeds and baseline timings; media size limit, re-consent, and the ChatGPT harness; and the research below (Section 5), which is done. |
-| I1 Stock engine | In progress | Started 16 November, in parallel with I0, because every later milestone builds on its schema. |
-| I2 Transfers, returns, counts | Waiting for I1 | |
-| I3 Purchasing and alerts | Waiting for I1 | |
-| I4 Scanning and picking | Waiting for I1 | |
-| I5 Webhooks, activity, reports | Waiting for I1 | |
-| I6 Shopify connector | Waiting for I1 and I2 | |
+| I0 Groundwork | Done | Bench seeds and baseline timings (PR #48, [measurements](phase-2-measurements.md)). Originals shrink to 2,048 px, re-consent revokes earlier connections, and the ChatGPT harness (PR #46). Research (Section 5). The bench seed found a crash in the catalog grid on names outside Latin-1 ("ș", "€"); fixed in PR #50. |
+| I1 Stock engine | Mostly done | Schema, receipts, reservations, fulfillment, allocation rules, bundles, shortages, and valuation (PRs #45, #49). One-of-a-kind items, quick add, starter families for cards and sets, and the dashboard stock panel (PR #51). The scheduled reconciliation job is in progress. |
+| I2 Transfers, returns, counts | In progress | Restarted 16 November, 07:30 UTC |
+| I3 Purchasing and alerts | In progress | Restarted 16 November, 07:30 UTC |
+| I4 Scanning and picking | In progress | Restarted 16 November, 07:30 UTC. The scanning screen and installed app land first, for the iPhone check. |
+| I5 Webhooks, activity, reports | In progress | Webhooks done (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views are being finished. Reports wait for I3. |
+| I6 Shopify connector | Waiting for I2 | |
 | I7 MVP gate | Not started | |
 | I8 Pilot go-live | Not started | |
 | I9 After January | Not started | |
+
+**Night of 16 November:** every agent stopped at the account's 5-hour usage limit at about 03:20 UTC. Only pushed work survived: the stock engine's third part, the webhooks, and most of the activity views. The three milestones that had just started lost nothing, because they had not written code yet. Each agent now pushes within its first 30 minutes.
 
 ## 2. Owner steps
 
@@ -36,10 +38,14 @@ ADRs are numbered when they merge. This table links each decision as it lands.
 
 | ID | Decision | Record |
 | --- | --- | --- |
-| D16 | MCP tools: measured tool choice, not a count | [ADR 0005, update](adr/0005-operation-registry.md) and Section 5.1 |
-| D19 | Media originals shrink above 2,048 px | In progress |
-| D20 | Re-consent revokes earlier connections | In progress |
+| D1–D4 | Stock model, conditions, lots, serials, allocation rule | [ADR 0020](adr/0020-stock-model.md) |
+| D5 | One-of-a-kind items, both ways | [ADR 0024](adr/0024-one-of-a-kind-items.md) |
+| D6 | Shortages | [ADR 0021](adr/0021-shortages.md) |
+| D7 | Valuation | [ADR 0022](adr/0022-valuation.md) |
 | D14 | Webhooks: registry of event types, per-shop subscriptions, signed deliveries with retries | [ADR 0023](adr/0023-outgoing-webhooks.md), [docs/webhooks.md](webhooks.md) |
+| D16 | MCP tools: measured tool choice, not a count | [ADR 0005, update](adr/0005-operation-registry.md) and Section 5.1 |
+| D19 | Media originals shrink above 2,048 px | [ADR 0015, update](adr/0015-media.md) |
+| D20 | Re-consent revokes earlier connections, on the new connection's first request | [ADR 0007, update](adr/0007-mcp-connection-binding.md) |
 
 ## 4. Bench project
 
@@ -86,5 +92,5 @@ Checked on 16 November 2026 against [Shopify's protected customer data page](htt
 
 | Where | Data | Purpose |
 | --- | --- | --- |
-| Bench project | Six "Bench" persona shops and a 1-million-event history (I0) | Timings; written to `docs/phase-2-measurements.md` when I0 lands |
+| Bench project | Six "Bench" persona shops on branch `i0-personas`; the 1-million-event history on branch `i0-baseline` (I0) | Timings; see [measurements](phase-2-measurements.md) |
 | Staging | As listed in [Phase 1 status](phase-1-status.md), Section 4 | Unchanged by Phase 2 seeds |

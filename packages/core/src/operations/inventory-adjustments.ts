@@ -320,13 +320,7 @@ export const adjustStock = defineOperation({
       async () => changes,
       input.reservationChoices ?? [],
     );
-    // One of a kind: at most one unit across the shop (D5).
-    const ones = await ctx.tx.query<{ id: string }>(
-      `select v.id from variants v join variant_costs c on c.shop_id = v.shop_id and c.variant_id = v.id
-       where v.id = any($1::uuid[]) and v.one_of_a_kind and c.quantity > 1`,
-      [changes.map((c) => c.key.variantId)],
-    );
-    if (ones.length > 0) throw errors.conflict('one_of_a_kind', 'This item is one of a kind.');
+    // One of a kind (D5): applyChanges checks the owned quantity under the cost-row lock.
     return {
       result: { operationId, ...changesOut(ctx, applied) },
       audit: {

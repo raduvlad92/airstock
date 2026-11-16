@@ -346,7 +346,7 @@ describe('F-SCOPE-ENGINE-EVENTS: expiry events carry no locations and reach ever
 // its shelf, gives it several units, so it can be reserved and sold more than once.
 // ---------------------------------------------------------------------------------------------
 describe('F-ONE-OF-A-KIND-COUNT: a count can give a one-of-a-kind item more than one unit', () => {
-  it.fails('refuses a count that would make a one-of-a-kind item own two units', async () => {
+  it('refuses a count that would make a one-of-a-kind item own two units', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, oneOfAKind: true });
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '1' });
@@ -462,7 +462,7 @@ describe('F-PICK-COMPLETE-WHOLE-BUNDLE: completing a list ships bundle component
 // unit entered or left the shop. ADR 0022 allows the default cost only while there is no stock.
 // ---------------------------------------------------------------------------------------------
 describe('F-COST-RESET-ON-MOVE: a count that moves all units to another shelf resets the average', () => {
-  it.fails('keeps the moving average when a count finds the same five units on another shelf', async () => {
+  it('keeps the moving average when a count finds the same five units on another shelf', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, defaultCost: '4' });
     await h.run(ops.receiveStock, {

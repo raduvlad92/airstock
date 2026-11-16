@@ -380,8 +380,11 @@ export async function applyChanges(
   const touched = [...new Set([...released, ...reallocated].map((r) => r.reservationId))];
   if (touched.length > 0) await refreshStatuses(ctx.tx, touched);
 
-  // 3. Costs per variant in id order: units out at the average; units in at the average (or the
-  // default cost without stock), or at the cost a reversal brings back.
+  // 3. Costs per variant in id order: units in first, at the average (or the default cost
+  // without stock), or at the cost a reversal brings back; then units out at the average. Units
+  // that only change shelf or condition in one operation come in at the average and leave at it,
+  // so the average stays (ADR 0022). Costing the outs first would take a count that moves every
+  // unit to another shelf through "no stock" and reset the average to the default cost.
   const costs = new Map<string, { unitCost: string | null; costBasis: string }>();
   const costOf = new Map<
     StockChange & { delta: string },
@@ -390,20 +393,6 @@ export async function applyChanges(
   const costKind = kind === 'count' ? 'count' : 'adjustment';
   for (const variantId of [...new Set(live.map((c) => c.key.variantId))].sort()) {
     const mine = live.filter((c) => c.key.variantId === variantId);
-    const outs = mine.filter((c) => !positive(c.delta));
-    if (outs.length > 0) {
-      const total = outs.reduce((s, c) => add(s, c.delta.replace(/^-/, '')), '0');
-      const cost = await applyStockCost(
-        ctx,
-        variantId,
-        operationId,
-        costKind,
-        `-${normalize(total)}`,
-        null,
-      );
-      for (const c of outs) costOf.set(c, cost);
-      costs.set(variantId, cost);
-    }
     const ins = mine.filter((c) => positive(c.delta));
     const groups = new Map<string, Array<StockChange & { delta: string }>>();
     for (const c of ins) {
@@ -421,7 +410,47 @@ export async function applyChanges(
         k === '' ? null : k,
       );
       for (const c of group) costOf.set(c, cost);
-      if (!costs.has(variantId)) costs.set(variantId, cost);
+      costs.set(variantId, cost);
+    }
+    const outs = mine.filter((c) => !positive(c.delta));
+    if (outs.length > 0) {
+      const total = outs.reduce((s, c) => add(s, c.delta.replace(/^-/, '')), '0');
+      const cost = await applyStockCost(
+        ctx,
+        variantId,
+        operationId,
+        costKind,
+        `-${normalize(total)}`,
+        null,
+      );
+      for (const c of outs) costOf.set(c, cost);
+      costs.set(variantId, cost);
+    }
+  }
+  // One of a kind: at most one owned unit across the shop (ADR 0024), checked under the cost-row
+  // locks just taken, for every adjustment, count, and reversal that adds units. An item found
+  // again after it was sold is active again, as after a receipt.
+  const added = [...new Set(live.filter((c) => positive(c.delta)).map((c) => c.key.variantId))];
+  if (added.length > 0) {
+    const ones = await ctx.tx.query<{ id: string; product_id: string; quantity: string }>(
+      `select v.id, v.product_id, c.quantity::text from variants v
+       join variant_costs c on c.shop_id = v.shop_id and c.variant_id = v.id
+       where v.id = any($1::uuid[]) and v.one_of_a_kind`,
+      [added],
+    );
+    const over = ones.filter((o) => compare(o.quantity, '1') > 0);
+    if (over.length > 0) {
+      throw errors.conflict('one_of_a_kind', 'This item is one of a kind.', {
+        variantIds: over.map((o) => o.id),
+      });
+    }
+    const back = ones.filter((o) => compare(o.quantity, '0') > 0).map((o) => o.product_id);
+    if (back.length > 0) {
+      await ctx.tx.query(
+        `update products set status = 'active', updated_at = now(), version = version + 1
+         where id = any($1::uuid[]) and status = 'sold'`,
+        [[...new Set(back)].sort()],
+      );
     }
   }
 

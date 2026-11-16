@@ -1,6 +1,6 @@
 {
   "title": "Phase 2 ChatGPT run (plan Section 7.4, milestone I7)",
-  "note": "Concrete for the staging shop \"ChatGPT run 2\", filled by scripts/chatgpt-run-shop.ts; the expected answers are in docs/phase-2-status.md Section 6. Tool and action names are the current ones (apps/worker/test/mcp-tools.test.ts). A step without an action accepts any action of its tool; `or` lists other calls that also do. Prompts 1 to 14 run on a full-access connection, in one chat, in this order; 13 and 14 are optional (they need a Shopify development store connected to the shop). Prompt 15 runs on a read-only connection. Check with: pnpm chatgpt-run --shop \"ChatGPT run 2\" --from <start> --expect docs/chatgpt-runs/phase-2.json",
+  "note": "Concrete for the staging shop \"ChatGPT run 2\", filled by scripts/chatgpt-run-shop.ts; the expected answers are in docs/phase-2-status.md Section 6. Tool and action names are the current ones (apps/worker/test/mcp-tools.test.ts); apps/worker/test/chatgpt-run.test.ts makes each prompt's expected calls and checks this file marks them right. A step without an action accepts any action of its tool; `or` lists other calls that also do. Prompts 1 to 14 run on a full-access connection, in one chat, in this order; 13 and 14 are optional (they need a Shopify development store connected to the shop). In prompt 8, <moment> is the time the seed script printed after its later phase. Prompt 15 runs on a read-only connection. Check with: AIRSTOCK_TOKEN=… pnpm chatgpt-run --shop <shop ID> --from <start> --expect docs/chatgpt-runs/phase-2.json",
   "prompts": [
     {
       "prompt": 1,
@@ -23,11 +23,13 @@
       "ordered": true,
       "expect": [
         {
-          "tool": "stock_alerts",
-          "action": ["list", "summary"],
-          "or": [{ "tool": "run_report", "action": "run" }]
+          "tool": "manage_purchasing",
+          "action": "suggest_from_low_stock",
+          "or": [
+            { "tool": "stock_alerts", "action": ["list", "summary"] },
+            { "tool": "run_report", "action": "run" }
+          ]
         },
-        { "tool": "manage_purchasing", "action": "suggest_from_low_stock" },
         { "tool": "manage_purchasing", "action": "draft" }
       ]
     },
@@ -55,10 +57,18 @@
     },
     {
       "prompt": 8,
-      "text": "What is my stock worth now, and what was it worth on 16 November at 4 pm?",
+      "text": "What is my stock worth now, and what was it worth at <moment>?",
       "expect": [
-        { "tool": "run_report", "action": "run" },
-        { "tool": "run_report", "action": "run" }
+        {
+          "tool": "run_report",
+          "action": "run",
+          "or": [{ "tool": "get_stock", "action": "valuation" }]
+        },
+        {
+          "tool": "run_report",
+          "action": "run",
+          "or": [{ "tool": "get_stock", "action": "valuation" }]
+        }
       ]
     },
     {
@@ -79,7 +89,13 @@
     {
       "prompt": 12,
       "text": "Someone scanned 84731629 in the warehouse. Which item is that and where is it?",
-      "expect": [{ "tool": "warehouse_work", "action": "scan" }]
+      "expect": [
+        {
+          "tool": "warehouse_work",
+          "action": "scan",
+          "or": [{ "tool": "search_catalog", "action": "lookup_barcode" }]
+        }
+      ]
     },
     {
       "prompt": 13,

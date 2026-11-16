@@ -17,50 +17,57 @@
  * shop with every scope, read from the environment and never printed. Each command carries an
  * idempotency key made from the shop and the step, so running a phase again repeats nothing.
  */
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-
-const { values: args } = parseArgs({
-  options: {
-    base: { type: 'string', default: 'https://airstock.deletecookies.dev' },
-    shop: { type: 'string' },
-    phase: { type: 'string', default: 'all' },
-  },
-});
-const token = process.env.AIRSTOCK_TOKEN;
-if (!token || !args.shop) throw new Error('Needs AIRSTOCK_TOKEN and --shop.');
-if (!['opening', 'later', 'all'].includes(args.phase ?? '')) {
-  throw new Error('--phase is opening, later, or all.');
-}
-const shopId = args.shop;
-const base = `${args.base}/api/v1/shops/${shopId}`;
 
 type Json = Record<string, unknown>;
 
-async function api<T = Json>(method: string, path: string, body?: unknown, step?: string) {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${base}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(method === 'POST'
-          ? { 'idempotency-key': `chatgpt-run:${shopId}:${step ?? path}` }
-          : {}),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await res.text();
-    if ((res.status === 429 || res.status === 503) && attempt < 6) {
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-      continue;
-    }
-    if (!res.ok) throw new Error(`${method} ${path} (${step ?? ''}): ${res.status} ${text}`);
-    return (text ? JSON.parse(text) : {}) as T;
-  }
+/** Where to seed: an Airstock base URL, the shop, and an API credential's token. */
+export interface SeedTarget {
+  base: string;
+  shopId: string;
+  token: string;
+  /** Defaults to the global fetch; tests pass the app's own handler. */
+  fetch?: (request: Request) => Promise<Response>;
 }
-const post = <T = Json>(path: string, body: unknown, step: string) =>
-  api<T>('POST', path, body, step);
-const get = <T = Json>(path: string) => api<T>('GET', path);
+
+export type SeedPhase = 'opening' | 'later' | 'all';
+
+/** The REST calls of one run, each command with an idempotency key made from the shop and step. */
+function client(target: SeedTarget) {
+  const base = `${target.base.replace(/\/$/, '')}/api/v1/shops/${target.shopId}`;
+  const send = target.fetch ?? ((request: Request) => fetch(request));
+  async function api<T = Json>(method: string, path: string, body?: unknown, step?: string) {
+    for (let attempt = 0; ; attempt++) {
+      const res = await send(
+        new Request(`${base}${path}`, {
+          method,
+          headers: {
+            authorization: `Bearer ${target.token}`,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+            ...(method === 'POST'
+              ? { 'idempotency-key': `chatgpt-run:${target.shopId}:${step ?? path}` }
+              : {}),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      );
+      const text = await res.text();
+      if ((res.status === 429 || res.status === 503) && attempt < 8) {
+        const wait = Number(res.headers.get('retry-after'));
+        await new Promise((r) => setTimeout(r, (wait > 0 ? wait : attempt + 1) * 1000));
+        continue;
+      }
+      if (!res.ok) throw new Error(`${method} ${path} (${step ?? ''}): ${res.status} ${text}`);
+      return (text ? JSON.parse(text) : {}) as T;
+    }
+  }
+  return {
+    post: <T = Json>(path: string, body: unknown, step: string) => api<T>('POST', path, body, step),
+    get: <T = Json>(path: string) => api<T>('GET', path),
+  };
+}
+type Client = ReturnType<typeof client>;
 
 /** An EAN-13 in the restricted-circulation range (prefix 20), so it is no real product's code. */
 function ean13(n: number): string {
@@ -413,7 +420,7 @@ interface Ids {
   packs: Record<string, Record<string, string>>;
 }
 
-async function catalog(): Promise<Ids> {
+async function catalog({ post, get }: Client): Promise<Ids> {
   for (const template of ['building_sets', 'food', 'trading_cards']) {
     await post('/catalog/templates', { template }, `template:${template}`).catch((e: Error) => {
       // Adding a template twice is refused; the family is there either way.
@@ -492,6 +499,7 @@ async function catalog(): Promise<Ids> {
       packsVersion: number;
       barcodesVersion: number;
       packs: Array<{ id: string; name: string; status: string }>;
+      barcodes: unknown[];
     }>(`/variants/${variantId}/packaging`);
     if (item.packs && packaging.packs.filter((p) => p.status === 'active').length === 0) {
       await post(
@@ -510,23 +518,26 @@ async function catalog(): Promise<Ids> {
       packaging = await get(`/variants/${variantId}/packaging`);
     }
     packs[item.key] = Object.fromEntries(packaging.packs.map((p) => [p.name, p.id]));
-    await post(
-      `/variants/${variantId}/barcodes`,
-      {
-        barcodesVersion: packaging.barcodesVersion,
-        barcodes: [
-          { code: item.barcode, symbology: 'ean13' },
-          ...(item.packs ?? [])
-            .filter((p) => p.barcode)
-            .map((p) => ({
-              code: p.barcode,
-              symbology: 'ean13',
-              packId: packs[item.key]![p.name],
-            })),
-        ],
-      },
-      `barcodes:${item.key}`,
-    );
+    // Set once: a second run would send a newer version under the same idempotency key.
+    if (packaging.barcodes.length === 0) {
+      await post(
+        `/variants/${variantId}/barcodes`,
+        {
+          barcodesVersion: packaging.barcodesVersion,
+          barcodes: [
+            { code: item.barcode, symbology: 'ean13' },
+            ...(item.packs ?? [])
+              .filter((p) => p.barcode)
+              .map((p) => ({
+                code: p.barcode,
+                symbology: 'ean13',
+                packId: packs[item.key]![p.name],
+              })),
+          ],
+        },
+        `barcodes:${item.key}`,
+      );
+    }
     if (item.lots) {
       await post(
         `/variants/${variantId}/stock-settings`,
@@ -560,7 +571,7 @@ async function catalog(): Promise<Ids> {
 }
 
 /** Looks up what `catalog` made, for the later phase. */
-async function load(): Promise<Ids> {
+async function load({ get }: Client): Promise<Ids> {
   const { warehouses } = await get<{ warehouses: Array<{ warehouseId: string }> }>('/warehouses');
   const { locations } = await get<{
     locations: Array<{ locationId: string; code: string | null }>;
@@ -598,7 +609,7 @@ async function load(): Promise<Ids> {
 
 // Phases ----------------------------------------------------------------------------------------
 
-async function opening(ids: Ids) {
+async function opening({ post }: Client, ids: Ids) {
   const v = ids.variants;
   const receive = (key: string, step: string, body: Json) =>
     post('/receipts', { variantId: v[key], ...body }, `receipt:${step}`);
@@ -711,7 +722,7 @@ async function opening(ids: Ids) {
   }
 }
 
-async function later(ids: Ids) {
+async function later({ post }: Client, ids: Ids) {
   const v = ids.variants;
   const tcg = ids.suppliers.tcg;
   const food = ids.suppliers.food;
@@ -850,22 +861,121 @@ async function later(ids: Ids) {
 
 // Main ------------------------------------------------------------------------------------------
 
-const started = new Date();
-if (args.phase === 'opening' || args.phase === 'all') {
-  const ids = await catalog();
-  await opening(ids);
-  console.log(`Opening phase done at ${new Date().toISOString()}.`);
+interface ValueReport {
+  totals: Record<string, string>;
+  currency: string;
+  at: string | null;
 }
-if (args.phase === 'later' || args.phase === 'all') {
-  const ids = await load();
-  await later(ids);
-  console.log(`Later phase done at ${new Date().toISOString()}.`);
+
+/** The shop's stock value from the inventory value report, now or at a moment. */
+async function stockValue({ get }: Client, at?: string): Promise<string> {
+  const report = await get<ValueReport>(
+    `/reports/inventory_value${at ? `?at=${encodeURIComponent(at)}` : ''}`,
+  );
+  return `${report.totals.value ?? '?'} ${report.currency}`;
 }
-const value = await get<Json>('/reports/inventory_value');
-console.log(
-  JSON.stringify(
-    { shopId, startedAt: started.toISOString(), inventoryValue: value },
-    null,
-    2,
-  ).slice(0, 3000),
-);
+
+/** A whole minute in the shop's time zone, as a person would say it ("17 Nov, 14:05"). */
+function localMinute(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(at);
+}
+
+export interface SeedResult {
+  /** For prompt 8: a moment between the phases, when the stock value differed from now. */
+  valueMoment: { at: string; local: string; value: string } | null;
+  valueNow: string;
+}
+
+/**
+ * Seeds one phase (or both) and reports the values for prompt 8. With `all`, it waits for the
+ * next whole minute between the phases unless `waitForMinute` is false (tests), so the moment
+ * between them can be said in whole minutes.
+ */
+export async function seedRunShop(
+  target: SeedTarget,
+  phase: SeedPhase,
+  {
+    log = console.log,
+    waitForMinute = true,
+  }: { log?: (line: string) => void; waitForMinute?: boolean } = {},
+): Promise<SeedResult> {
+  const api = client(target);
+  const { shop } = await api.get<{ shop: { name: string; timezone: string } }>('');
+  let moment: Date | null = null;
+  if (phase === 'opening' || phase === 'all') {
+    const ids = await catalog(api);
+    await opening(api, ids);
+    const done = new Date();
+    log(
+      `Opening phase done at ${localMinute(done, shop.timezone)} (${shop.timezone}), in "${shop.name}".`,
+    );
+    if (phase === 'all') {
+      moment = new Date(Math.ceil((done.getTime() + 1) / 60_000) * 60_000);
+      if (waitForMinute) {
+        await new Promise((r) => setTimeout(r, moment!.getTime() - Date.now() + 1000));
+      } else {
+        moment = done;
+      }
+    }
+  }
+  let valueMoment: SeedResult['valueMoment'] = null;
+  if (phase === 'later' || phase === 'all') {
+    // The moment for prompt 8: the last whole minute before this phase, which must be after the
+    // opening phase ended (the value then equals the value now, before this phase writes).
+    if (!moment) moment = new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60_000);
+    const before = await stockValue(api);
+    const then = await stockValue(api, moment.toISOString());
+    if (then !== before) {
+      throw new Error(
+        `The value at ${moment.toISOString()} (${then}) differs from the value now (${before}): the opening phase was still running then. Wait two minutes after it and run --phase later again.`,
+      );
+    }
+    const ids = await load(api);
+    await later(api, ids);
+    valueMoment = {
+      at: moment.toISOString(),
+      local: localMinute(moment, shop.timezone),
+      value: then,
+    };
+    log(`Later phase done at ${localMinute(new Date(), shop.timezone)}.`);
+  }
+  const valueNow = await stockValue(api);
+  if (valueMoment) {
+    log(
+      `Prompt 8: ask for the value at ${valueMoment.local} (${shop.timezone}): ${valueMoment.value} then, ${valueNow} now (before the run's own changes).`,
+    );
+  } else {
+    log(`Stock value now: ${valueNow}.`);
+  }
+  return { valueMoment, valueNow };
+}
+
+async function main() {
+  const { values: args } = parseArgs({
+    options: {
+      base: { type: 'string', default: 'https://airstock.deletecookies.dev' },
+      shop: { type: 'string' },
+      phase: { type: 'string', default: 'all' },
+    },
+  });
+  const token = process.env.AIRSTOCK_TOKEN;
+  if (!token || !args.shop) throw new Error('Needs AIRSTOCK_TOKEN and --shop.');
+  if (!['opening', 'later', 'all'].includes(args.phase ?? '')) {
+    throw new Error('--phase is opening, later, or all.');
+  }
+  await seedRunShop({ base: args.base!, shopId: args.shop, token }, args.phase as SeedPhase);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

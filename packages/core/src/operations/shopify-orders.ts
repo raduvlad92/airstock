@@ -792,15 +792,27 @@ export const syncShopifyOrder = defineOperation({
     );
     const lines: LineRow[] = [];
 
-    // 1. Lines seen for the first time: reserve what is ordered.
+    // 1. Lines seen for the first time: reserve what is ordered. A line recorded before its
+    // variant was mapped, of an order its map follows (placed while the onboarding preview
+    // waited: opening stock still counts its units), is applied now as if first seen; its
+    // fulfillments recorded meanwhile are applied to it in step 2.
+    const reopened = new Set<string>();
     for (const l of [...order.lines].sort((a, b) => (a.lineId < b.lineId ? -1 : 1))) {
       const known = existing.get(l.lineId);
-      if (known) {
-        lines.push(known);
-        if (known.outcome !== 'unmapped') result.alreadyProcessed++;
-        continue;
-      }
       const map = l.variantId ? maps.get(l.variantId) : undefined;
+      if (known) {
+        const follow =
+          known.outcome === 'unmapped' &&
+          !payloadOnly &&
+          map?.ordersFrom != null &&
+          Date.parse(order.createdAt) >= Date.parse(map.ordersFrom);
+        if (!follow) {
+          lines.push(known);
+          if (known.outcome !== 'unmapped') result.alreadyProcessed++;
+          continue;
+        }
+        reopened.add(l.lineId);
+      }
       const mapped = Boolean(map && scopes.length > 0 && l.quantity > 0);
       // Where Shopify committed the line: read by the connector (null when Shopify did not say),
       // or, when not read at all, the only mapped location.
@@ -827,7 +839,12 @@ export const syncShopifyOrder = defineOperation({
         `insert into shopify_order_lines (shop_id, connection_id, shopify_order_id, shopify_line_id,
            shopify_variant_id, quantity, outcome, shopify_location_id, variant_id, pack_id, bundle,
            per_item, effect_items)
-         values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+         values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         on conflict (shop_id, connection_id, shopify_line_id) do update set
+           outcome = excluded.outcome, shopify_location_id = excluded.shopify_location_id,
+           variant_id = excluded.variant_id, pack_id = excluded.pack_id, bundle = excluded.bundle,
+           per_item = excluded.per_item, effect_items = excluded.effect_items, open_items = 0,
+           fulfilled_items = 0, updated_at = now()`,
         [
           connectionId,
           order.orderId,
@@ -858,7 +875,7 @@ export const syncShopifyOrder = defineOperation({
           row.inventory_item_id,
           row.shopify_location_id,
           l.quantity,
-          takenAt,
+          reopened.has(l.lineId) ? order.createdAt : takenAt,
         );
       lines.push(row);
     }
@@ -898,17 +915,17 @@ export const syncShopifyOrder = defineOperation({
       for (const f of sorted) {
         const was = recorded.get(f.fulfillmentId);
         const reference = `shopify:fulfillment/${f.fulfillmentId}`;
-        if (!was && f.status === 'success') {
-          const scope = scopeOf(f.locationId);
-          const done: Array<{
-            lineId: string;
-            items: number;
-            released: number;
-            operationIds: string[];
-          }> = [];
+        const scope = scopeOf(f.locationId);
+        const done: Array<{
+          lineId: string;
+          items: number;
+          released: number;
+          operationIds: string[];
+        }> = [];
+        const apply = async (only: (lineId: string) => boolean) => {
           for (const fl of f.lines) {
             const line = byLine.get(fl.lineId);
-            if (!line || !live(line) || fl.quantity === 0) continue;
+            if (!line || !live(line) || fl.quantity === 0 || !only(fl.lineId)) continue;
             // Shopify shipped more than the line holds: its first sync already carries the
             // fulfillment (fulfillments/create came first, or the reconciler found the order).
             // The difference is reserved first, so the shipped units leave stock here.
@@ -951,12 +968,25 @@ export const syncShopifyOrder = defineOperation({
               operationIds: outcome.operationIds,
             });
           }
+        };
+        if (!was && f.status === 'success') {
+          await apply(() => true);
           await ctx.tx.query(
             `insert into shopify_fulfillments (shop_id, connection_id, shopify_fulfillment_id,
                shopify_order_id, shopify_location_id, status, lines)
              values (app_shop_id(), $1, $2, $3, $4, 'fulfilled', $5)`,
             [connectionId, f.fulfillmentId, order.orderId, f.locationId, JSON.stringify(done)],
           );
+        } else if (was?.status === 'fulfilled' && f.status === 'success' && reopened.size > 0) {
+          // Recorded while a line was not followed yet: applied to that line now.
+          await apply((id) => reopened.has(id) && !was.lines.some((x) => x.lineId === id));
+          if (done.length > 0) {
+            await ctx.tx.query(
+              `update shopify_fulfillments set lines = lines || $3::jsonb
+               where connection_id = $1 and shopify_fulfillment_id = $2`,
+              [connectionId, f.fulfillmentId, JSON.stringify(done)],
+            );
+          }
         } else if (!was && f.status === 'cancelled') {
           // Cancelled before Airstock saw it: nothing was fulfilled here.
           await ctx.tx.query(

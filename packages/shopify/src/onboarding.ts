@@ -9,7 +9,7 @@ import {
   type StoredCaller,
 } from '@airstock/core';
 import { ShopifyApiError } from './admin.ts';
-import { connectedStore, NotConnectedError, type SyncDeps } from './sync.ts';
+import { connectedStore, NotConnectedError, runJob, type SyncDeps } from './sync.ts';
 
 // The onboarding job (plan Section 5.14, D17). Each run takes the onboarding one step further and
 // says when to run again; every step is safe to repeat, so a lost message or a crash resumes
@@ -19,7 +19,8 @@ import { connectedStore, NotConnectedError, type SyncDeps } from './sync.ts';
 //   matching   match by SKU and barcode, write the CSV import and preview it as the member
 //   previewed  waits for the member to commit (shopify.onboarding.commit)
 //   committing waits for the import job to complete
-//   finishing  maps variants and references pictures, 200 rows per transaction
+//   finishing  maps variants and references pictures, 200 rows per transaction; orders placed
+//              since the catalog read are applied again for the newly mapped variants
 
 export type OnboardingStep = { status: 'done' } | { status: 'again'; delaySeconds: number };
 
@@ -340,7 +341,10 @@ async function finish(
       shopId,
       input: { onboardingId: id },
     });
-    const { remaining } = done.result as { remaining: number };
+    const { remaining, orderJobs } = done.result as { remaining: number; orderJobs: string[] };
+    // Orders placed while the preview waited, applied now that their variants are mapped. A job
+    // that fails is retried by the job runner (the cron sweep sends it again).
+    for (const jobId of orderJobs) await runJob(deps, shopId, jobId);
     await deps.dispatch?.().catch(() => {});
     if (remaining === 0) return { status: 'done' };
   }

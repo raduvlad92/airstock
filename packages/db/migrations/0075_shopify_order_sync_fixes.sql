@@ -15,3 +15,10 @@ alter table shopify_order_lines add constraint shopify_order_lines_outcome_check
 alter table shopify_connections
   add column orders_page_since timestamptz,
   add column orders_page_after text check (length(orders_page_after) <= 1000);
+
+-- Orders created at or after this time are followed for the map even when Airstock saw them
+-- before the map existed (their lines were recorded as unmapped). The onboarding sets it to the
+-- start of its catalog read, whose quantities became opening stock: an order placed while the
+-- preview waited took units that opening stock still counts, so it is held here once mapped.
+-- Null for other maps (orders seen before the map stay Shopify's, ADR 0033).
+alter table shopify_variant_maps add column orders_from timestamptz;

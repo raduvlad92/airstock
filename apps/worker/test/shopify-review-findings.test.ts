@@ -342,7 +342,7 @@ describe('Shopify connector review findings', () => {
   // fulfilled here. The first push then reads Shopify's lower quantity as the record and writes
   // the opening stock over it: Shopify shows the sold units as available again, and Airstock
   // keeps them on hand after they ship.
-  it.fails('F8: an order placed while the onboarding preview waits is not sold twice', async () => {
+  it('F8: an order placed while the onboarding preview waits is not sold twice', async () => {
     const m = await h.merchant('Onboarding race');
     const store = h.newStore('review');
     const code = `RACE-${uuidv7().slice(-6)}`;

@@ -272,6 +272,8 @@ export async function applyVariantMaps(
   connectionId: string,
   input: VariantMapInput[],
   replace = false,
+  /** Follow orders created from this time, even those seen before the map (onboarding). */
+  ordersFrom: string | null = null,
 ): Promise<{ set: number; removed: number; items: string[] }> {
   const rows = input.map((v) => ({
     shopifyVariantId: shopifyNumericId(v.shopifyVariantId),
@@ -372,9 +374,10 @@ export async function applyVariantMaps(
     try {
       await ctx.tx.query(
         `insert into shopify_variant_maps (shop_id, connection_id, shopify_variant_id,
-           shopify_inventory_item_id, variant_id, pack_id, shopify_product_id, sku, title, source)
+           shopify_inventory_item_id, variant_id, pack_id, shopify_product_id, sku, title, source,
+           orders_from)
          select app_shop_id(), $1, x."shopifyVariantId", x."shopifyInventoryItemId", x."variantId",
-           x."packId", x."shopifyProductId", x.sku, x.title, x.source
+           x."packId", x."shopifyProductId", x.sku, x.title, x.source, $3::timestamptz
          from jsonb_to_recordset($2::jsonb) as x("shopifyVariantId" text, "shopifyInventoryItemId" text,
            "variantId" uuid, "packId" uuid, "shopifyProductId" text, sku text, title text, source text)
          on conflict (shop_id, connection_id, shopify_variant_id) do update set
@@ -383,8 +386,8 @@ export async function applyVariantMaps(
            shopify_product_id = coalesce(excluded.shopify_product_id, shopify_variant_maps.shopify_product_id),
            sku = coalesce(excluded.sku, shopify_variant_maps.sku),
            title = coalesce(excluded.title, shopify_variant_maps.title),
-           source = excluded.source, updated_at = now()`,
-        [connectionId, JSON.stringify(targets)],
+           source = excluded.source, orders_from = excluded.orders_from, updated_at = now()`,
+        [connectionId, JSON.stringify(targets), ordersFrom],
       );
     } catch (error) {
       if ((error as { constraint?: string }).constraint === 'shopify_variant_maps_target_idx') {

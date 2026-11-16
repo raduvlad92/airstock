@@ -6,6 +6,8 @@ import { effectivePermissions } from '../permissions.ts';
 import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
 import type { CatalogImage } from '../shopify/catalog.ts';
+import { shopifyNumericId } from '../shopify/ids.ts';
+import { SHOPIFY_ORDER_JOB } from '../shopify/targets.ts';
 import { commitImport, storeCaller } from './imports.ts';
 import { applyVariantMaps, lockActiveConnection } from './shopify-mapping.ts';
 
@@ -401,7 +403,12 @@ export const finishShopifyOnboarding = defineOperation({
   kind: 'command',
   scope: 'shop',
   input: z.object({ onboardingId: Id }),
-  output: z.object({ remaining: z.number().int(), mapped: z.number().int() }),
+  output: z.object({
+    remaining: z.number().int(),
+    mapped: z.number().int(),
+    /** Order jobs queued for orders placed since the catalog read (run them after commit). */
+    orderJobs: z.array(Id),
+  }),
   permission: 'connections.manage',
   connectionScope: 'session',
   audit: { action: 'shopify.onboarding.finished_chunk' },
@@ -412,7 +419,7 @@ export const finishShopifyOnboarding = defineOperation({
     const onboarding = await loadOnboarding(ctx.tx, input.onboardingId, true);
     if (onboarding.status !== 'finishing') {
       return {
-        result: { remaining: 0, mapped: 0 },
+        result: { remaining: 0, mapped: 0, orderJobs: [] },
         audit: {
           targetType: 'shopify_onboarding',
           targetId: input.onboardingId,
@@ -478,10 +485,46 @@ export const finishShopifyOnboarding = defineOperation({
       ).map((r) => r.shopify_variant_id),
     );
     const toMap = maps.filter((m) => !kept.has(m.shopifyVariantId));
+    // Opening stock is Shopify's quantity at the catalog read, which started when the
+    // onboarding did: orders placed since then (while the preview waited) took units that
+    // opening stock still counts. The maps follow those orders, and each is applied again from
+    // Shopify as an order job, so its lines are held here (or leave stock if already shipped).
+    const ordersFrom = new Date(onboarding.created_at).toISOString();
     const applied =
       toMap.length > 0
-        ? await applyVariantMaps(ctx, onboarding.connection_id, toMap)
+        ? await applyVariantMaps(ctx, onboarding.connection_id, toMap, false, ordersFrom)
         : { set: 0, removed: 0, items: [] as string[] };
+    const orders = await ctx.tx.query<{ shopify_order_id: string }>(
+      `select distinct l.shopify_order_id from shopify_order_lines l
+       join shopify_orders o on o.shop_id = l.shop_id and o.connection_id = l.connection_id
+         and o.shopify_order_id = l.shopify_order_id
+       where l.connection_id = $1 and l.outcome = 'unmapped'
+         and l.shopify_variant_id = any($2::text[]) and o.shopify_created_at >= $3
+         and not exists (select 1 from jobs j where j.kind = $4
+           and j.status in ('pending', 'running') and j.payload->>'connectionId' = $1::text
+           and j.payload->>'orderId' = l.shopify_order_id)
+       order by l.shopify_order_id`,
+      [
+        onboarding.connection_id,
+        toMap.map((m) => shopifyNumericId(m.shopifyVariantId)),
+        ordersFrom,
+        SHOPIFY_ORDER_JOB,
+      ],
+    );
+    const orderJobs = orders.map(() => ctx.newId());
+    if (orderJobs.length > 0) {
+      await ctx.tx.query(
+        `insert into jobs (shop_id, id, kind, payload)
+         select app_shop_id(), x.id, $3, jsonb_build_object('connectionId', $4::text, 'orderId', x.o)
+         from unnest($1::uuid[], $2::text[]) as x(id, o)`,
+        [
+          orderJobs,
+          orders.map((o) => o.shopify_order_id),
+          SHOPIFY_ORDER_JOB,
+          onboarding.connection_id,
+        ],
+      );
+    }
     const pictures = await referencePictures(
       ctx,
       rows.flatMap((r) =>
@@ -535,11 +578,17 @@ export const finishShopifyOnboarding = defineOperation({
       [input.onboardingId, applied.set, pictures, notes.length, remaining],
     );
     return {
-      result: { remaining, mapped: applied.set },
+      result: { remaining, mapped: applied.set, orderJobs },
       audit: {
         targetType: 'shopify_onboarding',
         targetId: input.onboardingId,
-        changes: { mapped: applied.set, pictures, notImported: notes.length, remaining },
+        changes: {
+          mapped: applied.set,
+          pictures,
+          notImported: notes.length,
+          remaining,
+          ordersToApply: orderJobs.length,
+        },
       },
       outbox:
         applied.items.length > 0

@@ -1,4 +1,4 @@
-import { uuidv7 } from '@airstock/core';
+import { runImportJob, uuidv7 } from '@airstock/core';
 import { reconcileConnection, runJob, type ShopifyVariant } from '@airstock/shopify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
@@ -273,5 +273,89 @@ describe('Shopify order sync fixes', () => {
     expect(reads).toBe(0);
     expect(await h.available(s.m, only.variantId)).toBe('4.000000');
     expect(s.store.available(only.shopify)).toBe(4);
+  });
+  it('onboarding: an order shipped while the preview waited leaves stock; one from before the read stays Shopify’s', async () => {
+    const m = await h.merchant('Onboarding shipped');
+    const store = h.newStore('fixes');
+    const code = `SHIP-${uuidv7().slice(-6)}`;
+    const [variant] = store.addProduct({
+      title: 'Shipped mug',
+      variants: [{ sku: code, quantities: { '1001': 10 } }],
+    });
+    const connectionId = await h.install(m, store);
+    const base = `/shops/${m.shopId}/shopify/connections/${connectionId}`;
+    await h.command(m.cookie, `${base}/locations`, {
+      connectionId,
+      locations: [{ shopifyLocationId: '1001', locationId: m.locationId }],
+    });
+    // Sold after the connection, before the onboarding: already out of the catalog read.
+    const before = store.placeOrder([{ variant: variant!, quantity: 1 }]);
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(before));
+    await h.runJobs(m.shopId);
+    await new Promise((r) => setTimeout(r, 5));
+    const started = await h.command(m.cookie, `${base}/onboardings`, { connectionId });
+    const onboardingId = (await json(started)).onboarding.onboardingId as string;
+    await h.runOnboardingSteps(m.shopId, onboardingId);
+    const viewed = await json(
+      await h.dashboard(m.cookie, `/shops/${m.shopId}/shopify/onboardings/${onboardingId}`),
+    );
+    expect(viewed.onboarding.status).toBe('previewed');
+    // While the preview waits: 2 sold and shipped, then 3 sold (not shipped yet).
+    const shipped = store.placeOrder([{ variant: variant!, quantity: 2 }]);
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(shipped));
+    const f = store.fulfill(shipped);
+    await h.deliver(
+      store.domain,
+      'fulfillments/create',
+      store.topicBody('fulfillments/create', shipped, f.fulfillmentId),
+    );
+    const open = store.placeOrder([{ variant: variant!, quantity: 3 }]);
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(open));
+    await h.runJobs(m.shopId);
+    expect(store.available(variant!)).toBe(4);
+    const committed = await h.command(
+      m.cookie,
+      `/shops/${m.shopId}/shopify/onboardings/${onboardingId}/commit`,
+      {},
+    );
+    expect(committed.status, await committed.clone().text()).toBe(200);
+    await h.runOnboardingSteps(m.shopId, onboardingId, 1);
+    await runImportJob(
+      { db: h.t.db, audit: h.t.sink, files: h.deps().files! },
+      m.shopId,
+      viewed.onboarding.importId,
+    );
+    await h.runOnboardingSteps(m.shopId, onboardingId);
+    await h.flushTogether(m.shopId);
+    // Opening stock 9 (Shopify's 10 less the order before the read): 2 shipped, 3 held.
+    const [mapped] = await ownerQuery<{ variant_id: string }>(
+      'select variant_id from shopify_variant_maps where shop_id = $1',
+      [m.shopId],
+    );
+    const [stock] = await ownerQuery<{ on_hand: string; allocated: string }>(
+      `select sum(on_hand)::text as on_hand, sum(allocated)::text as allocated
+       from inventory_positions where shop_id = $1 and variant_id = $2`,
+      [m.shopId, mapped!.variant_id],
+    );
+    expect(stock).toEqual({ on_hand: '7.000000', allocated: '3.000000' });
+    expect(store.available(variant!)).toBe(4);
+    const lines = await ownerQuery<{ shopify_order_id: string; outcome: string }>(
+      'select shopify_order_id, outcome from shopify_order_lines where shop_id = $1',
+      [m.shopId],
+    );
+    expect(lines.find((l) => l.shopify_order_id === before.orderId)?.outcome).toBe('unmapped');
+    // Shipping the order placed before the read changes nothing here.
+    const g = store.fulfill(before);
+    await h.deliver(
+      store.domain,
+      'fulfillments/create',
+      store.topicBody('fulfillments/create', before, g.fulfillmentId),
+    );
+    await h.runJobs(m.shopId);
+    await h.flushTogether(m.shopId);
+    expect(await h.available(m, mapped!.variant_id)).toBe('4.000000');
+    await reconcileConnection(h.deps(), m.shopId, connectionId, { daily: true });
+    expect(await shopifyAlerts(m.shopId)).toEqual([]);
+    expect(store.available(variant!)).toBe(4);
   });
 });

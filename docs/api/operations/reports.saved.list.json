@@ -1,0 +1,130 @@
+{
+  "/api/v1/shops/{shopId}/saved-reports": {
+    "get": {
+      "operationId": "reports.saved.list",
+      "summary": "List saved reports",
+      "description": "Use this when someone asks which reports they saved, or before running one by name: your saved reports and those shared with the shop, with their report type and filters.",
+      "x-permission": "reports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "reports.saved_reports.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "report",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "stock_on_hand",
+              "low_stock",
+              "movements",
+              "inventory_value",
+              "cost_of_goods",
+              "purchasing",
+              "expiring_lots",
+              "shortages"
+            ],
+            "description": "stock_on_hand: units by variant, location, condition, and lot with packs. low_stock: rules at or below their reorder point, with on order and a suggested reorder. movements: receipts, transfers, fulfillments, adjustments, returns, and counts over a period. inventory_value: units times moving average cost, now or at a past date (needs costs.read). cost_of_goods: cost of fulfilled units over a period (needs costs.read). purchasing: open purchase orders, on order, overdue. expiring_lots: lots expiring within days. shortages: open shortages from accepted orders."
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "savedReports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "report": {
+                          "type": "string",
+                          "enum": [
+                            "stock_on_hand",
+                            "low_stock",
+                            "movements",
+                            "inventory_value",
+                            "cost_of_goods",
+                            "purchasing",
+                            "expiring_lots",
+                            "shortages"
+                          ]
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "The standard report it runs."
+                        },
+                        "filters": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "shared": {
+                          "type": "boolean"
+                        },
+                        "mine": {
+                          "type": "boolean"
+                        },
+                        "canEdit": {
+                          "type": "boolean"
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "report",
+                        "title",
+                        "filters",
+                        "shared",
+                        "mine",
+                        "canEdit",
+                        "version",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "savedReports"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

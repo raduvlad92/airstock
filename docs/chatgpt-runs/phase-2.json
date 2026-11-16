@@ -44,7 +44,10 @@
     {
       "prompt": 8,
       "text": "What is my stock worth today, and what was it worth on 1 December?",
-      "expect": [{ "tool": "run_report" }]
+      "expect": [
+        { "tool": "run_report", "action": "run" },
+        { "tool": "run_report", "action": "run" }
+      ]
     },
     {
       "prompt": 9,

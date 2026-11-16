@@ -576,7 +576,7 @@ export const exportReport = defineOperation({
   id: 'reports.export',
   summary: 'Export a report as CSV',
   description:
-    'Starts a job that writes every row of a standard or saved report to a CSV file, with a totals line. The file can be downloaded for 24 hours and is deleted after 7 days; each download is logged. Location scope and costs.read apply as when running the report.',
+    'Starts a job that writes every row of a standard or saved report to a CSV file, with a totals line. The file can be downloaded for 24 hours and is deleted after 7 days; each download is logged. Location scope and costs.read apply as when running the report. The file downloads from the export file route, which needs catalog:read for an API credential, as for catalog exports.',
   kind: 'command',
   scope: 'shop',
   input: z.object({

@@ -10,7 +10,7 @@ export const getValuation = defineOperation({
   id: 'inventory.valuation.get',
   summary: 'Value stock at a date and cost of goods for a period',
   description:
-    'Use this for "what is my stock worth" and cost of goods questions. Value is owned units times the moving average cost, for one variant or the whole shop, now or at any past moment (reproducible later). Cost of goods sums fulfillments between from and to at the cost each one recorded. Needs costs.read; not available to members limited to some locations.',
+    'Use this for one variant’s average cost and value, now or at a past moment (reproducible later), with its cost of goods between from and to. For what the whole stock is worth, by location or category, or cost of goods across products, use run_report (inventory_value, cost_of_goods). Needs costs.read; not available to members limited to some locations.',
   kind: 'read',
   scope: 'shop',
   input: z.object({

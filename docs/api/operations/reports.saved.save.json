@@ -1,0 +1,294 @@
+{
+  "/api/v1/shops/{shopId}/saved-reports": {
+    "post": {
+      "operationId": "reports.saved.save",
+      "summary": "Save a report",
+      "description": "Without savedReportId, saves a new report: a standard report with its filters and a name. Private unless shared; sharing, and changing or deleting a report another member shared, needs reports.manage.",
+      "x-permission": "reports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "reports.saved_report.saved",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "savedReportId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "expectedVersion": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "report": {
+                  "type": "string",
+                  "enum": [
+                    "stock_on_hand",
+                    "low_stock",
+                    "movements",
+                    "inventory_value",
+                    "cost_of_goods",
+                    "purchasing",
+                    "expiring_lots",
+                    "shortages"
+                  ],
+                  "description": "stock_on_hand: units by variant, location, condition, and lot with packs. low_stock: rules at or below their reorder point, with on order and a suggested reorder. movements: receipts, transfers, fulfillments, adjustments, returns, and counts over a period. inventory_value: units times moving average cost, now or at a past date (needs costs.read). cost_of_goods: cost of fulfilled units over a period (needs costs.read). purchasing: open purchase orders, on order, overdue. expiring_lots: lots expiring within days. shortages: open shortages from accepted orders."
+                },
+                "filters": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "warehouseId": {
+                      "description": "Only this warehouse.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "locationId": {
+                      "description": "Only this location and the locations inside it.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "familyId": {
+                      "description": "Only products of this family.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "categoryId": {
+                      "description": "Only products in this category (a Category option ID).",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "supplierId": {
+                      "description": "Only variants this supplier sells; for purchasing, only this supplier’s orders.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "variantId": {
+                      "description": "Only this variant.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "search": {
+                      "description": "Part of a SKU or product name.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "condition": {
+                      "description": "stock_on_hand: only this stock condition.",
+                      "type": "string",
+                      "enum": [
+                        "sellable",
+                        "quarantine",
+                        "damaged",
+                        "repair",
+                        "supplier_return"
+                      ]
+                    },
+                    "at": {
+                      "description": "inventory_value: value at this moment. A date (2026-12-01) means the end of that day in the shop’s time zone; now when left out.",
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "from": {
+                      "description": "movements, cost_of_goods: start of the period. A date means the start of that day in the shop’s time zone; 30 days before `to` when left out.",
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "to": {
+                      "description": "movements, cost_of_goods: end of the period. A date includes that whole day; a time is exclusive; now when left out.",
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "days": {
+                      "description": "expiring_lots: lots expiring within this many days (default 30), and expired ones.",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3650
+                    },
+                    "movementType": {
+                      "description": "movements: only this type of movement.",
+                      "type": "string",
+                      "enum": [
+                        "receipt",
+                        "transfer",
+                        "fulfillment",
+                        "adjustment",
+                        "return",
+                        "count",
+                        "condition_change",
+                        "reversal"
+                      ]
+                    },
+                    "overdueOnly": {
+                      "description": "purchasing: only lines past their expected date.",
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "true",
+                            "false"
+                          ]
+                        }
+                      ]
+                    },
+                    "groupBy": {
+                      "description": "Rows per: stock_on_hand position (default), variant, location; movements variant (default), location, type, entry; inventory_value location (default), warehouse, category, family, variant; cost_of_goods variant (default), location, warehouse, category, family; purchasing line (default), order, variant, supplier; expiring_lots lot (default), position; shortages order (default), variant.",
+                      "type": "string",
+                      "enum": [
+                        "position",
+                        "variant",
+                        "location",
+                        "warehouse",
+                        "category",
+                        "family",
+                        "entry",
+                        "type",
+                        "line",
+                        "order",
+                        "supplier",
+                        "lot",
+                        "rule"
+                      ]
+                    },
+                    "sort": {
+                      "description": "A column key from the result’s columns; prefix \"-\" for descending.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    }
+                  }
+                },
+                "shared": {
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "report"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "savedReport": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "report": {
+                        "type": "string",
+                        "enum": [
+                          "stock_on_hand",
+                          "low_stock",
+                          "movements",
+                          "inventory_value",
+                          "cost_of_goods",
+                          "purchasing",
+                          "expiring_lots",
+                          "shortages"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "description": "The standard report it runs."
+                      },
+                      "filters": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      },
+                      "shared": {
+                        "type": "boolean"
+                      },
+                      "mine": {
+                        "type": "boolean"
+                      },
+                      "canEdit": {
+                        "type": "boolean"
+                      },
+                      "version": {
+                        "type": "number"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "report",
+                      "title",
+                      "filters",
+                      "shared",
+                      "mine",
+                      "canEdit",
+                      "version",
+                      "updatedAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "savedReport"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

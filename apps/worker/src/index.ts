@@ -15,11 +15,13 @@ import {
   notifyAlertOpened,
   ONBOARDING_RUN_TOPIC,
   type OutboxMessage,
+  REPORT_EXPORT_TOPIC,
   reconcileStock,
   recoverWebhookDeliveries,
   runDailyAlertChecks,
   runExportJob,
   runImportJob,
+  runReportExportJob,
   SHOPIFY_PUSH_TOPIC,
   type ShopifyPushPayload,
   sendInvitationEmail,
@@ -735,6 +737,14 @@ async function runJobsMessage(
           { contentType: 'json', delaySeconds: step.delaySeconds },
         );
       }
+      return null;
+    }
+    if (body.topic === REPORT_EXPORT_TOPIC) {
+      await runReportExportJob(
+        jobDeps(env, db),
+        body.shopId,
+        (body.payload as { exportId: string }).exportId,
+      );
       return null;
     }
     if (body.topic === 'inventory.availability_changed') {

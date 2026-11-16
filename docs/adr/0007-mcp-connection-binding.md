@@ -39,6 +39,15 @@ The ChatGPT run on staging on 14 November 2026 confirmed the same with real Work
 - Ending an Airstock session does not revoke existing connections; only revoking the grant does. The dashboard lists connections with a revoke button.
 - WorkOS access tokens last five minutes by default. Refresh tokens rotate for public clients and have no fixed maximum lifetime, which is why the per-request grant check matters.
 
+## Update, 16 November 2026: a new consent replaces the earlier connections (Phase 2, D20)
+
+In the Phase 1 ChatGPT run every reconnect created a new connection, and three full-access connections from the same person stayed active next to the new read-only one. The owner decided that a new consent from the same person, for the same MCP client and shop, revokes the earlier connections.
+
+- **When.** The consent step cannot do it: the OAuth client is unknown until the first token binds the grant. So the binding does it, in the same transaction: it revokes the same member's other active, bound grants for the same client ID (migration 0016). A new consent that is never used (abandoned on the WorkOS screen) therefore leaves the working connection alone, and expires as before.
+- **Order.** The newest consent wins. If an older grant binds after a newer one from the same client, the older one is revoked and its request gets 401. An advisory lock per member and client keeps two first requests at once from both surviving.
+- **Record.** Each revoked grant gets the usual `connection.revoked` event with the reason "Replaced by a new consent from the same person and client." and `replacedBy` in its changes and context. The actor is the new connection. The grant stores `replaced_by`, and the dashboard's AI assistants list says "Replaced by a new consent".
+- **Unchanged.** A revoked grant fails on its next request (pass criterion 3). Other clients, other shops, and other members' connections are untouched; `web.test.ts` checks each case.
+
 ## Revisit when
 
 WorkOS stops carrying consent-option claims through token refresh, an MCP client needs OAuth scopes that mirror connection scopes, or enterprise customers need organization-level SSO (option B could then sit alongside A).

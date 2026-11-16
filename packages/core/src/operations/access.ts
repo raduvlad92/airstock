@@ -182,6 +182,12 @@ const ConnectionSummary = z.object({
   /** When the first MCP request bound the grant to its client; null until then. */
   boundAt: z.string().nullable(),
   lastUsedAt: z.string().nullable(),
+  revokedAt: z.string().nullable(),
+  /**
+   * The connection that replaced this one: a new consent from the same person and client revokes
+   * the earlier ones when it is first used (plan D20). Null otherwise.
+   */
+  replacedBy: Id.nullable(),
 });
 
 /**
@@ -195,7 +201,7 @@ export const createConnection = defineOperation({
   id: 'connections.create',
   summary: 'Approve an AI or OAuth connection',
   description:
-    'The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2); a connection no client uses within 10 minutes expires.',
+    'The consent step: binds a new connection to this shop with the chosen scopes. The first request with the issued token binds it to that client (plan Section 7.2) and revokes your earlier connections from the same client in this shop; a connection no client uses within 10 minutes expires.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -253,9 +259,11 @@ export const listConnections = defineOperation({
       created_at: Date;
       bound_at: Date | null;
       last_used_at: Date | null;
+      revoked_at: Date | null;
+      replaced_by: string | null;
     }>(
       `select id, client_id, client_name, scopes, ${CURRENT_STATUS} as status, membership_id,
-         created_at, bound_at, last_used_at
+         created_at, bound_at, last_used_at, revoked_at, replaced_by
        from connection_grants where ($1 or membership_id = $2) order by created_at desc limit 500`,
       [all, ctx.membership?.id ?? null],
     );
@@ -271,6 +279,8 @@ export const listConnections = defineOperation({
           createdAt: iso(r.created_at) as string,
           boundAt: iso(r.bound_at),
           lastUsedAt: iso(r.last_used_at),
+          revokedAt: iso(r.revoked_at),
+          replacedBy: r.replaced_by,
         })),
       },
       audit: { targetType: 'connection_grant', targetId: 'list' },

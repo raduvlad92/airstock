@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
 import { RootLayout, ShopLayout } from './components/layout.tsx';
 import { parseLabelsSearch } from './labels/search.ts';
-import { ActivityPage } from './pages/activity.tsx';
+import { ActivityPage, parseActivitySearch } from './pages/activity.tsx';
 import { AlertsPage } from './pages/alerts.tsx';
 import { FamiliesSettingsPage, FieldsSettingsPage } from './pages/catalog-settings.tsx';
 import { CountsPage } from './pages/counts.tsx';
@@ -156,6 +156,7 @@ const activityRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/activity',
   component: ActivityPage,
+  validateSearch: parseActivitySearch,
 });
 
 const integrationsRoute = createRoute({

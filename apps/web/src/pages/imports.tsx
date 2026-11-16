@@ -179,6 +179,7 @@ function RecentExports({ shopId }: { shopId: string }) {
           <li key={e.exportId}>
             <span>
               <span className="muted">{formatDateTime(e.createdAt)}</span>{' '}
+              {e.kind === 'activity' ? <span>Activity history</span> : null}{' '}
               <Badge
                 tone={e.status === 'completed' ? 'ok' : e.status === 'failed' ? 'error' : 'muted'}
               >
@@ -482,17 +483,22 @@ function ImportResult({ shopId, imp }: { shopId: string; imp: ImportOut }) {
   );
 }
 
-/** Exports what the products page shows (plan 5.12): a job, then a download for 24 hours. */
+/**
+ * Exports what a page shows (plan 5.12): a job, then a download for 24 hours. The products page
+ * exports its query; the activity page its filters, through `endpoint`.
+ */
 export function ExportButton({
   shopId,
   query,
+  endpoint = `/shops/${shopId}/exports`,
 }: {
   shopId: string;
   query: Record<string, unknown>;
+  endpoint?: string;
 }) {
   const [exportId, setExportId] = useState<string | null>(null);
   const start = useMutation({
-    mutationFn: () => command<Out<typeof ops.createExport>>(`/shops/${shopId}/exports`, query),
+    mutationFn: () => command<Out<typeof ops.createExport>>(endpoint, query),
     onSuccess: (res) => setExportId(res.export.exportId),
   });
   const job = useQuery({

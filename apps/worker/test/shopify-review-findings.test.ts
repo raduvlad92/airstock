@@ -1,5 +1,5 @@
 import { uuidv7 } from '@airstock/core';
-import type { ShopifyVariant } from '@airstock/shopify';
+import { reconcileConnection, type ShopifyVariant } from '@airstock/shopify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
@@ -90,6 +90,58 @@ async function onHand(s: Setup) {
   return row!;
 }
 
+const NAMES = ['mug', 'teapot', 'kettle'];
+
+interface Many {
+  m: Merchant;
+  store: FakeStore;
+  connectionId: string;
+  items: Array<{ variantId: string; productId: string; shopify: ShopifyVariant }>;
+}
+
+/** A shop whose items (with stock) are each sold by one Shopify variant at "Shop location". */
+async function setupItems(name: string, stocks: number[]): Promise<Many> {
+  const m = await h.merchant(name);
+  const store = h.newStore('review');
+  const items: Many['items'] = [];
+  for (const [i, stock] of stocks.entries()) {
+    const sku = `${name.replace(/\W/g, '').slice(0, 6).toUpperCase()}-${i}-${uuidv7().slice(-6)}`;
+    const made = await h.item(m, `${name} ${NAMES[i]}`, sku);
+    if (stock > 0) await h.receive(m, made.variantId, stock);
+    const [shopify] = store.addProduct({
+      title: `${name} ${NAMES[i]}`,
+      variants: [{ sku, quantities: { '1001': 0 } }],
+    });
+    items.push({ variantId: made.variantId, productId: made.productId, shopify: shopify! });
+  }
+  const connectionId = await h.install(m, store);
+  const base = `/shops/${m.shopId}/shopify/connections/${connectionId}`;
+  await h.command(m.cookie, `${base}/locations`, {
+    connectionId,
+    locations: [{ shopifyLocationId: '1001', locationId: m.locationId }],
+  });
+  const mapped = await h.command(m.cookie, `${base}/variants`, {
+    connectionId,
+    variants: items.map((i) => ({
+      shopifyVariantId: i.shopify.variantId,
+      shopifyInventoryItemId: i.shopify.inventoryItemId,
+      variantId: i.variantId,
+    })),
+  });
+  expect(mapped.status).toBe(200);
+  await h.flushTogether(m.shopId);
+  for (const [i, stock] of stocks.entries()) expect(store.available(items[i]!.shopify)).toBe(stock);
+  return { m, store, connectionId, items };
+}
+
+async function shopifyAlerts(shopId: string) {
+  return ownerQuery<{ kind: string; status: string; details: object }>(
+    `select kind, status, details from alerts where shop_id = $1 and kind = 'shopify_sync'
+     order by opened_at`,
+    [shopId],
+  );
+}
+
 describe('Shopify connector review findings', () => {
   // FINDING 1 (stock drift, main). shopify.orders.sync runs fulfillments (step 2) before it
   // reserves new lines (step 3). An order whose first sync already carries a fulfillment (its
@@ -112,5 +164,85 @@ describe('Shopify connector review findings', () => {
     expect(await h.available(s.m, s.variantId)).toBe('3.000000');
     // Shopify sold 2 of 5: it must not be told 5 are available again.
     expect(s.store.available(s.item)).toBe(3);
+  });
+  // FINDING 2 (lost order, reconciler stuck; main). shopify.orders.sync applies a whole order in
+  // one transaction and reserveStock refuses an archived variant (409 variant_archived, not
+  // retryable). A Shopify order with one line for a mapped variant that was archived in Airstock
+  // (Shopify still sells it: "continue selling", a POS sale, or an order placed before the push
+  // of 0 landed) therefore fails whole: its other lines are never reserved, the job fails for
+  // good, and reconcileConnection throws on that order before it moves the cursor, so every run
+  // stops at the same order. No later missed order, level comparison, or pending push is ever
+  // reconciled for the store. A Shopify reservation released by hand in Airstock poisons an order
+  // the same way (its cancel or fulfillment gets reservation_not_open).
+  it.fails('F2: an order line for an archived variant does not lose the order or stop the reconciler', async () => {
+    const s = await setupItems('Archived line', [5, 5]);
+    const [gone, kept] = s.items as [Many['items'][0], Many['items'][0]];
+    // The first item is archived in Airstock (the state archive_variant leaves); still mapped.
+    await ownerQuery(`update variants set status = 'archived' where id = $1`, [gone.variantId]);
+    // Two orders whose webhooks never came: the first has a line for each item.
+    s.store.placeOrder([
+      { variant: gone.shopify, quantity: 1 },
+      { variant: kept.shopify, quantity: 2 },
+    ]);
+    s.store.placeOrder([{ variant: kept.shopify, quantity: 1 }]);
+    const run = () =>
+      reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: false }).catch(
+        (error: unknown) => error,
+      );
+    // Today each run throws variant_archived on the first order.
+    expect(await run()).not.toBeInstanceOf(Error);
+    await run();
+    // Both orders' lines for the item that is still sold are held.
+    expect(await h.available(s.m, kept.variantId)).toBe('2.000000');
+    // The cursor moves past the order (today it stays null: every run stops at the same order).
+    const [conn] = await ownerQuery<{ synced: Date | null }>(
+      'select orders_synced_through as synced from shopify_connections where id = $1',
+      [s.connectionId],
+    );
+    expect(conn?.synced).not.toBeNull();
+  });
+
+  // FINDING 3 (false conflict, level frozen; main). pushBatch decides a refused write is explained
+  // only when catchUpOrders "processed" something, and catchUpOrders counts reserved + shortage
+  // lines only. A refusal caused by Shopify's own restock (a cancellation, an edit that removes
+  // units, a refund with restock) whose webhook has not been applied yet is applied by the
+  // catch-up (released), yet counts 0, so the push records a conflict: a shopify_sync alert and a
+  // shopify.sync_conflict webhook go out, and the level is not pushed until the reconciler or a
+  // person clears it. A cancellation of an order created before the record's as-of time is not
+  // even listed by ordersSince, so it is always called a conflict.
+  it.fails('F3: a push refused because of an unprocessed cancellation is not a conflict', async () => {
+    const s = await setup('Cancel race', 6);
+    const order = s.store.placeOrder([{ variant: s.item, quantity: 4 }]);
+    await event(s, 'orders/create', s.store.webhookBody(order));
+    expect(s.store.available(s.item)).toBe(2);
+    // Shopify cancels and restocks; the orders/cancelled webhook is still on its way when a
+    // receipt in Airstock pushes the level.
+    s.store.cancel(order);
+    await h.receive(s.m, s.variantId, 1);
+    await h.flush(s.m.shopId);
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
+    expect(await h.available(s.m, s.variantId)).toBe('7.000000');
+    expect(s.store.available(s.item)).toBe(7);
+  });
+
+  // FINDING 4 (stock drift and false conflict; main). With one location map, processOrder never
+  // reads where Shopify committed a line (lineLocations runs only for several maps), and the sync
+  // takes `onlyLocation` for every line. A store with a second Shopify location that is not mapped
+  // (a 3PL, a pop-up) gets orders committed there counted against the mapped location's record:
+  // the record drops while Shopify's quantity at the mapped location does not, the push then sees
+  // target == record and writes nothing, so Shopify keeps showing the reserved units as sellable
+  // at the mapped location (oversell), and the next comparison calls it a conflict. PRD 8.5:
+  // unmapped Shopify locations are "never guessed".
+  it.fails('F4: an order committed at an unmapped Shopify location leaves the mapped level right', async () => {
+    const s = await setup('Unmapped loc', 5);
+    s.store.levels.set(s.store.key(s.item.inventoryItemId, '1002'), 10);
+    // Shopify commits the order at "Warehouse" (1002), which this shop has not mapped.
+    const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }], '1002');
+    await event(s, 'orders/create', s.store.webhookBody(order));
+    // Whatever Airstock holds for the order, Shopify's mapped level must show Airstock's
+    // availability there, and the record must match Shopify (no conflict on the next check).
+    expect(s.store.available(s.item, '1001')).toBe(Number(await h.available(s.m, s.variantId)));
+    await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
   });
 });

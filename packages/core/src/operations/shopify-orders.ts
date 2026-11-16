@@ -6,7 +6,12 @@ import { errors } from '../errors.ts';
 import type { AnyOperation, HandlerContext, HandlerResult } from '../registry.ts';
 import { defineOperation } from '../registry.ts';
 import { Id } from '../schemas.ts';
-import { SHOPIFY_PUSH_TOPIC, salesMaps, shopifyChannel } from '../shopify/targets.ts';
+import {
+  affectedLevels,
+  SHOPIFY_PUSH_TOPIC,
+  salesMaps,
+  shopifyChannel,
+} from '../shopify/targets.ts';
 import { applyChanges } from '../stock/adjust.ts';
 import { exactProduct } from '../stock/engine.ts';
 import type { WebhookEmit } from '../webhooks/events.ts';
@@ -949,7 +954,24 @@ export const syncShopifyOrder = defineOperation({
         ],
       );
     }
+    // Levels whose record changed are pushed after commit, unless a stock change in this
+    // transaction already announces them (its push covers the same level).
+    const announced = new Set<string>();
+    for (const o of acc.outbox) {
+      if (o.topic !== 'inventory.availability_changed') continue;
+      const p = o.payload as { variantId?: string; locationIds?: string[]; positionIds?: string[] };
+      for (const l of await affectedLevels(ctx.tx, {
+        variantId: p.variantId ?? null,
+        locationIds: p.locationIds ?? [],
+        positionIds: p.positionIds ?? [],
+      })) {
+        if (l.connectionId === connectionId) {
+          announced.add(`${l.inventoryItemId}@${l.shopifyLocationId}`);
+        }
+      }
+    }
     for (const level of acc.levels) {
+      if (announced.has(level)) continue;
       const [item, location] = level.split('@');
       acc.outbox.push({
         topic: SHOPIFY_PUSH_TOPIC,

@@ -461,19 +461,18 @@ function SessionWalk({
     },
   });
 
+  // Decisions only for lines that still need one; a recounted line no longer does.
+  const decided = () =>
+    (session.data?.lines ?? [])
+      .filter((l) => l.needsReview && reviews[l.lineId])
+      .map((l) => ({ lineId: l.lineId, resolution: reviews[l.lineId]! }));
+
   const submit = useMutation({
     mutationFn: (choices: ClaimChoice[]) =>
       command<Submitted>(
         `/shops/${env.shopId}/counts/${sessionId}/submit`,
         {
-          ...(Object.keys(reviews).length > 0
-            ? {
-                reviews: Object.entries(reviews).map(([lineId, resolution]) => ({
-                  lineId,
-                  resolution,
-                })),
-              }
-            : {}),
+          ...(decided().length > 0 ? { reviews: decided() } : {}),
           ...(choices.length > 0 ? { reservationChoices: choices } : {}),
         },
         submitKey.current,

@@ -39,7 +39,7 @@ pnpm dev:setup                       # creates airstock_dev and prints a shop, i
 pnpm --filter @airstock/worker dev   # Worker on http://localhost:8787 with local queues
 ```
 
-Adding to the API (details in [ADR 0005](docs/adr/0005-operation-registry.md)):
+Adding an operation, a tool action, or an ADR (details in [ADR 0005](docs/adr/0005-operation-registry.md)):
 
 - **Operation:** define and export it in its module in `packages/core/src/operations`, append it to the list at the end of that module, and run `pnpm openapi` to write its `docs/api/operations/<id>.json`. A new module also adds one sorted line to each group in `operations/index.ts`.
 - **MCP tool action:** set the operation's `mcp` field. Test it with the area's other tests, using `apps/worker/test/mcp-client.ts`. A new tool also adds one line to `mcp-tools.test.ts`.

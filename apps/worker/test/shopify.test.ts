@@ -3,6 +3,7 @@ import {
   connectedStore,
   pushAvailability,
   pushConnection,
+  reconcileConnection,
   runJob,
   type ShopifyVariant,
   type SyncDeps,
@@ -486,10 +487,14 @@ describe('Shopify orders and availability', () => {
     expect(conflict?.changes).toEqual({ expected: 11, airstock: 12, actual: 50 });
     const listed = await json(await dashboard(a.cookie, `/shops/${a.shopId}/shopify/connections`));
     expect(listed.connections[0].conflicts).toBe(1);
-    // Mapping again reads Shopify's quantity afresh and clears the conflict.
-    storeA.levels.set(storeA.key(mugA.inventoryItemId, '1001'), 11);
+    // Mapping the same variants again does not choose a side: the conflict stays open, and
+    // Shopify keeps the 50 a person set (ADR 0036; sync health resolves it, ADR 0037).
     expect((await mapBySku(a, connectionA)).status).toBe(200);
-    expect(await flushOutbox(a.shopId)).toEqual(['pushed']);
+    expect(await flushOutbox(a.shopId)).toEqual(['conflict']);
+    expect(storeA.available(mugA)).toBe(50);
+    // The person puts Shopify back: the reconciler explains the conflict and pushes Airstock's.
+    storeA.levels.set(storeA.key(mugA.inventoryItemId, '1001'), 11);
+    await reconcileConnection(deps(), a.shopId, connectionA, { daily: true });
     expect(storeA.available(mugA)).toBe(12);
   });
 

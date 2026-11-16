@@ -201,13 +201,9 @@ export const setShopifyMappings = defineOperation({
       variants.map((v) => ({ ...v, source: 'sku' as const })),
       true,
     );
-    // Every level is read from Shopify again before the next push (ADR 0008).
-    await ctx.tx.query(
-      `update shopify_inventory_levels set expected_available = null, expected_as_of = null,
-         conflict_at = null, conflict_shopify_available = null, updated_at = now()
-       where connection_id = $1`,
-      [input.connectionId],
-    );
+    // Levels whose map changed are read from Shopify again before the next push (the helpers
+    // reset them). Unchanged ones keep their record and any open conflict: mapping again does not
+    // choose a side for a person (ADR 0036; conflicts are resolved in sync health, ADR 0037).
     return {
       result: {
         connectionId: input.connectionId,

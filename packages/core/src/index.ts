@@ -115,6 +115,18 @@ export {
 } from './registry.ts';
 export { normalizeSku } from './schemas.ts';
 export {
+  ALERT_OPENED_TOPIC,
+  ALERT_RESOLVED_TOPIC,
+  RECONCILIATION_ALERT_KEY,
+  RECONCILIATION_ALERT_KIND,
+  type ReconcileStockOptions,
+  type ReconcileStockResult,
+  reconcileShop,
+  reconcileStock,
+  type ShopReconciliation,
+  type StockProblem,
+} from './stock/reconciliation.ts';
+export {
   announceStockChanged,
   attemptWebhookDelivery,
   type DeliveryResult,

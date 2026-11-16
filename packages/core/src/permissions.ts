@@ -20,6 +20,8 @@ export const PERMISSIONS = [
   'inventory.reserve',
   /** Ship reserved units: lowers on hand and reserved together (PRD 6.3). */
   'inventory.fulfill',
+  /** Correct stock with an audited adjustment, such as the repair of a stock check problem. */
+  'inventory.adjust',
   'activity.read',
   'credentials.manage',
   'connections.manage',
@@ -60,6 +62,7 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'inventory.receive',
     'inventory.reserve',
     'inventory.fulfill',
+    'inventory.adjust',
   ]),
   viewer: new Set(READ),
 };

@@ -1,4 +1,4 @@
-# 0027. Transfers: holds as typed reservations, transit positions per transfer, the transfer row locked first
+# 0028. Transfers: holds as typed reservations, transit positions per transfer, the transfer row locked first
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D8, Section 5.4, and PRD 6.4 (milestone I2). Builds on [ADR 0006](0006-inventory-concurrency.md) and [ADR 0020](0020-stock-model.md).
 

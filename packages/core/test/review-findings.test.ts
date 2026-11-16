@@ -408,3 +408,40 @@ describe('F-SERIAL-TWO-PLACES: one serial can end up on hand at two locations', 
     });
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-PICK-COMPLETE-WHOLE-BUNDLE (stock lost). picking.ts completePickList fulfills a bundle by
+// calling fulfillReservation.handler on the bundle header with no quantity, which fulfills every
+// component allocation the bundle holds, including ones that were never on this list (another
+// warehouse, outside a scoped member's locations, or on another open list). Stock leaves a
+// position nobody picked from.
+// ---------------------------------------------------------------------------------------------
+describe('F-PICK-COMPLETE-WHOLE-BUNDLE: completing a list ships bundle components it never listed', () => {
+  it.fails('leaves the other warehouse’s component in stock when only this warehouse was picked', async () => {
+    const a = await createVariant(h);
+    const b = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId: a, locationId: shop.locationId, quantity: '1' });
+    await h.run(ops.receiveStock, { variantId: b, locationId: store, quantity: '1' });
+    const bundle = await createVariant(h);
+    await h.run(ops.setBundle, {
+      variantId: bundle,
+      bundleVersion: 0,
+      components: [
+        { variantId: a, quantity: '1' },
+        { variantId: b, quantity: '1' },
+      ],
+    });
+    const r = await h.run(ops.reserveStock, { variantId: bundle, quantity: '1' });
+    const list = await h.run(ops.createPickList, {
+      warehouseId: shop.warehouseId,
+      reservationIds: [r.reservationId],
+    });
+    expect(list.pickLines.map((l: { variantId: string }) => l.variantId)).toEqual([a]);
+    for (const line of list.pickLines) {
+      await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: line.lineId });
+    }
+    await h.run(ops.completePickList, { pickListId: list.pickListId });
+    const view = await h.run(ops.getAvailability, { variantId: b });
+    expect(view.totals.onHand).toBe('1.000000');
+  });
+});

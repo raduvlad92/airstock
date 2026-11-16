@@ -20,10 +20,19 @@ export const PERMISSIONS = [
   'inventory.reserve',
   /** Ship reserved units: lowers on hand and reserved together (PRD 6.3). */
   'inventory.fulfill',
-  /** Correct stock with an audited adjustment, such as the repair of a stock check problem. */
+  /** Create, dispatch, receive, and resolve transfers between locations (PRD 6.4). */
+  'inventory.transfer',
+  /**
+   * Correct stock with an audited adjustment and a reason, change conditions, and reverse
+   * adjustments (PRD 6.6), such as the repair of a stock check problem.
+   */
   'inventory.adjust',
   /** Build pick lists and record picks; picks never change stock (PRD 6.10). */
   'picking.run',
+  /** Run count sessions; submitting posts count corrections (PRD 6.6). */
+  'inventory.count',
+  /** Create, authorize, receive, and inspect returns (PRD 6.5). */
+  'returns.manage',
   'activity.read',
   'credentials.manage',
   'connections.manage',
@@ -68,8 +77,11 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'inventory.receive',
     'inventory.reserve',
     'inventory.fulfill',
+    'inventory.transfer',
     'inventory.adjust',
     'picking.run',
+    'inventory.count',
+    'returns.manage',
   ]),
   viewer: new Set(READ),
 };

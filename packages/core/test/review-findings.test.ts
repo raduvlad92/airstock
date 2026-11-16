@@ -118,7 +118,7 @@ async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
 // bundle reservation, a count of both) deadlocks with the sweep; PostgreSQL aborts one side.
 // ---------------------------------------------------------------------------------------------
 describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id order', () => {
-  it.fails('does not deadlock with a command that locks the same positions in id order', async () => {
+  it('does not deadlock with a command that locks the same positions in id order', async () => {
     // Variant A sorts first by variant id; its position is created after B's, so pA > pB.
     const variantA = await createVariant(h);
     const variantB = await createVariant(h);
@@ -200,7 +200,7 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
 // that check for conservation of in-transit stock).
 // ---------------------------------------------------------------------------------------------
 describe('F-RECON-SKIPS-DOCUMENTS: the scheduled check ignores transfer and return invariants', () => {
-  it.fails('reports a transfer whose in-transit stock no longer matches its line', async () => {
+  it('reports a transfer whose in-transit stock no longer matches its line', async () => {
     const own = await seedShop(db, sink, 'Review recon');
     const oh = harness(db, sink, own);
     const wh = await oh.run(ops.createWarehouse, { name: 'Other' });
@@ -312,7 +312,7 @@ describe('F-SCOPE-ALLOCATION-RULE: a scoped member can widen or rewrite a channe
 // scopeWhere), so a member limited to one warehouse sees out-of-scope position ids and quantities.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-ENGINE-EVENTS: expiry events carry no locations and reach every scoped reader', () => {
-  it.fails('hides an out-of-scope reservation expiry from a member limited to another warehouse', async () => {
+  it('hides an out-of-scope reservation expiry from a member limited to another warehouse', async () => {
     const own = await seedShop(db, sink, 'Review expiry scope');
     const oh = harness(db, sink, own);
     const wh = await oh.run(ops.createWarehouse, { name: 'Other' });
@@ -346,7 +346,7 @@ describe('F-SCOPE-ENGINE-EVENTS: expiry events carry no locations and reach ever
 // its shelf, gives it several units, so it can be reserved and sold more than once.
 // ---------------------------------------------------------------------------------------------
 describe('F-ONE-OF-A-KIND-COUNT: a count can give a one-of-a-kind item more than one unit', () => {
-  it.fails('refuses a count that would make a one-of-a-kind item own two units', async () => {
+  it('refuses a count that would make a one-of-a-kind item own two units', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, oneOfAKind: true });
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '1' });
@@ -379,7 +379,7 @@ describe('F-ONE-OF-A-KIND-COUNT: a count can give a one-of-a-kind item more than
 // The same happens when a count recorded S as found and a return receipt brings S back first.
 // ---------------------------------------------------------------------------------------------
 describe('F-SERIAL-TWO-PLACES: one serial can end up on hand at two locations', () => {
-  it.fails('refuses to reverse a removal once the serial is back in stock elsewhere', async () => {
+  it('refuses to reverse a removal once the serial is back in stock elsewhere', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'serial' });
     const serial = `SN-${uuidv7().slice(-6)}`;
@@ -462,7 +462,7 @@ describe('F-PICK-COMPLETE-WHOLE-BUNDLE: completing a list ships bundle component
 // unit entered or left the shop. ADR 0022 allows the default cost only while there is no stock.
 // ---------------------------------------------------------------------------------------------
 describe('F-COST-RESET-ON-MOVE: a count that moves all units to another shelf resets the average', () => {
-  it.fails('keeps the moving average when a count finds the same five units on another shelf', async () => {
+  it('keeps the moving average when a count finds the same five units on another shelf', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, defaultCost: '4' });
     await h.run(ops.receiveStock, {
@@ -495,7 +495,7 @@ describe('F-COST-RESET-ON-MOVE: a count that moves all units to another shelf re
 // repair removes units that are on the shelf and leaves history and balance disagreeing again.
 // ---------------------------------------------------------------------------------------------
 describe('F-REVERSE-REPAIR: reversing a stock-check repair changes on hand', () => {
-  it.fails('refuses to reverse a ledger-only repair (or reverses only the ledger entry)', async () => {
+  it('refuses to reverse a ledger-only repair (or reverses only the ledger entry)', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '10' });
     const [pos] = await ownerQuery<{ id: string }>(
@@ -614,7 +614,7 @@ describe('F-SCOPE-PO-RECEIVE: a scoped member can receive an order for another w
 // Fulfilling 0.5 of a whole-unit variant leaves 4.5 units on hand.
 // ---------------------------------------------------------------------------------------------
 describe('F-FRACTIONAL-FULFILL: fulfillment ignores the variant’s quantity precision', () => {
-  it.fails('refuses to fulfill half a unit of a whole-unit variant', async () => {
+  it('refuses to fulfill half a unit of a whole-unit variant', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '5' });
     const r = await h.run(ops.reserveStock, { variantId, quantity: '2' });
@@ -636,7 +636,7 @@ describe('F-FRACTIONAL-FULFILL: fulfillment ignores the variant’s quantity pre
 // reservation limited to lot K can be moved to lot L (a picker rescan, or the API).
 // ---------------------------------------------------------------------------------------------
 describe('F-REALLOCATE-IGNORES-LIMITS: reallocation leaves the reservation’s own lot', () => {
-  it.fails('refuses to move a lot-limited reservation to another lot', async () => {
+  it('refuses to move a lot-limited reservation to another lot', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
     for (const lotCode of ['K', 'L']) {
@@ -781,7 +781,7 @@ describe('F-PICK-COMPLETE-EXPIRED: one expired reservation blocks completing the
 // or completed (inspection_pending).
 // ---------------------------------------------------------------------------------------------
 describe('F-RETURN-SKIPS-INSPECTION: a return’s quarantined units can be made sellable uninspected', () => {
-  it.fails('refuses to move a return’s uninspected units out of quarantine', async () => {
+  it('refuses to move a return’s uninspected units out of quarantine', async () => {
     const orderRef = `ORD-${uuidv7().slice(-6)}`;
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '5' });
@@ -878,7 +878,7 @@ describe('F-PICK-BUNDLE-SPLIT-LINE: a bundle whose line was split by a lot resca
 // receipt lands: stock ends up at an archived location, unsellable and refused by counts.
 // ---------------------------------------------------------------------------------------------
 describe('F-TRANSFER-DEST-UNLOCKED: a transfer receipt can land stock at a location being archived', () => {
-  it.fails('never leaves stock at an archived location', async () => {
+  it('never leaves stock at an archived location', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '3' });
     const wh = await h.run(ops.createWarehouse, { name: `Closing ${uuidv7().slice(-4)}` });

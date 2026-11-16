@@ -3,7 +3,7 @@
     "post": {
       "operationId": "storage.locations.archive",
       "summary": "Archive a location and everything inside it",
-      "description": "Refused while it or a location inside it holds stock or open reservations, or a Shopify store sells from it. Archived locations take no new operations; history stays. Restoring brings back the locations archived with it.",
+      "description": "Refused while it or a location inside it holds stock or open reservations, a transfer is on its way to it, or a Shopify store sells from it. Archived locations take no new operations; history stays. Restoring brings back the locations archived with it.",
       "x-permission": "storage.manage",
       "x-connection-scope": "storage:write",
       "x-audit-action": "storage.location.archived",

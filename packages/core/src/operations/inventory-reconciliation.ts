@@ -26,6 +26,11 @@ export const ProblemKind = z.enum([
   'bundle_component_mismatch',
   'serial_mismatch',
   'cost_quantity_mismatch',
+  'transfer_hold_mismatch',
+  'transfer_in_transit_mismatch',
+  'return_received_mismatch',
+  'return_inspected_mismatch',
+  'return_unit_inspected_mismatch',
 ]);
 type ProblemKind = z.infer<typeof ProblemKind>;
 
@@ -39,6 +44,13 @@ const PROBLEM_TITLES: Record<ProblemKind, string> = {
   bundle_component_mismatch: 'A bundle component reservation has the wrong quantity',
   serial_mismatch: 'A serial’s status differs from the stock that holds it',
   cost_quantity_mismatch: 'The quantity behind the average cost differs from stock',
+  transfer_hold_mismatch: 'A transfer line’s held quantity differs from its hold',
+  transfer_in_transit_mismatch:
+    'A transfer line’s in-transit quantity differs from stock in transit',
+  return_received_mismatch: 'A return line’s received quantity differs from its received units',
+  return_inspected_mismatch: 'A return line’s inspected quantities differ from its inspections',
+  return_unit_inspected_mismatch:
+    'Returned units’ inspected quantity differs from their inspections',
 };
 
 /** Problems with a compensating repair; the rest need a person to look at the records. */
@@ -51,7 +63,15 @@ const REPAIRABLE: ReadonlySet<ProblemKind> = new Set([
 const Problem = z.object({
   problem: ProblemKind,
   title: z.string(),
-  targetType: z.enum(['position', 'reservation', 'serial_unit', 'variant']),
+  targetType: z.enum([
+    'position',
+    'reservation',
+    'serial_unit',
+    'variant',
+    'transfer_line',
+    'return_line',
+    'return_unit',
+  ]),
   targetId: Id,
   expected: z.string().describe('What the history (or the source records) says.'),
   actual: z.string().describe('What the stored figure says.'),
@@ -91,7 +111,11 @@ async function describeProblems(
      left join inventory_positions p on t."targetType" = 'position' and p.id = t."targetId"
      left join reservations r on t."targetType" = 'reservation' and r.id = t."targetId"
      left join serial_units s on t."targetType" = 'serial_unit' and s.id = t."targetId"
+     left join transfer_lines tl on t."targetType" = 'transfer_line' and tl.id = t."targetId"
+     left join return_lines rl on t."targetType" = 'return_line' and rl.id = t."targetId"
+     left join return_units ru on t."targetType" = 'return_unit' and ru.id = t."targetId"
      left join variants v on v.id = coalesce(p.variant_id, r.variant_id, s.variant_id,
+       tl.variant_id, rl.variant_id, ru.variant_id,
        case when t."targetType" = 'variant' then t."targetId" end)
      left join locations l on l.id = p.location_id`,
     [
@@ -131,7 +155,7 @@ export const getStockCheck = defineOperation({
   id: 'inventory.reconciliation.get',
   summary: 'Get the stock check result',
   description:
-    'Use this for "does my stock add up" questions. Airstock checks every 30 minutes after stock changes, and daily, that history, balances, reservations, serials, and the quantity behind the average cost agree. Returns the latest scheduled checks, the reconciliation alert, and the problems found right now. Repairs are made by a person in the dashboard or over REST.',
+    'Use this for "does my stock add up" questions. Airstock checks every 30 minutes after stock changes, and daily, that history, balances, reservations, serials, transfers, returns, and the quantity behind the average cost agree. Returns the latest scheduled checks, the reconciliation alert, and the problems found right now. Repairs are made by a person in the dashboard or over REST.',
   kind: 'read',
   scope: 'shop',
   input: z.object({}),
@@ -227,7 +251,7 @@ export const getStockCheck = defineOperation({
 
 const RepairTarget = z.object({
   problem: ProblemKind,
-  targetId: Id.describe('The position or variant the problem names.'),
+  targetId: Id.describe('The position, variant, or other record the problem names.'),
 });
 
 const RepairPlan = z.object({
@@ -432,7 +456,7 @@ export const previewStockRepair = defineOperation({
           problem: current ? ((await describeProblems(ctx.tx, [current]))[0] ?? null) : null,
           repair: null,
           guidance: current
-            ? 'No automatic repair is offered for this problem. Open the reservation, serial, or position in the dashboard and check its history; contact support if it does not add up.'
+            ? 'No automatic repair is offered for this problem; check it by hand. Open the reservation, serial, position, transfer, or return in the dashboard and check its history; contact support if it does not add up.'
             : null,
         },
         audit: {

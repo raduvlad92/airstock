@@ -5,8 +5,9 @@ import { uuidv7 } from '../ids.ts';
 import { insertWebhookEvents, webhookEvent } from '../webhooks/events.ts';
 
 // The scheduled stock reconciliation (D18, PRD 6.1 rules 2 and 10, A21). For each shop it runs the
-// SQL check `stock_reconciliation_problems()` (migration 0017), records the result, and opens or
-// resolves one alert. It never changes stock: a mismatch is repaired only by a person, through
+// SQL checks `stock_reconciliation_problems()` (migration 0017), `transfer_reconciliation_problems()`
+// (0030: transfer holds and in-transit stock), and `return_reconciliation_problems()` (0031:
+// received and inspected return units), records the result, and opens or resolves one alert. It never changes stock: a mismatch is repaired only by a person, through
 // the reviewed repair operation (operations/inventory-reconciliation.ts).
 
 /** The open-alert key: at most one open reconciliation alert per shop (D12). */
@@ -47,7 +48,9 @@ export async function readStockProblems(
     actual: string;
   }>(
     `select problem, target_type, target_id, expected, actual
-     from stock_reconciliation_problems()
+     from (select * from stock_reconciliation_problems()
+           union all select * from transfer_reconciliation_problems()
+           union all select * from return_reconciliation_problems()) p
      where ($1::text is null or (problem = $1 and target_id = $2::uuid))
      order by problem, target_id`,
     [only?.problem ?? null, only?.targetId ?? null],

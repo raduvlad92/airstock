@@ -15,6 +15,7 @@ import {
 import {
   type AppliedMove,
   applyMoves,
+  assertReturnUnitsKept,
   type EnteredPack,
   findPositions,
   keyOf,
@@ -380,8 +381,11 @@ export async function applyChanges(
   const touched = [...new Set([...released, ...reallocated].map((r) => r.reservationId))];
   if (touched.length > 0) await refreshStatuses(ctx.tx, touched);
 
-  // 3. Costs per variant in id order: units out at the average; units in at the average (or the
-  // default cost without stock), or at the cost a reversal brings back.
+  // 3. Costs per variant in id order: units in first, at the average (or the default cost
+  // without stock), or at the cost a reversal brings back; then units out at the average. Units
+  // that only change shelf or condition in one operation come in at the average and leave at it,
+  // so the average stays (ADR 0022). Costing the outs first would take a count that moves every
+  // unit to another shelf through "no stock" and reset the average to the default cost.
   const costs = new Map<string, { unitCost: string | null; costBasis: string }>();
   const costOf = new Map<
     StockChange & { delta: string },
@@ -390,20 +394,6 @@ export async function applyChanges(
   const costKind = kind === 'count' ? 'count' : 'adjustment';
   for (const variantId of [...new Set(live.map((c) => c.key.variantId))].sort()) {
     const mine = live.filter((c) => c.key.variantId === variantId);
-    const outs = mine.filter((c) => !positive(c.delta));
-    if (outs.length > 0) {
-      const total = outs.reduce((s, c) => add(s, c.delta.replace(/^-/, '')), '0');
-      const cost = await applyStockCost(
-        ctx,
-        variantId,
-        operationId,
-        costKind,
-        `-${normalize(total)}`,
-        null,
-      );
-      for (const c of outs) costOf.set(c, cost);
-      costs.set(variantId, cost);
-    }
     const ins = mine.filter((c) => positive(c.delta));
     const groups = new Map<string, Array<StockChange & { delta: string }>>();
     for (const c of ins) {
@@ -421,9 +411,51 @@ export async function applyChanges(
         k === '' ? null : k,
       );
       for (const c of group) costOf.set(c, cost);
-      if (!costs.has(variantId)) costs.set(variantId, cost);
+      costs.set(variantId, cost);
+    }
+    const outs = mine.filter((c) => !positive(c.delta));
+    if (outs.length > 0) {
+      const total = outs.reduce((s, c) => add(s, c.delta.replace(/^-/, '')), '0');
+      const cost = await applyStockCost(
+        ctx,
+        variantId,
+        operationId,
+        costKind,
+        `-${normalize(total)}`,
+        null,
+      );
+      for (const c of outs) costOf.set(c, cost);
+      costs.set(variantId, cost);
     }
   }
+  // One of a kind: at most one owned unit across the shop (ADR 0024), checked under the cost-row
+  // locks just taken, for every adjustment, count, and reversal that adds units. An item found
+  // again after it was sold is active again, as after a receipt.
+  const added = [...new Set(live.filter((c) => positive(c.delta)).map((c) => c.key.variantId))];
+  if (added.length > 0) {
+    const ones = await ctx.tx.query<{ id: string; product_id: string; quantity: string }>(
+      `select v.id, v.product_id, c.quantity::text from variants v
+       join variant_costs c on c.shop_id = v.shop_id and c.variant_id = v.id
+       where v.id = any($1::uuid[]) and v.one_of_a_kind`,
+      [added],
+    );
+    const over = ones.filter((o) => compare(o.quantity, '1') > 0);
+    if (over.length > 0) {
+      throw errors.conflict('one_of_a_kind', 'This item is one of a kind.', {
+        variantIds: over.map((o) => o.id),
+      });
+    }
+    const back = ones.filter((o) => compare(o.quantity, '0') > 0).map((o) => o.product_id);
+    if (back.length > 0) {
+      await ctx.tx.query(
+        `update products set status = 'active', updated_at = now(), version = version + 1
+         where id = any($1::uuid[]) and status = 'sold'`,
+        [[...new Set(back)].sort()],
+      );
+    }
+  }
+
+  await checkSerials(ctx, live, byKey);
 
   const moves: StockMove[] = live.map((c) => {
     const pos = byKey.get(keyOf(c.key));
@@ -451,7 +483,44 @@ export async function applyChanges(
         };
   });
   const applied = await applyMoves(ctx, operationId, moves);
+  // A counted position that did not exist when the count read the shelf may have been created by
+  // a receipt that committed meanwhile: the upsert then added the count to it. The count must set
+  // the shelf to what was counted, so it is retried against the position as it is now.
+  const fresh = live.filter((c) => c.target !== undefined && !byKey.get(keyOf(c.key)));
+  if (fresh.length > 0) {
+    const landed = applied.filter((m) => fresh.some((c) => c.key.variantId === m.variantId));
+    const now = await ctx.tx.query<{ id: string; on_hand: string }>(
+      'select id, on_hand::text from inventory_positions where id = any($1::uuid[])',
+      [landed.map((m) => m.toPositionId).filter((id): id is string => id !== null)],
+    );
+    for (const c of fresh) {
+      const m = applied.find(
+        (x) =>
+          x.toPositionId &&
+          keyOf({
+            variantId: x.variantId,
+            locationId: x.to!.locationId,
+            condition: x.to!.condition,
+            lotId: x.lotId,
+            serialId: x.serialId,
+            transferId: x.to!.transferId,
+          }) === keyOf(c.key),
+      );
+      const onHand = now.find((n) => n.id === m?.toPositionId)?.on_hand;
+      if (onHand !== undefined && compare(onHand, c.target!) !== 0) {
+        throw errors.conflict(
+          'retry_conflict',
+          'Stock arrived at a counted shelf while the count was posted. Retry: the count then sets the shelf to the number counted.',
+          { variantId: c.key.variantId, locationId: c.key.locationId },
+        );
+      }
+    }
+  }
   await syncSerials(ctx, operationId, applied, 'written_off');
+  await assertReturnUnitsKept(
+    ctx.tx,
+    applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+  );
 
   const shortagesFilled: AppliedChanges['shortagesFilled'] = [];
   for (const variantId of raisedSellable) {
@@ -477,6 +546,52 @@ export async function applyChanges(
     shortagesFilled,
     costs: Object.fromEntries([...costs].map(([v, c]) => [v, c.unitCost])),
   };
+}
+
+/**
+ * Locks the serial units the changes move (step 3 of the lock order, after the cost rows, as
+ * fulfillments and return receipts take them) and checks them again now that the positions are
+ * held: the checks before the locks were plain reads. A serial added must be out of stock (not on
+ * hand anywhere, not in transit); a serial removed must be on hand at that position. Without this
+ * a concurrent find, return, or the reversal of a removal could put one serial in two places.
+ */
+async function checkSerials(
+  ctx: HandlerContext,
+  live: Array<StockChange & { delta: string }>,
+  byKey: Map<string, { id: string }>,
+): Promise<void> {
+  const changes = live.filter((c) => c.key.serialId);
+  if (changes.length === 0) return;
+  const units = await ctx.tx.query<{
+    id: string;
+    serial: string;
+    status: string;
+    position_id: string | null;
+  }>(
+    `select id, serial, status, position_id from serial_units
+     where id = any($1::uuid[]) order by id for update`,
+    [[...new Set(changes.map((c) => c.key.serialId!))]],
+  );
+  for (const c of changes) {
+    const unit = units.find((u) => u.id === c.key.serialId);
+    if (!unit) throw errors.notFound('Serial');
+    const held = unit.status === 'in_stock' || unit.status === 'in_transit';
+    if (positive(c.delta)) {
+      if (held) {
+        throw errors.conflict(
+          'serial_in_stock',
+          `Serial ${unit.serial} is already in stock elsewhere; move it instead.`,
+          { serial: unit.serial },
+        );
+      }
+    } else if (!held || unit.position_id !== byKey.get(keyOf(c.key))?.id) {
+      throw errors.conflict(
+        'serial_not_here',
+        `Serial ${unit.serial} is not at this location in this condition.`,
+        { serial: unit.serial },
+      );
+    }
+  }
 }
 
 /** Serial units by serial for a variant; unknown ones are created (not in stock) to be found. */

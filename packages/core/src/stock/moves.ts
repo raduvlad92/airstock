@@ -254,7 +254,7 @@ export async function applyMoves(
          serial_id, transfer_id, on_hand, received_at)
        select app_shop_id(), x.id, x."variantId", x."locationId", x.condition, x."lotId",
          x."serialId", x."transferId", x.quantity, coalesce(x."receivedAt", now())
-       from x
+       from x order by x.k
        on conflict on constraint inventory_positions_identity
        do update set on_hand = inventory_positions.on_hand + excluded.on_hand,
          received_at = case when inventory_positions.on_hand = 0 then excluded.received_at
@@ -267,14 +267,19 @@ export async function applyMoves(
          and x."serialId" is not distinct from inventory_positions.serial_id
          and x."transferId" is not distinct from inventory_positions.transfer_id) as key`,
       [
+        // In identity order: a position created here waits on another command creating the same
+        // one, so every command creates them in one order and two receipts into empty
+        // positions cannot deadlock (existing destinations are locked by id beforehand).
         JSON.stringify(
-          [...ins.entries()].map(([k, v]) => ({
-            id: v.id,
-            k,
-            ...v.key,
-            quantity: v.quantity,
-            receivedAt: v.receivedAt,
-          })),
+          [...ins.entries()]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([k, v]) => ({
+              id: v.id,
+              k,
+              ...v.key,
+              quantity: v.quantity,
+              receivedAt: v.receivedAt,
+            })),
         ),
       ],
     );
@@ -359,6 +364,11 @@ export async function applyMoves(
 /**
  * Keeps serial units in step with moves: a serial that lands in a position is there (in stock,
  * or in transit for a transfer position); one that leaves stock gets `outStatus`.
+ *
+ * Each update is guarded by where the serial is now: a move out of a position needs the serial
+ * at that position, and a move from outside stock (a find, a return, a reversal) needs it out of
+ * stock. The row update re-checks a concurrently committed change, so one serial can never be on
+ * hand twice (serial_in_stock) or leave a position it is not at (serial_not_here).
  */
 export async function syncSerials(
   ctx: HandlerContext,
@@ -371,16 +381,86 @@ export async function syncSerials(
     .map((m) => ({
       serialId: m.serialId,
       positionId: m.toPositionId,
+      fromPositionId: m.from?.positionId ?? null,
       status: m.to ? (m.to.transferId ? 'in_transit' : 'in_stock') : outStatus,
-    }));
+    }))
+    .sort((a, b) => (a.serialId! < b.serialId! ? -1 : 1));
   if (rows.length === 0) return;
-  await ctx.tx.query(
+  const updated = await ctx.tx.query<{ id: string }>(
     `update serial_units s set status = x.status, position_id = x."positionId",
        last_operation_id = $2, updated_at = now(), version = s.version + 1
-     from jsonb_to_recordset($1::jsonb) as x("serialId" uuid, "positionId" uuid, status text)
-     where s.shop_id = app_shop_id() and s.id = x."serialId"`,
+     from jsonb_to_recordset($1::jsonb)
+       as x("serialId" uuid, "positionId" uuid, "fromPositionId" uuid, status text)
+     where s.shop_id = app_shop_id() and s.id = x."serialId"
+       and case when x."fromPositionId" is null
+         then s.status not in ('in_stock', 'in_transit')
+         else s.status in ('in_stock', 'in_transit') and s.position_id = x."fromPositionId" end
+     returning s.id`,
     [JSON.stringify(rows), operationId],
   );
+  if (updated.length === rows.length) return;
+  const done = new Set(updated.map((u) => u.id));
+  const failed = rows.filter((r) => !done.has(r.serialId!));
+  const serials = await ctx.tx.query<{ serial: string }>(
+    'select serial from serial_units where id = any($1::uuid[]) order by serial',
+    [failed.map((f) => f.serialId)],
+  );
+  const names = serials.map((x) => x.serial);
+  if (failed.some((f) => f.fromPositionId === null)) {
+    throw errors.conflict(
+      'serial_in_stock',
+      `Serial ${names.join(', ')} is already in stock elsewhere; move it instead.`,
+      { serials: names },
+    );
+  }
+  throw errors.conflict(
+    'serial_not_here',
+    `Serial ${names.join(', ')} is no longer at this position.`,
+    { serials: names },
+  );
+}
+
+/**
+ * Refuses a change that leaves a quarantine position with fewer units than open returns are
+ * still to inspect there (ADR 0029): inspection is the only way a return's units leave
+ * quarantine. Runs after the moves, with the positions locked; an inspection of the same units
+ * waits for those locks, so the figures it reads are settled.
+ */
+export async function assertReturnUnitsKept(tx: Tx, positionIds: string[]): Promise<void> {
+  if (positionIds.length === 0) return;
+  const short = await tx.query<{
+    position_id: string;
+    variant_id: string;
+    on_hand: string;
+    uninspected: string;
+  }>(
+    `select p.id as position_id, p.variant_id, p.on_hand::text, h.uninspected::text
+     from inventory_positions p
+     cross join lateral (
+       select coalesce(sum(u.received - u.inspected), 0) as uninspected
+       from return_units u join returns r on r.shop_id = u.shop_id and r.id = u.return_id
+       where u.shop_id = p.shop_id and r.location_id = p.location_id
+         and r.status not in ('completed', 'cancelled')
+         and u.variant_id = p.variant_id and u.lot_id is not distinct from p.lot_id
+         and u.serial_id is not distinct from p.serial_id and u.received > u.inspected) h
+     where p.id = any($1::uuid[]) and p.condition = 'quarantine' and p.transfer_id is null
+       and p.on_hand < h.uninspected`,
+    [[...new Set(positionIds)]],
+  );
+  if (short.length > 0) {
+    throw errors.conflict(
+      'return_units_uninspected',
+      'These quarantined units came back on an open return and wait for inspection; inspect them on the return instead.',
+      {
+        positions: short.map((r) => ({
+          positionId: r.position_id,
+          variantId: r.variant_id,
+          onHandAfter: normalize(r.on_hand),
+          uninspected: normalize(r.uninspected),
+        })),
+      },
+    );
+  }
 }
 
 /** The shop's in-transit system location (migration 0017). */

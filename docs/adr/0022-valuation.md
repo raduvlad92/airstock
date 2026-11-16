@@ -19,6 +19,10 @@
 - A single locked row per variant serializes average updates without locking the variant's positions against each other, and keeps value reproducible without replaying the ledger.
 - Storing the cost on every entry means cost of goods never depends on recomputing the average later.
 
+## Update, 16 November 2026: units in before units out
+
+An adjustment, count, or reversal costs each variant's units in before its units out (`applyChanges`). Units that only change shelf in one operation (a count that finds the shelf's units on another shelf) then come in at the average and leave at it, so the average stays. Costing the outs first took the owned quantity through zero, and the ins then took the default cost although no unit entered or left the shop. The formula is unchanged.
+
 ## Revisit when
 
 FIFO valuation, landed costs, per-warehouse costs, or foreign-currency purchase orders arrive (PRD Phase 4).

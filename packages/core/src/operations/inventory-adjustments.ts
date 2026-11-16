@@ -22,6 +22,7 @@ import {
 import {
   type AppliedMove,
   applyMoves,
+  assertReturnUnitsKept,
   type EnteredPack,
   findPositions,
   lockStock,
@@ -320,13 +321,7 @@ export const adjustStock = defineOperation({
       async () => changes,
       input.reservationChoices ?? [],
     );
-    // One of a kind: at most one unit across the shop (D5).
-    const ones = await ctx.tx.query<{ id: string }>(
-      `select v.id from variants v join variant_costs c on c.shop_id = v.shop_id and c.variant_id = v.id
-       where v.id = any($1::uuid[]) and v.one_of_a_kind and c.quantity > 1`,
-      [changes.map((c) => c.key.variantId)],
-    );
-    if (ones.length > 0) throw errors.conflict('one_of_a_kind', 'This item is one of a kind.');
+    // One of a kind (D5): applyChanges checks the owned quantity under the cost-row lock.
     return {
       result: { operationId, ...changesOut(ctx, applied) },
       audit: {
@@ -525,6 +520,10 @@ export const changeCondition = defineOperation({
     }
     const applied = await applyMoves(ctx, operationId, moves);
     await syncSerials(ctx, operationId, applied);
+    await assertReturnUnitsKept(
+      ctx.tx,
+      applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+    );
     const events = [...lock.events];
     const shortagesFilled: Array<{ reservationId: string; quantity: string }> = [];
     for (const variantId of sellable) {
@@ -598,12 +597,22 @@ export const reverseOperation = defineOperation({
   async handler(ctx, input) {
     const [op] = await ctx.tx.query<{
       kind: string;
+      reason: string | null;
       transfer_id: string | null;
       return_id: string | null;
-    }>('select kind, transfer_id, return_id from inventory_operations where id = $1', [
+    }>('select kind, reason, transfer_id, return_id from inventory_operations where id = $1', [
       input.operationId,
     ]);
     if (!op) throw errors.notFound('Operation');
+    // A stock-check repair is a ledger-only entry: the balance already held those units, so
+    // reversing it would change real stock. A wrong repair is corrected with a count.
+    if (op.reason === 'reconciliation') {
+      throw errors.unprocessable(
+        'not_reversible',
+        'A stock check repair only explains the balance in the history and cannot be reversed. Count the shelf to correct the stock.',
+        { kind: op.kind, reason: op.reason },
+      );
+    }
     if (
       !['adjustment', 'count', 'condition_change'].includes(op.kind) ||
       op.transfer_id ||
@@ -777,6 +786,10 @@ async function reverseConditionChange(
   }
   const applied = await applyMoves(ctx, operationId, moves);
   await syncSerials(ctx, operationId, applied);
+  await assertReturnUnitsKept(
+    ctx.tx,
+    applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+  );
   return {
     changes: applied.flatMap((m) => [
       {

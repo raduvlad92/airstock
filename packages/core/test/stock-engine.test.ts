@@ -909,7 +909,8 @@ describe('reallocation (D3)', () => {
       quantity: '2',
       lotCode: 'B',
     });
-    const r = await h.run(ops.reserveStock, { variantId, quantity: '3', lotCode: 'A' });
+    // Lot A is the oldest, so it is allocated first; a reservation not limited to a lot can move.
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '3' });
     await expect(
       h.run(ops.reallocateReservation, { reservationId: r.reservationId, lotCode: 'B' }),
     ).rejects.toMatchObject({ code: 'insufficient_stock' });

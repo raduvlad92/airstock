@@ -237,7 +237,9 @@ describe('receipts filling shortages while orders arrive (D6)', () => {
     const b = await createLeafLocation(h, wh.warehouseId, 'B');
     await h.run(ops.receiveStock, { variantId, locationId: a, quantity: '20' });
     await h.run(ops.receiveStock, { variantId, locationId: b, quantity: '20' });
-    const r = await h.run(ops.reserveStock, { variantId, quantity: '20', locationId: a });
+    // A is the oldest stock, so it is allocated first; no location limit, so claims may move to B.
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '20' });
+    expect(r.allocations.map((x: { locationId: string }) => x.locationId)).toEqual([a]);
     const { errors } = await race(15, (i) =>
       i % 3 === 0
         ? h.run(ops.fulfillReservation, { reservationId: r.reservationId, quantity: '2' })

@@ -31,7 +31,12 @@
               "reservation_status_mismatch",
               "bundle_component_mismatch",
               "serial_mismatch",
-              "cost_quantity_mismatch"
+              "cost_quantity_mismatch",
+              "transfer_hold_mismatch",
+              "transfer_in_transit_mismatch",
+              "return_received_mismatch",
+              "return_inspected_mismatch",
+              "return_unit_inspected_mismatch"
             ]
           }
         },
@@ -42,7 +47,7 @@
           "schema": {
             "type": "string",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "description": "The position or variant the problem names."
+            "description": "The position, variant, or other record the problem names."
           }
         }
       ],
@@ -73,7 +78,12 @@
                               "reservation_status_mismatch",
                               "bundle_component_mismatch",
                               "serial_mismatch",
-                              "cost_quantity_mismatch"
+                              "cost_quantity_mismatch",
+                              "transfer_hold_mismatch",
+                              "transfer_in_transit_mismatch",
+                              "return_received_mismatch",
+                              "return_inspected_mismatch",
+                              "return_unit_inspected_mismatch"
                             ]
                           },
                           "title": {
@@ -85,7 +95,10 @@
                               "position",
                               "reservation",
                               "serial_unit",
-                              "variant"
+                              "variant",
+                              "transfer_line",
+                              "return_line",
+                              "return_unit"
                             ]
                           },
                           "targetId": {

@@ -130,6 +130,8 @@ export interface CandidateSpec {
   locationId?: string | null;
   lotId?: string | null;
   serialId?: string | null;
+  /** Also limit to this location and its sub-locations (a reservation's own location limit). */
+  within?: string | null;
   /** The channel's allocation rule: warehouses or locations in order; null takes every one. */
   ruleScopes: string[] | null;
   /** The caller's location scope. */
@@ -163,6 +165,7 @@ export async function lockCandidates(tx: Tx, spec: CandidateSpec, lock = true): 
        and ($6::uuid[] is null or l.path_ids && $6::uuid[])
        and not (p.id = any($7::uuid[]))
        and ($8::uuid[] is null or p.id = any($8::uuid[]))
+       and ($10::uuid is null or l.path_ids @> array[$10::uuid])
      order by p.id${lock ? ' for update of p' : ''}`,
     [
       spec.variantIds,
@@ -174,6 +177,7 @@ export async function lockCandidates(tx: Tx, spec: CandidateSpec, lock = true): 
       spec.exclude ?? [],
       spec.only ?? null,
       spec.includeEmpty ?? false,
+      spec.within ?? null,
     ],
   );
   return rows.map((r) => r.id);
@@ -218,6 +222,7 @@ export async function expireClaimsAt(
   const released = await ctx.tx.query<{
     reservation_id: string;
     position_id: string;
+    location_id: string;
     outstanding: string;
   }>(
     `with expired as (
@@ -233,7 +238,8 @@ export async function expireClaimsAt(
        set allocated = p.allocated - s.total, version = p.version + 1, updated_at = now()
        from (select position_id, sum(outstanding) as total from expired group by position_id) s
        where p.shop_id = app_shop_id() and p.id = s.position_id)
-     select reservation_id, position_id, outstanding::text from expired`,
+     select e.reservation_id, e.position_id, p.location_id, e.outstanding::text
+     from expired e join inventory_positions p on p.shop_id = app_shop_id() and p.id = e.position_id`,
     [positionIds, due.map((d) => d.id)],
   );
   if (released.length === 0) return [];
@@ -261,6 +267,10 @@ export async function expireClaimsAt(
       target_type: 'reservation',
       target_id: id,
       operation_id: operationId,
+      // The locations of the released claims, so location scopes apply to the event.
+      location_ids: [
+        ...new Set(released.filter((r) => r.reservation_id === id).map((r) => r.location_id)),
+      ],
       changes: {
         released: released
           .filter((r) => r.reservation_id === id)

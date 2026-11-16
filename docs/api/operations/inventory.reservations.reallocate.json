@@ -3,7 +3,7 @@
     "post": {
       "operationId": "inventory.reservations.reallocate",
       "summary": "Move a reservation’s allocation to another position",
-      "description": "Use this when the units for a reservation should come from somewhere else, for example a picker scanned a different lot or serial, or the order ships from another location. Name the target as positionId, or as locationId, lotCode, or serial. Without allocationId the reservation must have exactly one open allocation.",
+      "description": "Use this when the units for a reservation should come from somewhere else, for example a picker scanned a different lot or serial, or the order ships from another location. Name the target as positionId, or as locationId, lotCode, or serial. The new units stay within the reservation’s own lot, location, and channel allocation rule. Without allocationId the reservation must have exactly one open allocation.",
       "x-permission": "inventory.reserve",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "inventory.reservation.reallocated",

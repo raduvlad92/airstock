@@ -18,6 +18,7 @@ import {
 import {
   type AppliedMove,
   applyMoves,
+  assertReturnUnitsKept,
   type EnteredPack,
   findPositions,
   findSerials,
@@ -314,11 +315,16 @@ export interface LocationInfo {
   leaf: boolean;
 }
 
-export async function loadLocation(tx: Tx, id: string): Promise<LocationInfo> {
+/**
+ * A storage location. With `share`, the row is share-locked like every command that brings stock
+ * in (stockLocation), so an archive, which locks it FOR UPDATE and then checks it holds no
+ * stock, waits for this command instead of passing that check while units land.
+ */
+export async function loadLocation(tx: Tx, id: string, share = false): Promise<LocationInfo> {
   const [row] = await tx.query<LocationInfo>(
     `select l.id, l.warehouse_id, l.path, l.path_ids, l.status, l.kind,
        not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as leaf
-     from locations l where l.id = $1`,
+     from locations l where l.id = $1${share ? ' for share of l' : ''}`,
     [id],
   );
   if (row?.kind !== 'storage') throw errors.notFound('Location');
@@ -357,7 +363,7 @@ export async function destinationLeaf(
   t: TransferRow,
   locationId: string | undefined,
 ): Promise<LocationInfo> {
-  const loc = await loadLocation(tx, locationId ?? t.to_location_id);
+  const loc = await loadLocation(tx, locationId ?? t.to_location_id, true);
   if (!loc.path_ids.includes(t.to_location_id)) {
     throw errors.unprocessable(
       'outside_destination',
@@ -520,12 +526,37 @@ export interface ResolvedItem {
  * Turns items into per-line quantities, each at most `limit(line)`. Without items, every line
  * with something left takes all of it.
  */
+/**
+ * What a line still has of one lot: in transit on this transfer, or held at the source. A lot
+ * scanned without a quantity takes this, not the line's whole remainder across lots.
+ */
+async function lotRemainder(
+  tx: Tx,
+  line: LineRow,
+  lotId: string,
+  of: 'in_transit' | 'held',
+): Promise<string> {
+  const [row] = await tx.query<{ total: string }>(
+    of === 'in_transit'
+      ? `select coalesce(sum(p.on_hand), 0)::text as total from inventory_positions p
+         join transfer_lines l on l.shop_id = p.shop_id and l.transfer_id = p.transfer_id
+         where l.id = $1 and p.variant_id = l.variant_id and p.lot_id = $2`
+      : `select coalesce(sum(a.outstanding), 0)::text as total from reservation_allocations a
+         join inventory_positions p on p.shop_id = a.shop_id and p.id = a.position_id
+         join transfer_lines l on l.shop_id = a.shop_id and l.reservation_id = a.reservation_id
+         where l.id = $1 and p.lot_id = $2`,
+    [line.id, lotId],
+  );
+  return normalize(row?.total ?? '0');
+}
+
 export async function resolveItems(
   ctx: HandlerContext,
   lines: LineRow[],
   items: ItemSpec[] | undefined,
   limit: (l: LineRow) => string,
   what: { code: string; message: string },
+  byLot: 'in_transit' | 'held' | null = null,
 ): Promise<ResolvedItem[]> {
   if (!items || items.length === 0) {
     const all = lines
@@ -585,6 +616,10 @@ export async function resolveItems(
       );
       if (!lot) throw errors.notFound('Lot');
       lotId = lot.id;
+      if (item.quantity === undefined && !serials && byLot) {
+        const ofLot = await lotRemainder(ctx.tx, line, lotId, byLot);
+        if (compare(ofLot, quantity) < 0) quantity = ofLot;
+      }
     }
     const [v] = await ctx.tx.query<{ scale: number }>(
       'select quantity_scale as scale from variants where id = $1',
@@ -796,6 +831,10 @@ export async function dispatchItems(
   }
   const applied = await applyMoves(ctx, operationId, moves);
   await syncSerials(ctx, operationId, applied);
+  await assertReturnUnitsKept(
+    ctx.tx,
+    applied.flatMap((m) => (m.from ? [m.from.positionId] : [])),
+  );
   await bumpLines(ctx, items, 'dispatched');
   await refreshStatuses(ctx.tx, reservationIds);
   return { moves: applied, events };

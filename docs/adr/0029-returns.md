@@ -26,6 +26,11 @@ As for transfers: the return row first (only return commands lock it), then vari
 - Reversing cost of goods at the fulfillment cost keeps valuation honest when the average moved between sale and return; falling back to the average never invents a cost.
 - Receiving an unmatched serial instead of refusing it matches what happens at the bench: the box is here and must be accounted for, but someone has to look at it.
 
+## Update, 16 November 2026: inspection is the only way out of quarantine
+
+- A condition change (and its reversal), adjustment, count, reversal, or transfer dispatch that would leave a quarantine position with fewer units than open returns still have to inspect there is refused with `return_units_uninspected`. Quarantined units beyond that still move. The check runs after the command's moves, with the positions locked; an inspection of the same units waits for those locks.
+- A serial that was not fulfilled from this shop cannot be inspected as sellable while the return's exception is open (`exception_open`): a person reviews it and clears the flag first. Other dispositions (disposal, damaged) may go ahead.
+
 ## Revisit when
 
 Returns need restocking fees, refunds, exchanges, or receipt at several locations for one return.

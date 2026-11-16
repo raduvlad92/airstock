@@ -284,8 +284,10 @@ async function checkPair(ctx: HandlerContext, fromId: string, toId: string) {
   if (fromId === toId) {
     throw errors.unprocessable('same_location', 'The source and destination are the same.');
   }
-  const from = await loadLocation(ctx.tx, fromId);
-  const to = await loadLocation(ctx.tx, toId);
+  // Share-locked, so an archive waits for this command: it refuses while a transfer is open to
+  // or from a location, and a transfer created meanwhile must not slip past that check.
+  const from = await loadLocation(ctx.tx, fromId, true);
+  const to = await loadLocation(ctx.tx, toId, true);
   if (from.status !== 'active' || to.status !== 'active') {
     throw errors.conflict('location_archived', 'The source or destination is archived.');
   }
@@ -525,10 +527,17 @@ export const dispatchTransfer = defineOperation({
     const { t, lines } = await lockTransfer(ctx.tx, input.transferId);
     assertReadied(t);
     assertNotClosed(t);
-    const items = await resolveItems(ctx, lines, input.items, (l) => (t.ready_at ? held(l) : '0'), {
-      code: 'quantity_exceeds_held',
-      message: 'Dispatch cannot exceed what the transfer still holds at the source.',
-    });
+    const items = await resolveItems(
+      ctx,
+      lines,
+      input.items,
+      (l) => (t.ready_at ? held(l) : '0'),
+      {
+        code: 'quantity_exceeds_held',
+        message: 'Dispatch cannot exceed what the transfer still holds at the source.',
+      },
+      'held',
+    );
     const operationId = await insertOperation(ctx, 'transfer_dispatch', t, input.reason ?? null);
     const { moves, events } = await dispatchItems(ctx, t, items, operationId, null);
     if (input.trackingReference) {
@@ -608,10 +617,36 @@ export const receiveTransfer = defineOperation({
     const { t, lines } = await lockTransfer(ctx.tx, input.transferId);
     assertReadied(t);
     const dest = await destinationLeaf(ctx.tx, t, input.locationId);
-    const items = await resolveItems(ctx, lines, input.items, inTransit, {
-      code: 'quantity_exceeds_in_transit',
-      message: 'Receipt cannot exceed what is in transit on this transfer.',
-    });
+    // Units that arrive in a worse state are received as such; making units sellable that were
+    // sent in another condition (quarantine, damaged) is a condition change with its permission
+    // and reason, not a side effect of the receipt.
+    if (input.condition === 'sellable') {
+      const named = new Set((input.items ?? []).map((i) => i.variantId));
+      const upgraded = lines.filter(
+        (l) =>
+          l.condition !== 'sellable' &&
+          (named.size === 0 || named.has(l.variant_id)) &&
+          compare(inTransit(l), '0') > 0,
+      );
+      if (upgraded.length > 0) {
+        throw errors.unprocessable(
+          'condition_change_required',
+          'These units were sent in another condition. Receive them as sent, then change their condition with a reason (adjust_stock, change_condition).',
+          { variantIds: upgraded.map((l) => l.variant_id) },
+        );
+      }
+    }
+    const items = await resolveItems(
+      ctx,
+      lines,
+      input.items,
+      inTransit,
+      {
+        code: 'quantity_exceeds_in_transit',
+        message: 'Receipt cannot exceed what is in transit on this transfer.',
+      },
+      'in_transit',
+    );
     const operationId = await insertOperation(ctx, 'transfer_receipt', t, input.reason ?? null);
     const { moves, events, shortagesFilled } = await receiveItems(
       ctx,
@@ -743,6 +778,9 @@ export const reportTransferException = defineOperation({
   idempotency: 'required',
   http: { method: 'POST', path: '/shops/{shopId}/transfers/{transferId}/exception' },
   mcp: { tool: TOOL, action: 'report_exception', readOnly: false, destructive: false },
+  // Either side in scope is enough (requireEitherInScope). [] means "not known yet": the attempt
+  // and a failure stay hidden from members limited to some locations; the outcome names both.
+  locations: async () => [],
   async handler(ctx, input) {
     const { t, lines } = await lockTransfer(ctx.tx, input.transferId);
     await requireEitherInScope(ctx, t);
@@ -801,14 +839,23 @@ export const resolveTransferException = defineOperation({
   idempotency: 'required',
   http: { method: 'POST', path: '/shops/{shopId}/transfers/{transferId}/resolve' },
   mcp: { tool: TOOL, action: 'resolve', readOnly: false, destructive: true },
+  // As for report: either side in scope; the outcome names both locations.
+  locations: async () => [],
   async handler(ctx, input) {
     const { t, lines } = await lockTransfer(ctx.tx, input.transferId);
     assertReadied(t);
     await requireEitherInScope(ctx, t);
-    const items = await resolveItems(ctx, lines, input.items, inTransit, {
-      code: 'quantity_exceeds_in_transit',
-      message: 'A resolution cannot exceed what is in transit on this transfer.',
-    });
+    const items = await resolveItems(
+      ctx,
+      lines,
+      input.items,
+      inTransit,
+      {
+        code: 'quantity_exceeds_in_transit',
+        message: 'A resolution cannot exceed what is in transit on this transfer.',
+      },
+      'in_transit',
+    );
     const operationId = ctx.newId();
     await ctx.tx.query(
       `insert into inventory_operations (shop_id, id, kind, actor_type, actor_id, source, attempt_id,

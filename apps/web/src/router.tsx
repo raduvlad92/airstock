@@ -12,6 +12,7 @@ import {
 } from './pages/integrations.tsx';
 import { InventoryPage } from './pages/inventory.tsx';
 import { LabelsPage } from './pages/labels.tsx';
+import { PickingPage } from './pages/picking.tsx';
 import { ProductsPage } from './pages/products.tsx';
 import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.tsx';
 import { ShopsPage } from './pages/shops.tsx';
@@ -95,6 +96,11 @@ const labelsRoute = createRoute({
   path: '/labels',
   component: LabelsPage,
   validateSearch: parseLabelsSearch,
+});
+const pickingRoute = createRoute({
+  getParentRoute: () => shopRoute,
+  path: '/picking',
+  component: PickingPage,
 });
 const activityRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -186,6 +192,7 @@ export const routeTree = rootRoute.addChildren([
     warehousesRoute,
     suppliersRoute,
     labelsRoute,
+    pickingRoute,
     activityRoute,
     integrationsRoute.addChildren([
       integrationsIndexRoute,

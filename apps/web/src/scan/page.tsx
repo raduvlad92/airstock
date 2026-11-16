@@ -9,6 +9,7 @@ import { FLOWS } from './flow-list.tsx';
 import {
   type CurrentLocation,
   type FlowId,
+  type FlowPreset,
   isFlowId,
   ScanBus,
   ScanBusContext,
@@ -174,6 +175,7 @@ function ScanWorkspace({
   const [flash, setFlash] = useState<'ok' | 'error' | null>(null);
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState(soundEnabled());
+  const [preset, setPreset] = useState<{ flow: FlowId; data: FlowPreset } | null>(null);
   const [location, setLocationState] = useState<CurrentLocation | null>(() => {
     const saved = remembered(`${LOCATION_KEY}.${shopId}`);
     try {
@@ -268,9 +270,27 @@ function ScanWorkspace({
 
   useKeyboardWedge(onTyped);
 
+  const startFlow = useCallback(
+    (next: FlowId, data?: FlowPreset) => {
+      setPreset(data ? { flow: next, data } : null);
+      throttle.current.reset();
+      void navigate({ to: '/scan', search: { shop: shopId, flow: next }, replace: true });
+    },
+    [navigate, shopId],
+  );
+
   const env: ScanEnv = useMemo(
-    () => ({ shopId, shop, location, setLocation, feedback, setPaused }),
-    [shopId, shop, location, setLocation, feedback],
+    () => ({
+      shopId,
+      shop,
+      location,
+      setLocation,
+      feedback,
+      setPaused,
+      startFlow,
+      preset: preset && preset.flow === flow ? preset.data : null,
+    }),
+    [shopId, shop, location, setLocation, feedback, startFlow, preset, flow],
   );
 
   const available = FLOWS.filter((f) => !f.permission || can(shop, f.permission));
@@ -343,6 +363,9 @@ function ScanWorkspace({
             <div className="scan-soon">
               <h2>{active.label}</h2>
               <p>{active.soon}</p>
+              {env.preset?.locationPath ? (
+                <p className="muted">Requested: {env.preset.locationPath}.</p>
+              ) : null}
             </div>
           ) : (
             <Flow key={active.id} env={env} />
@@ -358,9 +381,8 @@ function ScanWorkspace({
             className={f.id === active.id ? 'scan-tab active' : 'scan-tab'}
             aria-current={f.id === active.id ? 'page' : undefined}
             onClick={() => {
-              throttle.current.reset();
               setPaused(false);
-              void navigate({ to: '/scan', search: { shop: shopId, flow: f.id }, replace: true });
+              startFlow(f.id);
             }}
           >
             {f.label}

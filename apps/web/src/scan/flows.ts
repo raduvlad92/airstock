@@ -36,7 +36,17 @@ export interface ScanEnv {
   feedback: (tone: 'ok' | 'error' | 'notice', message?: string) => void;
   /** Stops decoding camera frames, for example while a quantity waits for confirmation. */
   setPaused: (paused: boolean) => void;
+  /**
+   * Hands over to another flow with a starting point, such as a short pick asking for a count of
+   * its position. The target flow reads it from `preset`.
+   */
+  startFlow: (flow: FlowId, preset?: FlowPreset) => void;
+  /** What the flow was started with by another flow, if anything. */
+  preset: FlowPreset | null;
 }
+
+/** A starting point one flow hands another, as plain strings. */
+export type FlowPreset = Record<string, string>;
 
 /** What a flow does with a scan. Return (or resolve to) true when the flow used it. */
 export type ScanHandler = (scan: Resolved) => unknown;

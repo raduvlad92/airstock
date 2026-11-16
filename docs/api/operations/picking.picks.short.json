@@ -1,0 +1,576 @@
+{
+  "/api/v1/shops/{shopId}/pick-lists/{pickListId}/short-picks": {
+    "post": {
+      "operationId": "picking.picks.short",
+      "summary": "Record a short pick: fewer units found than the line needs",
+      "description": "Use this when the picker cannot find everything a line asks for at its position. Records what was found (it counts as picked) and flags the line short; the missing units stay reserved at that position until a count settles it and they are reallocated. Returns the position to count. Stock does not change. Not for units taken from another lot or position (use record_pick with lotCode, serial, or locationId).",
+      "x-permission": "picking.run",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "picking.pick.short",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "pickListId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "lineId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "found": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,6})?$",
+                  "description": "Base units found at the position (0 when none)."
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "lineId",
+                "found"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pickListId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "line": {
+                    "type": "object",
+                    "properties": {
+                      "lineId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "picked",
+                          "short",
+                          "moved",
+                          "done",
+                          "cancelled"
+                        ],
+                        "description": "open: still to pick; picked; short: flagged, some units were not found; moved: taken from another position (see the new line); done: the list was completed."
+                      },
+                      "locationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "locationPath": {
+                        "type": "string"
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "productName": {
+                        "type": "string"
+                      },
+                      "variantName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "sku": {
+                        "type": "string"
+                      },
+                      "quantity": {
+                        "type": "string",
+                        "description": "Base units to pick."
+                      },
+                      "inPacks": {
+                        "type": "object",
+                        "properties": {
+                          "packs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "packId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "count": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "packId",
+                                "name",
+                                "count"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "looseUnits": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "packs",
+                          "looseUnits"
+                        ],
+                        "additionalProperties": false,
+                        "description": "The quantity in the variant’s packs, largest first, and the units left over."
+                      },
+                      "picked": {
+                        "type": "string"
+                      },
+                      "short": {
+                        "type": "string"
+                      },
+                      "moved": {
+                        "type": "string"
+                      },
+                      "remaining": {
+                        "type": "string"
+                      },
+                      "lotId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "lotCode": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "expiresOn": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "serialId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "serial": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reservationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                        "description": "The order-level reservation."
+                      },
+                      "allocationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "positionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "externalRef": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "fulfillOnComplete": {
+                        "type": "boolean",
+                        "description": "False for Shopify orders, which are fulfilled from Shopify."
+                      }
+                    },
+                    "required": [
+                      "lineId",
+                      "sequence",
+                      "status",
+                      "locationId",
+                      "locationPath",
+                      "variantId",
+                      "productName",
+                      "variantName",
+                      "sku",
+                      "quantity",
+                      "inPacks",
+                      "picked",
+                      "short",
+                      "moved",
+                      "remaining",
+                      "lotId",
+                      "lotCode",
+                      "expiresOn",
+                      "serialId",
+                      "serial",
+                      "reservationId",
+                      "allocationId",
+                      "positionId",
+                      "externalRef",
+                      "fulfillOnComplete"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "newLines": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "lineId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "picked",
+                            "short",
+                            "moved",
+                            "done",
+                            "cancelled"
+                          ],
+                          "description": "open: still to pick; picked; short: flagged, some units were not found; moved: taken from another position (see the new line); done: the list was completed."
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationPath": {
+                          "type": "string"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productName": {
+                          "type": "string"
+                        },
+                        "variantName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "string",
+                          "description": "Base units to pick."
+                        },
+                        "inPacks": {
+                          "type": "object",
+                          "properties": {
+                            "packs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "packId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "count": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "packId",
+                                  "name",
+                                  "count"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "looseUnits": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "packs",
+                            "looseUnits"
+                          ],
+                          "additionalProperties": false,
+                          "description": "The quantity in the variant’s packs, largest first, and the units left over."
+                        },
+                        "picked": {
+                          "type": "string"
+                        },
+                        "short": {
+                          "type": "string"
+                        },
+                        "moved": {
+                          "type": "string"
+                        },
+                        "remaining": {
+                          "type": "string"
+                        },
+                        "lotId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lotCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expiresOn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "serialId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serial": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "description": "The order-level reservation."
+                        },
+                        "allocationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "positionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "externalRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "fulfillOnComplete": {
+                          "type": "boolean",
+                          "description": "False for Shopify orders, which are fulfilled from Shopify."
+                        }
+                      },
+                      "required": [
+                        "lineId",
+                        "sequence",
+                        "status",
+                        "locationId",
+                        "locationPath",
+                        "variantId",
+                        "productName",
+                        "variantName",
+                        "sku",
+                        "quantity",
+                        "inPacks",
+                        "picked",
+                        "short",
+                        "moved",
+                        "remaining",
+                        "lotId",
+                        "lotCode",
+                        "expiresOn",
+                        "serialId",
+                        "serial",
+                        "reservationId",
+                        "allocationId",
+                        "positionId",
+                        "externalRef",
+                        "fulfillOnComplete"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Lines for units taken from another lot or position, already picked."
+                  },
+                  "reallocated": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "operationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "quantity": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "operationId",
+                          "quantity"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Set when the scan named another lot or position and the allocation moved first."
+                  },
+                  "openLines": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "count": {
+                    "type": "object",
+                    "properties": {
+                      "positionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "locationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "lotId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "serialId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "missing": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "positionId",
+                      "locationId",
+                      "variantId",
+                      "lotId",
+                      "serialId",
+                      "missing"
+                    ],
+                    "additionalProperties": false,
+                    "description": "The position to count: where the count that settles the difference starts."
+                  }
+                },
+                "required": [
+                  "pickListId",
+                  "line",
+                  "newLines",
+                  "reallocated",
+                  "openLines",
+                  "count"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

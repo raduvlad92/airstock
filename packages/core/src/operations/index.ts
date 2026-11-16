@@ -28,6 +28,7 @@ import { inventoryValuationOperations } from './inventory-valuation.ts';
 import { labelsOperations } from './labels.ts';
 import { mediaOperations } from './media.ts';
 import { membersOperations } from './members.ts';
+import { pickingOperations } from './picking.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
@@ -58,6 +59,7 @@ export const operations: readonly AnyOperation[] = [
   ...labelsOperations,
   ...mediaOperations,
   ...membersOperations,
+  ...pickingOperations,
   ...shopifyOperations,
   ...shopsOperations,
   ...storageOperations,
@@ -97,6 +99,7 @@ export * from './inventory-valuation.ts';
 export * from './labels.ts';
 export * from './media.ts';
 export * from './members.ts';
+export * from './picking.ts';
 export * from './shopify.ts';
 export * from './shops.ts';
 export * from './storage.ts';

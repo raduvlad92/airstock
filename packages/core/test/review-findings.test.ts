@@ -2,6 +2,7 @@ import { type Caller, ops, reconcileShop, sweepShortages, uuidv7 } from '@airsto
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
+  addMember,
   appDatabase,
   createLeafLocation,
   createVariant,
@@ -205,5 +206,61 @@ describe('F-RECON-SKIPS-DOCUMENTS: the scheduled check ignores transfer and retu
     expect(direct.length).toBeGreaterThan(0);
     const checked = await reconcileShop(db, own.shopId, 'scheduled');
     expect(checked.problems).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-SCOPE-LOT-SERIAL-HISTORY (scope leak). operations/inventory-lots.ts traceLot and
+// serialHistory have no `locations` hook and never read ctx.locationScope: a member limited to
+// one warehouse sees every movement of a lot or serial (locations, quantities, orders) and the
+// serial's current out-of-scope position. PRD 2.4: the scope covers positions, movements, and
+// history entries about those locations; out-of-scope stock figures and history are hidden.
+// ---------------------------------------------------------------------------------------------
+describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore location scope', () => {
+  it.fails('hides out-of-scope lot movements from a member limited to another warehouse', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
+    const received = await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '7',
+      lotCode: `LOT-${uuidv7().slice(-6)}`,
+    });
+    const [lot] = await ownerQuery<{ id: string }>(
+      'select id from lots where shop_id = $1 and variant_id = $2',
+      [shop.shopId, variantId],
+    );
+    expect(received).toBeTruthy();
+    const scoped = await addMember(shop.shopId, 'viewer', [store]);
+    const trace = await h.run(ops.traceLot, { lotId: lot!.id }, { caller: scoped.caller });
+    const outOfScope = trace.movements.filter(
+      (m: { locationId: string }) => m.locationId === shop.locationId,
+    );
+    expect({ movements: outOfScope.length, onHand: trace.totals.onHand }).toEqual({
+      movements: 0,
+      onHand: '0',
+    });
+  });
+
+  it.fails('hides an out-of-scope serial’s position and movements', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, trackingMode: 'serial' });
+    const serial = `SN-${uuidv7().slice(-6)}`;
+    await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '1',
+      serials: [serial],
+    });
+    const scoped = await addMember(shop.shopId, 'viewer', [store]);
+    const history = await h.run(
+      ops.serialHistory,
+      { variantId, serial },
+      { caller: scoped.caller },
+    );
+    expect({
+      current: history.current?.locationId ?? null,
+      movements: history.movements.length,
+    }).toEqual({ current: null, movements: 0 });
   });
 });

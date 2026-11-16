@@ -2,8 +2,8 @@
 
 ## Product requirements, operating behavior, and architecture
 
-**Version:** 0.6 — review draft with Phase 1 owner answers  
-**Date:** 14 November 2026  
+**Version:** 0.7 — review draft with Phase 1 findings  
+**Date:** 16 November 2026  
 **Audience:** Product owner, designers, developers, and future implementation agents  
 **Product name:** To be decided  
 **Repository visibility:** PUBLIC until the product owner explicitly instructs otherwise  
@@ -18,7 +18,7 @@ This document combines the PRD and the detailed operating specification. Keeping
 - **Proposed default:** A concrete recommendation that makes the draft implementable; it is not presented as an instruction already given by the owner.
 - **Open:** A decision that remains genuinely unresolved. Repository visibility is not open.
 
-Requirements describe intended behavior. Where Phase 0 built or measured something, the text says so and points to the [Phase 0 report](phase-0-report.md); everything else is not yet implemented. Prices and vendor allowances are reference information checked on the date above, not permanent guarantees.
+Requirements describe intended behavior. Where Phase 0 or Phase 1 built or measured something, the text says so and points to the [Phase 0 report](phase-0-report.md) or the [Phase 1 report](phase-1-report.md); everything else is not yet implemented. Prices and vendor allowances are reference information checked on the date above, not permanent guarantees.
 
 ## Contents
 
@@ -318,6 +318,7 @@ Representing a category's attributes is distinct from completing all its operati
 - Use authorized media delivery for access that must produce a shop audit event. Public image distribution is a later explicit policy, not an accidental consequence of using a CDN.
 - **Picture access logging (confirmed, v0.6, C08):** each list or detail request that returns pictures records one access event naming the media it returned. The thumbnail and display images are fetched through short-lived signed URLs issued by that request, without a separate event per image. Each download of an original file is its own audit event.
 - Thumbnail generation and image processing are background work with their own measured resource budget.
+- **Size of originals (open, v0.7).** Phase 1 keeps each original as uploaded, plus a 1,600 px display image and a 320 px thumbnail in WebP. Originals are most of the stored bytes: a phone photo is 2–4 MB, against about 150–300 KB for the display image. At 1,500 pictures of 3 MB a shop stores about 4.8 GB, about $0.07 a month in R2, the largest new per-shop cost of Phase 1 ([Phase 1 report, Section 5](phase-1-report.md#5-cost-model-update)). Before launch, decide whether to keep originals as uploaded or to recompress those above a limit, such as 2,048 px, keeping the full file only on request (Sections 14.4 and 17).
 
 ### 4.6 Pack sizes and units of measure
 
@@ -340,8 +341,9 @@ Confirmed requirement C18. Stock is always held and recorded in the variant's **
 Confirmed requirement C23.
 
 - A variant and each of its packs can hold several barcodes: supplier GTIN/EAN/UPC codes and internal codes.
-- Generate an internal Code 128 barcode or QR code for items without one. QR codes encode an internal identifier, not a public URL that exposes data.
+- Generate an internal Code 128 barcode or QR code for items without one. Generated codes come from a per-shop sequence, such as `AS00000001`, and are never a URL: a QR code encodes the same internal code, not a public link that exposes data (v0.7, built in Phase 1).
 - Barcodes are unique per shop across variants and packs. Creating a duplicate is rejected, with a link to the existing record.
+- **Uniqueness is checked on a normalized code (v0.7).** GTINs (UPC-A, EAN-8, EAN-13, and GTIN-14) are padded to 14 digits, so a UPC-A code and its EAN-13 form count as the same code, and a scanned GTIN-14 with a leading zero finds its item. Other codes are compared upper-cased. The code is stored as entered and shown that way ([ADR 0019](adr/0019-packaging-labels-bundles.md)).
 - Label templates cover A4 sheet layouts and common thermal label sizes. Each template chooses its fields: name, SKU, variant options, price, barcode, lot, and expiry.
 - Print item, pack, and location labels. Location labels drive scanning (Section 3.4).
 - Labels render as PDF and print through the browser's print dialog. Direct printer drivers are not in V0.
@@ -353,6 +355,7 @@ Confirmed requirement C26.
 
 - A bundle is a sellable variant made of component variants with exact quantities, for example a gift set of one candle and two soaps.
 - In V0 a bundle holds no stock of its own. Its availability is the smallest result, over its components, of floor(component available ÷ quantity per bundle), for the requested fulfillment scope.
+- **Computed on read (v0.7).** Bundle availability is calculated from the components' stock positions each time it is asked for, for the whole shop, a warehouse, or a location. There is no separate bundle ledger or stored bundle count to keep in step, so a component's stock change is reflected at once (built in Phase 1).
 - Reserving or fulfilling a bundle reserves or consumes all its components in one transaction, in the documented lock order. If any component is short, the whole reservation fails. The exception is an externally accepted order, which records a shortage per component (Section 8.5).
 - Components can be packs (Section 4.6). Bundles cannot contain other bundles in V0.
 - A bundle can map to a Shopify variant. Any change in a component's availability triggers a push for the bundle.
@@ -370,6 +373,13 @@ Confirmed requirement C32.
 - Confirmed (v0.4) for API and MCP: a create call without an explicit acknowledgment flag returns the likely matches instead of creating. An AI client therefore cannot skip the warning silently.
 - Receiving stock for a scanned or typed item that resembles an existing one shows the match before anything is created.
 - The warnings shown and the choice made are logged.
+
+### 4.10 Catalog completeness
+
+Merchants and AI clients ask "what is missing" more often than "what matches": which items have no primary picture, which furniture lacks shipping-package dimensions, which variants have no barcode.
+
+- **Completeness filters are part of the catalog query (v0.7).** `has_picture`, `has_shipping_package`, and `has_barcode` filter like any other field, in the grid, saved views, exports, REST, and MCP (Section 9). They were added in Phase 1 because the ChatGPT prompts needed them ([Phase 1 report, Section 6](phase-1-report.md#6-what-went-wrong)).
+- New catalog data that merchants are expected to fill in, such as lot settings or reorder rules, should come with a matching completeness filter.
 
 ## 5. Warehouses, locations, and stock definitions
 
@@ -712,6 +722,8 @@ These are contract sketches, not a frozen endpoint specification. Lifecycle tran
 
 Imports map columns to typed fields and variants, preview validation errors, and distinguish create, update, and stock-adjustment operations. Each row has an outcome and traceable history. Large imports are resumable jobs.
 
+**Opening stock in imports (v0.7).** An import writes opening stock as receipts inside each chunk's transaction, together with the chunk's catalog rows, so a chunk commits or fails as a whole. It announces the changed availability once per chunk, in one outbox event naming the chunk's positions, not once per variant. In Phase 1, one event per variant left a 300-row import's 258 events queued ahead of other shops' work ([Phase 1 report, Section 3](phase-1-report.md#3-staging-run)).
+
 Exports respect filters, permissions, and field visibility. Export generation and file access are logged. Temporary export files expire under a disclosed policy while the audit history remains.
 
 Webhooks are a proposed core integration feature: publish signed events after transaction commit through an outbox. Use stable event IDs, retries, delivery status, and idempotent consumers. Never notify an integration about stock that did not commit. Initial outbound event coverage should include catalog changes, inventory changes, operation transitions, and job completion.
@@ -805,6 +817,7 @@ These examples describe tool-backed workflows. They do not require the platform 
 - Keep tool descriptions concise, with pagination, field selection, and useful errors.
 - Provide tools for field discovery and enabled capabilities so agents can understand each shop's custom schema.
 - Use a stable set of tools that accepts field identifiers; do not create a separate tool for every custom field or SKU.
+- Catalog search answers "what is missing" questions through the completeness filters (Section 4.10), not through a tool per check.
 - Rate-limit each MCP connection before launch, as each API credential is (Section 8.3). Every call costs queue operations and database time (Section 14.2).
 
 ### 9.3 Tool families and parity
@@ -833,6 +846,8 @@ These examples describe tool-backed workflows. They do not require the platform 
 REST routes, the OpenAPI document, permission checks, and audit naming are generated from the registry, so they cannot drift apart. MCP tools are also built from registry operations, but they are **designed around merchant tasks, not mirrored one-to-one from REST**. For example, one `adjust_stock` tool can cover counts and reasoned adjustments, and one `transfer` tool can cover prepare, dispatch, and receive. Target about 25 MCP tools or fewer at launch, because model clients choose tools less reliably as the list grows.
 
 Parity is checked at the capability level. A CI check asserts that every registry operation is reachable through REST and through at least one MCP tool, or has a documented infrastructure-only exception. A new feature is incomplete until this check passes.
+
+**Tool count after Phase 1 (v0.7).** Phase 1 ended with 99 operations in 14 MCP tools. Each tool has a flat input schema; a tool that combines operations takes an `action` argument. Keep this shape. In the Phase 1 ChatGPT run (F13), ChatGPT picked the right `edit_catalog` action every time: create, set options, preview and then generate variants, update, and bulk preview and commit. It did not start an export when asked for one, and answered from supplier records instead ([Phase 1 status, Section 5](phase-1-status.md#5-chatgpt-run-f13)). Revisit the tool split if a later run shows ChatGPT picking the wrong action in a combined tool (risk R3).
 
 ### 9.4 OAuth and tenant authorization
 
@@ -964,6 +979,8 @@ Disable Hyperdrive query caching on inventory, authorization, and other reads th
 ### 10.5 Jobs and external effects
 
 - Persist job state and outbox rows before queue delivery.
+- **Outbox dispatch drains bursts (v0.7).** Dispatch keeps going until the outbox is empty, and runs after jobs as well as after requests. Before this, dispatch moved only the 100 oldest events after a request and at each 30-minute sweep, so one import's events delayed every other shop's Shopify pushes, emails, and exports.
+- **Volume tests on staging in every milestone (v0.7).** That outbox bug passed every unit test, because tests dispatch with a large limit and never have a second shop waiting. Each milestone runs its feature on staging with realistic volume before it is called done.
 - **Work a merchant waits on runs in the request, after the response, next to the database.** A Shopify order job runs right after the webhook is acknowledged, and a command delivers its outbox events right after it returns. Cloudflare Queues is the retry path, not the first delivery: in Phase 0 queue delivery added 1.5–4.6 s, and running order jobs in the request cut webhook-to-reservation from a median of 4.6 s to 0.26 s.
 - **Queue consumers are not placed near the database.** Placement moves only fetch handlers, and a consumer measured about 150 ms per round trip to Neon. A consumer hands its batch to the Worker's own fetch handler through a service binding, so database-heavy work still runs next to the database.
 - Treat queues as delivery mechanisms; a temporary queue retention limit must not erase the only record of an unfinished import or webhook.
@@ -1046,6 +1063,8 @@ Do not make the entire product a single arbitrary JSON document. Flexible attrib
 Measure with representative shops and realistic attribute/media/history data. Initial benchmark proposal: three shops, 10,000 variants per shop, 1,000,000 audit events total, and ten simultaneous users. Logging every read means a small pilot produces 100,000 events within weeks, so the benchmark must cover at least several months of history.
 
 Phase 0 measured **732 bytes per audit event** in PostgreSQL, including its indexes ([report Section 4.6](phase-0-report.md#46-bytes-per-audit-event)). A million events therefore take about 700 MB, which leaves too little of Neon Free's storage for the rest of the benchmark. Run the full benchmark in a temporary separate Neon project, then delete it. Moving staging to a paid Neon plan (Launch) happens only when a benchmark or the pilot actually needs it, and only after asking the owner at that time (confirmed, v0.6).
+
+**Catalog queries measured in Phase 1 (v0.7).** With three shops of 10,000 variants each, custom field values in typed JSONB, and no generated columns or expression indexes, every catalog query shape stayed under half the target. The slowest, in-stock with availability, had a server p95 of 435 ms; list, sort, search, custom-field filter and sort, and products mode were 176–257 ms ([Phase 1 report, Section 4.1](phase-1-report.md#41-catalog-queries-f12)). Keep this design. Add expression indexes on hot custom fields only when a shop's benchmark nears one second. Phase 1 ran on separate benchmark shops in staging, deleted afterwards, because a separate Neon project could not be created; the 1-million-event audit seed is still to be run.
 
 Target the 95th percentile of ordinary warm list/search responses below one second at the server for a page of fifty records, and ordinary stock commands below two seconds. Report cold-start behavior separately and include end-to-end user latency in the test results. These are proposed targets, not measured capacity or an SLA.
 
@@ -1167,6 +1186,7 @@ Sortly's plans, checked on 14 November 2026 (USD, list monthly price):
 - API, webhooks, MCP, custom roles, and complete history are confirmed for every shop (C08, C10, C11). Sortly reserves them for its Premium and Enterprise plans. For a merchant who needs them, the real price gap is far larger than 10×.
 - **Payment fees matter at this price.** On a monthly charge under $5, a fixed per-transaction card fee takes a large share. Default to annual billing, or bill Shopify-installed merchants through Shopify. Shopify's docs list 0% revenue share on the first $1 million of app revenue, plus a separate processing fee. Recheck both before choosing a billing path.
 - **Proposed per-shop infrastructure budget:** no more than 10% of the plan price, so under $0.49 per month on the lowest paid plan. The largest variable cost is audit history. That is why the hot window stays in PostgreSQL and older history moves to R2 (Section 7.4), which charges $0.015 per GB-month.
+- **Measured after Phase 1 (v0.7):** about $0.33–0.37 per shop per month with a 10,000-variant catalog, 20 hours of grid use, one large import, and 1,500 pictures. That is inside the $0.49 budget, but the headroom fell from about 2× to 1.3×. Media originals in R2 are the largest new item, about $0.07 a month, and grow with the catalog rather than with use. The size policy for originals (Section 4.5) must be decided before launch ([Phase 1 report, Section 5](phase-1-report.md#5-cost-model-update)).
 - Measure actual cost per shop per month during the pilot (Section 16.2) before publishing prices.
 
 ## 15. Delivery sequence and launch scope
@@ -1331,6 +1351,7 @@ These decisions do not prevent drafting or building the foundation. Resolve them
 | Final role matrix and MCP write defaults | Granular permissions with explicit write consent. | Inviting live staff or connecting live AI clients. |
 | Audit retention and privacy treatment | Deferred by the owner. No silent event expiry; searchable archives; pseudonymize removed members (Section 12.4). | Onboarding live EU merchants. |
 | Warehouse commercial functions | Record provider and contract/rate information first. | Advertising automated warehouse billing. |
+| Size of media originals | Keep originals as uploaded until decided; the alternative is to recompress above a limit such as 2,048 px, with the full file on request (Section 4.5, v0.7). | Launch, or earlier if media storage approaches the per-shop budget. |
 | Pricing and merchant billing | Ceiling fixed at one tenth of Sortly's list price: $4.90, $14.90, and $29.90 (C19, Section 14.4). Open: plan limits, and Shopify billing vs Stripe annual billing. | Charging customers. |
 | Shopify field ownership | Platform owns stock; Shopify owns orders; storefront content per field, default Shopify (Section 8.5). | Shopify connector implementation. |
 | Production budget and recovery objectives | Free development, measured pilot, upgrades before quotas affect live stock. Each paid upgrade during development, such as Neon Launch for a benchmark, only when needed and approved by the owner at the time (v0.6). | Live inventory dependence. |
@@ -1385,3 +1406,4 @@ These primary sources support the vendor behavior and architecture constraints d
 | 0.4 | 14 November 2026 | Owner confirmed the V0 limits: bundles without their own stock (kits later), shop-currency purchase orders, one average cost per variant per shop, reorder rules per warehouse, an installable web app without offline mode, picking that does not create Shopify fulfillments, report emails with a link only, and duplicate acknowledgment for API/MCP creates. Price benchmark confirmed as Sortly's list price ($4.90 entry ceiling). |
 | 0.5 | 14 November 2026 | Phase 0 findings P1–P15 ([report Section 7](phase-0-report.md#7-proposed-prd-v05-changes)). Shopify: compare-and-set push where only an unexplained difference is a conflict (8.5); expiring offline tokens (8.5); one shop per store at a time and protected customer data approval before going public (8.5); bundles wording (8.5). Audit: authentication before the audit queue (7.3, 10.3); one queue message per read (7.3, 14.2); UUIDv7 event IDs, monthly partitions on creation time, `UNIQUE (occurred_at, event_id)` (7.3, 7.4); 732 bytes per event and a separate project for the 1-million-event benchmark (12.3, 14.1). MCP: WorkOS AuthKit with standalone Connect and the platform's consent creating the grant (1.3, 9.4, 10.2); unbound grants expire after 10 minutes (9.4). Runtime: waited-on work runs in the request next to the database, with queues as the retry path (10.2, 10.3, 10.5); sweeps every 30 minutes (6.3, 10.2, 14.2); rate limits and batched access events before launch (7.3, 8.3, 9.2, 14.2). Neon in `aws-eu-central-1` (12.4). Email: Resend for the pilot, US data storage noted against C20 (12.4, 14.1, 14.2, 17). |
 | 0.6 | 14 November 2026 | Owner answers for Phase 1 ([Phase 1 build plan](phase-1-build-plan.md), Section 4.2): edit conflicts detected per field (3.3); four starter family templates (4.3); one access event per list or detail request naming its pictures, and one per original download (4.5); paid Neon upgrades only when needed and approved by the owner at the time (12.3, 17). |
+| 0.7 | 16 November 2026 | Phase 1 findings P16–P23 ([report Section 7](phase-1-report.md#7-proposed-prd-changes)). Catalog queries meet the targets with JSONB attributes and no generated columns; expression indexes only when a benchmark nears 1 s (12.3). Barcodes unique on a normalized code; generated codes from a shop sequence, never a URL (4.7). Bundle availability computed on read (4.8). Imports write opening stock as receipts in each chunk and announce availability once per chunk (8.4). Media originals dominate storage cost; a size policy is due before launch (4.5, 14.4, 17). Outbox dispatch drains bursts and runs after jobs; volume tests on staging per milestone (10.5). Completeness filters in the catalog query (new 4.10, 9.2). MCP stays at 14 tools with flat schemas, with the F13 run's result (9.3). |

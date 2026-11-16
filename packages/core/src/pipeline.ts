@@ -76,6 +76,11 @@ export async function execute(
     idempotencyKey,
   });
 
+  // The locations this request touches, for location-scoped history (PRD 2.4, A42). Null for
+  // operations without a `locations` hook; [] while they are not known yet, which hides the
+  // event from members limited to some locations until it is known.
+  let locationIds: string[] | null = op.locations ? [] : null;
+
   const fail = async (error: unknown): Promise<never> => {
     const appError = toAppError(error, deps.logger, op.id);
     try {
@@ -84,6 +89,7 @@ export async function execute(
           action: op.audit.action,
           phase: 'outcome',
           outcome: appError.outcome,
+          location_ids: locationIds,
           error: { code: appError.code, status: appError.status },
           // What the caller was told (field errors, conflicts, similar items), so the warning
           // shown is in the history along with the choice made next (plan 5.7).
@@ -144,12 +150,19 @@ export async function execute(
     }
   }
 
+  if (op.locations) locationIds = await locationsFromInput(op, input);
+
   // 3. Commands: the attempt is durable before anything executes (PRD 7.3).
   if (op.kind === 'command') {
     attemptId = uuidv7();
     try {
       await deps.audit.send([
-        auditEvent(base(), { action: op.audit.action, phase: 'attempt', outcome: 'received' }),
+        auditEvent(base(), {
+          action: op.audit.action,
+          phase: 'attempt',
+          outcome: 'received',
+          location_ids: locationIds,
+        }),
       ]);
     } catch {
       throw errors.auditUnavailable();
@@ -175,7 +188,9 @@ export async function execute(
           if (replay) return { kind: 'replay', response: replay.response } as const;
         }
         if (op.locations) {
-          await assertLocationsInScope(tx, await op.locations(input, tx), locationScope);
+          const touched = await op.locations(input, tx);
+          locationIds = [...new Set(touched)];
+          await assertLocationsInScope(tx, touched, locationScope);
         }
         const ctx: HandlerContext = {
           tx,
@@ -194,7 +209,15 @@ export async function execute(
         const handled = await op.handler(ctx, input);
         let webhookRows = 0;
         if (op.kind === 'command') {
-          webhookRows = await finalizeCommand(tx, op, caller, idempotencyKey, handled, base());
+          webhookRows = await finalizeCommand(
+            tx,
+            op,
+            caller,
+            idempotencyKey,
+            handled,
+            base(),
+            locationIds,
+          );
         }
         return { kind: 'done', handled, webhookRows } as const;
       },
@@ -232,7 +255,7 @@ export async function execute(
           outcome: 'succeeded',
           target_type: audit.targetType,
           target_id: audit.targetId,
-          location_ids: audit.locationIds ?? null,
+          location_ids: mergeLocations(audit.locationIds, locationIds),
           context: audit.context ?? { input },
         }),
         ...(outcome.handled.events ?? []),
@@ -365,6 +388,7 @@ async function finalizeCommand(
   idempotencyKey: string | null,
   handled: HandlerResult<unknown>,
   base: Parameters<typeof auditEvent>[0],
+  touched: string[] | null,
 ): Promise<number> {
   const { audit } = handled;
   const success: AuditEvent = auditEvent(base, {
@@ -374,7 +398,7 @@ async function finalizeCommand(
     target_type: audit.targetType,
     target_id: audit.targetId,
     operation_id: audit.operationId ?? null,
-    location_ids: audit.locationIds ?? null,
+    location_ids: mergeLocations(audit.locationIds, touched),
     external_ref: audit.externalRef ?? null,
     reason: audit.reason ?? null,
     changes: audit.changes ?? null,
@@ -416,6 +440,40 @@ async function finalizeCommand(
     ],
   );
   return written?.webhooks ?? 0;
+}
+
+/** The handler's locations and the hook's, or null when the operation names none. */
+function mergeLocations(
+  fromHandler: string[] | undefined,
+  touched: string[] | null,
+): string[] | null {
+  const all = [...new Set([...(fromHandler ?? []), ...(touched ?? [])])];
+  if (all.length > 0) return all.slice(0, 100);
+  // A location-scoped operation that touched none (a reservation anywhere that found nothing)
+  // is about no location: visible to everyone who may read history.
+  return null;
+}
+
+class NeedsDatabase extends Error {}
+
+/**
+ * The `locations` hook evaluated before the transaction, for the attempt event: most hooks read
+ * the input only. A hook that needs the database gives [] here (not known yet), and the outcome
+ * event, written inside the transaction, carries the real locations.
+ */
+async function locationsFromInput(op: AnyOperation, input: unknown): Promise<string[]> {
+  const offline = {
+    query: () => {
+      throw new NeedsDatabase();
+    },
+    statements: 0,
+  } as unknown as Tx;
+  try {
+    const ids = await op.locations!(input, offline);
+    return [...new Set(ids)].filter((id) => UUID_PATTERN.test(id));
+  } catch {
+    return [];
+  }
 }
 
 async function assertLocationsInScope(

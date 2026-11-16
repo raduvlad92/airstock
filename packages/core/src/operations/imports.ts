@@ -448,13 +448,14 @@ export const commitImport = defineOperation({
     }
     await ctx.tx.query(
       `update import_jobs set status = 'committing', committed_at = now(), updated_at = now(), version = version + 1,
-         caller = $2 where id = $1`,
-      [input.importId, JSON.stringify(storeCaller(ctx.caller))],
+         caller = $2, commit_attempt_id = $3 where id = $1`,
+      [input.importId, JSON.stringify(storeCaller(ctx.caller)), ctx.attemptId],
     );
     const updated = await loadImport(ctx.tx, input.importId);
     return {
       result: { import: importOut(updated) },
-      // The import's parent event: chunks and records link to it by importId.
+      // The import's parent event: each record's event carries this request's attempt ID, so the
+      // activity history lists the import with every record it changed (PRD 7.4, batch).
       audit: {
         targetType: 'import',
         targetId: input.importId,
@@ -655,10 +656,10 @@ export async function runImportJob(
   const job = await deps.db.transaction({ shopId, userId: null }, async (tx) => {
     const [row] = await tx.query<ImportRow>(
       `update import_jobs set updated_at = now() where id = $1 and status = 'committing'
-       returning id, file_name, status, header, mapping, row_count, counts, checkpoint, error, created_at, completed_at, caller, delimiter`,
+       returning id, file_name, status, header, mapping, row_count, counts, checkpoint, error, created_at, completed_at, caller, delimiter, commit_attempt_id`,
       [importId],
     );
-    return row ?? null;
+    return (row as (ImportRow & { commit_attempt_id: string | null }) | undefined) ?? null;
   });
   if (!job) return 'missing';
   let caller: Caller;
@@ -680,7 +681,13 @@ export async function runImportJob(
     return 'done';
   }
   const requestId = uuidv7();
-  const base = { shopId, caller, requestId, attemptId: null, idempotencyKey: null };
+  const base = {
+    shopId,
+    caller,
+    requestId,
+    attemptId: job.commit_attempt_id,
+    idempotencyKey: null,
+  };
   let chunk = 0;
   while (Date.now() - started < budgetMs) {
     const rows = await deps.db.transaction({ shopId, userId: caller.userId }, async (tx) => {

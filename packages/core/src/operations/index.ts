@@ -20,6 +20,7 @@ import { catalogVariantsOperations } from './catalog-variants.ts';
 import { importsOperations } from './imports.ts';
 import { inventoryOperations } from './inventory.ts';
 import { inventoryLotsOperations } from './inventory-lots.ts';
+import { inventoryQuickAddOperations } from './inventory-quick-add.ts';
 import { inventoryReservationsOperations } from './inventory-reservations.ts';
 import { inventorySettingsOperations } from './inventory-settings.ts';
 import { inventoryValuationOperations } from './inventory-valuation.ts';
@@ -47,6 +48,7 @@ export const operations: readonly AnyOperation[] = [
   ...importsOperations,
   ...inventoryOperations,
   ...inventoryLotsOperations,
+  ...inventoryQuickAddOperations,
   ...inventoryReservationsOperations,
   ...inventorySettingsOperations,
   ...inventoryValuationOperations,
@@ -83,6 +85,7 @@ export * from './catalog-variants.ts';
 export * from './imports.ts';
 export * from './inventory.ts';
 export * from './inventory-lots.ts';
+export * from './inventory-quick-add.ts';
 export * from './inventory-reservations.ts';
 export * from './inventory-settings.ts';
 export * from './inventory-valuation.ts';

@@ -27,7 +27,7 @@ import {
   shortfall,
   sumQuantities,
 } from '../stock/engine.ts';
-import { LotCode } from './inventory.ts';
+import { Flag, isSet, LotCode } from './inventory.ts';
 
 // Reservations v2 (plan Section 5.3, ADR 0020): reserve variants and bundles, release and fulfill
 // in part, reallocate, and list. Every command follows the lock order in stock/engine.ts.
@@ -1279,9 +1279,9 @@ export const listReservations = defineOperation({
       .describe('Ignored when reservationId is given.'),
     externalRef: Reference.optional(),
     channel: z.string().trim().min(1).max(100).optional(),
-    shortageOnly: z.boolean().optional(),
+    shortageOnly: Flag.optional(),
     before: Id.optional().describe('Reservations created before this one (paging).'),
-    limit: z.number().int().min(1).max(100).default(50),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
   }),
   output: z.object({ reservations: z.array(ReservationOut), next: Id.nullable() }),
   permission: 'inventory.read',
@@ -1355,7 +1355,7 @@ export const listReservations = defineOperation({
         input.status,
         input.externalRef ?? null,
         input.channel ?? null,
-        input.shortageOnly ?? false,
+        isSet(input.shortageOnly),
         input.before ?? null,
         input.limit,
         ctx.locationScope,

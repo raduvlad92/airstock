@@ -41,7 +41,9 @@
                     "apparel",
                     "furniture",
                     "food",
-                    "spare_parts"
+                    "spare_parts",
+                    "trading_cards",
+                    "building_sets"
                   ]
                 }
               },

@@ -166,8 +166,10 @@
                             "enum": [
                               "draft",
                               "active",
-                              "archived"
-                            ]
+                              "archived",
+                              "sold"
+                            ],
+                            "description": "sold: a one-of-a-kind item that was fulfilled; it is active again if it returns."
                           },
                           "family": {
                             "anyOf": [
@@ -358,6 +360,12 @@
                             "trackingMode": {
                               "type": "string"
                             },
+                            "oneOfAKind": {
+                              "type": "boolean"
+                            },
+                            "sellByMarginDays": {
+                              "type": "number"
+                            },
                             "status": {
                               "type": "string",
                               "enum": [
@@ -470,6 +478,8 @@
                             "baseUnit",
                             "quantityScale",
                             "trackingMode",
+                            "oneOfAKind",
+                            "sellByMarginDays",
                             "status",
                             "isDefault",
                             "version",

@@ -33,6 +33,10 @@ export const DateOnly = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date such as 2027-03-31.')
   .refine((v) => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)), 'Not a real date.');
 
+/** A yes/no query parameter: REST sends it as text, MCP as a boolean. */
+export const Flag = z.union([z.boolean(), z.enum(['true', 'false'])]);
+export const isSet = (flag: z.infer<typeof Flag> | undefined) => flag === true || flag === 'true';
+
 export const LotCode = z
   .string()
   .trim()

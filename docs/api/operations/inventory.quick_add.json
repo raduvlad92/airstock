@@ -1,0 +1,203 @@
+{
+  "/api/v1/shops/{shopId}/quick-add": {
+    "post": {
+      "operationId": "inventory.quick_add",
+      "summary": "Add a single item and receive it in one step",
+      "description": "Use this for one-of-a-kind items such as a graded card or a used set: creates the product as one of a kind, with its barcode (for example the grading certificate number), its family fields, and its price, and receives the single unit at a location, all in one command. With variantId and serial instead, adds one unit with that serial to an existing serial-tracked variant (units that share a price). Pictures are added afterwards with manage_media.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "inventory.quick_add.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "locationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "name": {
+                  "description": "Required for a new item.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "sku": {
+                  "description": "Defaults to the barcode, or a generated code.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "barcode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "price": {
+                  "type": "string",
+                  "maxLength": 30
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 50000
+                },
+                "family": {
+                  "description": "Family ID or name, such as Trading cards.",
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "fields": {
+                  "description": "Custom field values by key.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "status": {
+                  "default": "active",
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "active"
+                  ]
+                },
+                "acknowledgeSimilar": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "variantId": {
+                  "description": "An existing serial-tracked variant to add one unit to.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "serial": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "condition": {
+                  "default": "sellable",
+                  "type": "string",
+                  "enum": [
+                    "sellable",
+                    "quarantine",
+                    "damaged",
+                    "repair",
+                    "supplier_return"
+                  ]
+                },
+                "unitCost": {
+                  "description": "Needs costs.read.",
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                },
+                "reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "locationId"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "sku": {
+                    "type": "string"
+                  },
+                  "created": {
+                    "type": "boolean",
+                    "description": "False when a unit was added to an existing variant."
+                  },
+                  "receipt": {
+                    "type": "object",
+                    "properties": {
+                      "operationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "positionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "serialId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operationId",
+                      "positionId",
+                      "serialId"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "productId",
+                  "variantId",
+                  "sku",
+                  "created",
+                  "receipt"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

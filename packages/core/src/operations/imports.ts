@@ -1726,6 +1726,7 @@ const ExportQuery = QueryInput.pick({
   sort: true,
   fields: true,
   archived: true,
+  sold: true,
 });
 
 async function loadExport(tx: Tx, exportId: string): Promise<ExportRow> {
@@ -1918,6 +1919,7 @@ export async function runExportJob(
           const result = await runQuery(ctx, {
             mode,
             archived: job.query.archived ?? 'exclude',
+            sold: job.query.sold ?? 'exclude',
             ...(job.query.search ? { search: job.query.search } : {}),
             ...(job.query.filter ? { filter: job.query.filter } : {}),
             ...(job.query.sort ? { sort: job.query.sort } : {}),

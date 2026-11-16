@@ -31,7 +31,18 @@
           "in": "query",
           "required": false,
           "schema": {
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            ]
           }
         },
         {

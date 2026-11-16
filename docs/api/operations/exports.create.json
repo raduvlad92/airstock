@@ -160,6 +160,16 @@
                     "include",
                     "only"
                   ]
+                },
+                "sold": {
+                  "default": "exclude",
+                  "description": "One-of-a-kind items that were sold are hidden unless included.",
+                  "type": "string",
+                  "enum": [
+                    "exclude",
+                    "include",
+                    "only"
+                  ]
                 }
               }
             }

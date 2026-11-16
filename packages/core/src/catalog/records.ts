@@ -245,7 +245,9 @@ export const BUILTIN_FIELDS: BuiltinField[] = [
     level: 'variant',
     column: 'tracking_mode',
     kind: 'text',
-    encode: (v) => (v === 'none' ? ok('none') : fail('Lot and serial tracking arrive in Phase 2.')),
+    // Tracking changes only while the variant has no stock: set it with set_stock_settings.
+    encode: (v) =>
+      v === 'none' ? ok('none') : fail('Set tracking with the set_stock_settings action.'),
     comparable: plain,
   },
 ];
@@ -269,7 +271,7 @@ export interface ProductRow {
   id: string;
   name: string;
   description: string | null;
-  status: 'draft' | 'active' | 'archived';
+  status: 'draft' | 'active' | 'archived' | 'sold';
   family_id: string | null;
   tags: string[];
   attributes: Record<string, unknown>;
@@ -288,6 +290,8 @@ export interface VariantRow {
   base_unit: string;
   quantity_scale: number;
   tracking_mode: string;
+  one_of_a_kind: boolean;
+  sell_by_margin_days: number;
   is_default: boolean;
   status: 'active' | 'archived';
   option_value_ids: string[];
@@ -313,7 +317,7 @@ export const PRODUCT_COLUMNS = `id, name, description, status, family_id, tags, 
  * or dimensions (JSON null) is read as the string 'cleared'; SQL NULL (inherit) stays null.
  */
 export const VARIANT_COLUMNS = `id, product_id, sku, price::text as price, base_unit, quantity_scale, tracking_mode,
-  is_default, status, option_value_ids, attributes,
+  one_of_a_kind, sell_by_margin_days, is_default, status, option_value_ids, attributes,
   case when weight = 'null'::jsonb then to_jsonb('cleared'::text) else weight end as weight,
   case when dimensions = 'null'::jsonb then to_jsonb('cleared'::text) else dimensions end as dimensions,
   version, created_at, updated_at`;

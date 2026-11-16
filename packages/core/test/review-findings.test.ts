@@ -17,6 +17,7 @@ import {
   harness,
   MemoryAuditSink,
   ownerQuery,
+  reconcile,
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
@@ -356,6 +357,54 @@ describe('F-ONE-OF-A-KIND-COUNT: a count can give a one-of-a-kind item more than
     expect({ outcomes, owned: view.totals.ownedTotal }).toEqual({
       outcomes: ['one_of_a_kind', 'one_of_a_kind'],
       owned: '1.000000',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-SERIAL-TWO-PLACES (stock created). A serial's state is checked with plain reads and
+// stock/moves.ts syncSerials updates serial_units with no status guard; reverseOperation
+// (inventory-adjustments.ts) does no serial check at all. Removing serial S at A, adding S as
+// found at B, then reversing the removal puts S back at A while it is still at B: one serial unit
+// is on hand twice, owned quantity is one too high, and reconciliation reports serial_mismatch.
+// The same happens when a count recorded S as found and a return receipt brings S back first.
+// ---------------------------------------------------------------------------------------------
+describe('F-SERIAL-TWO-PLACES: one serial can end up on hand at two locations', () => {
+  it.fails('refuses to reverse a removal once the serial is back in stock elsewhere', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, trackingMode: 'serial' });
+    const serial = `SN-${uuidv7().slice(-6)}`;
+    await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '1',
+      serials: [serial],
+    });
+    const removed = await h.run(ops.adjustStock, {
+      locationId: shop.locationId,
+      adjustmentReason: 'loss_or_theft',
+      adjustments: [{ variantId, direction: 'remove', serials: [serial] }],
+    });
+    await h.run(ops.adjustStock, {
+      locationId: store,
+      adjustmentReason: 'found',
+      adjustments: [{ variantId, direction: 'add', serials: [serial] }],
+    });
+    const reversal = await h
+      .run(ops.reverseOperation, { operationId: removed.operationId, note: 'not lost' })
+      .then(
+        () => 'succeeded',
+        (e: { code?: string }) => e.code ?? String(e),
+      );
+    const [held] = await ownerQuery<{ positions: number }>(
+      `select count(*)::int as positions from inventory_positions p
+       join serial_units s on s.shop_id = p.shop_id and s.id = p.serial_id
+       where p.shop_id = $1 and s.variant_id = $2 and p.on_hand > 0`,
+      [shop.shopId, variantId],
+    );
+    expect({ reversal, positions: held!.positions }).toEqual({
+      reversal: 'serial_in_stock',
+      positions: 1,
     });
   });
 });

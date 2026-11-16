@@ -80,8 +80,10 @@ const { rows: tables } = await client.query<{
      sum(pg_total_relation_size(rel.oid))::text as total
    from rel group by rel.table order by sum(pg_total_relation_size(rel.oid)) desc`,
 );
-const { rows: db } = await client.query<{ size: string }>(
-  'select pg_database_size(current_database())::text as size',
+// Neon's limit applies to the whole cluster, which adds the postgres and template databases.
+const { rows: db } = await client.query<{ size: string; cluster: string }>(
+  `select pg_database_size(current_database())::text as size,
+     (select sum(pg_database_size(datname)) from pg_database)::text as cluster`,
 );
 const { rows: counts } = await client.query<{ variants: string; events: string; shops: string }>(
   `select (select count(*) from variants)::text as variants,
@@ -130,6 +132,7 @@ const report = {
   variants,
   auditEvents: events,
   databaseMB: mb(Number(db[0]!.size)),
+  clusterMB: mb(Number(db[0]!.cluster)),
   groupsMB: Object.fromEntries(Object.entries(byGroup).map(([g, v]) => [g, mb(v)])),
   bytesPerVariant: variants
     ? Math.round(((byGroup.catalog ?? 0) + (byGroup.stock ?? 0)) / variants)

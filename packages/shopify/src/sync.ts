@@ -80,11 +80,13 @@ interface ConnectionRow {
   access_token_expires_at: Date | null;
   refresh_token_ciphertext: string | null;
   installed_by_membership_id: string;
-  created_at: Date;
+  /** When the connection's orders start: its creation, or its first predecessor's. */
+  orders_from: Date;
 }
 
 const CONNECTION_COLUMNS = `id, shop_domain, scopes, status, token_key_id, access_token_ciphertext,
-  access_token_expires_at, refresh_token_ciphertext, installed_by_membership_id, created_at`;
+  access_token_expires_at, refresh_token_ciphertext, installed_by_membership_id,
+  coalesce(orders_from, created_at) as orders_from`;
 
 export class NotConnectedError extends Error {
   constructor() {
@@ -239,7 +241,7 @@ export async function connectedStore(
     shopId,
     connectionId,
     shopDomain: row.shop_domain,
-    createdAt: new Date(row.created_at),
+    createdAt: new Date(row.orders_from),
     caller: shopifyConnectorCaller(shopId, connectionId, row.installed_by_membership_id),
     admin: deps.shopify.admin(row.shop_domain, accessToken, row.scopes),
   };

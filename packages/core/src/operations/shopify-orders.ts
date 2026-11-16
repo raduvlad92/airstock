@@ -707,7 +707,8 @@ export const syncShopifyOrder = defineOperation({
       alertVariants: [],
     };
     const [connection] = await ctx.tx.query<{ status: string; created_at: Date }>(
-      'select status, created_at from shopify_connections where id = $1 for key share',
+      `select status, coalesce(orders_from, created_at) as created_at from shopify_connections
+       where id = $1 for key share`,
       [connectionId],
     );
     if (!connection) throw errors.notFound('Shopify connection');
@@ -1362,4 +1363,86 @@ async function startReturn(
   return returnId;
 }
 
-export const shopifyOrderCallbacks = [syncShopifyOrder] as const;
+/**
+ * Releases what an uninstalled store's orders still hold, when Shopify says the store is gone for
+ * good (`shop/redact`, 48 hours after an uninstall). Until then the holds stay: the store may be
+ * installed again, and the new connection then continues these orders (ADR 0035).
+ */
+export const releaseUninstalledShopifyHolds = defineOperation({
+  id: 'shopify.orders.release_uninstalled',
+  summary: 'Release the holds of an uninstalled Shopify store’s orders',
+  kind: 'command',
+  scope: 'shop',
+  input: z.object({ connectionId: Id }),
+  output: z.object({ released: z.number().int(), lines: z.number().int() }),
+  permission: 'integrations.sync',
+  connectionScope: 'inventory:write',
+  audit: { action: 'shopify.orders.released' },
+  idempotency: 'none',
+  http: {
+    method: 'POST',
+    path: '/shops/{shopId}/shopify/connections/{connectionId}/orders/release',
+  },
+  mcp: { exception: 'Integration callback: runs only for a verified shop/redact webhook.' },
+  async handler(ctx, input) {
+    const [connection] = await ctx.tx.query<{ status: string }>(
+      'select status from shopify_connections where id = $1 for update',
+      [input.connectionId],
+    );
+    if (!connection) throw errors.notFound('Shopify connection');
+    const acc: Acc = {
+      levels: new Set(),
+      took: [],
+      outbox: [],
+      events: [],
+      webhooks: [],
+      alertVariants: [],
+    };
+    let released = 0;
+    let count = 0;
+    if (connection.status === 'uninstalled') {
+      const open = await ctx.tx.query<LineRow>(
+        `select l.shopify_line_id, l.shopify_variant_id, l.quantity, l.outcome,
+           l.shopify_location_id, l.variant_id, l.pack_id, l.bundle, l.per_item::text,
+           l.open_items, l.fulfilled_items, l.effect_items, null as inventory_item_id
+         from shopify_order_lines l
+         where l.connection_id = $1 and l.open_items > 0
+         order by l.shopify_line_id
+         for update`,
+        [input.connectionId],
+      );
+      for (const line of open) {
+        released += await releaseItems(
+          ctx,
+          acc,
+          input.connectionId,
+          line,
+          line.open_items,
+          'The Shopify store was uninstalled for good',
+          true,
+        );
+        await ctx.tx.query(
+          `update shopify_order_lines set open_items = 0, updated_at = now()
+           where connection_id = $1 and shopify_line_id = $2`,
+          [input.connectionId, line.shopify_line_id],
+        );
+        count++;
+      }
+    }
+    return {
+      result: { released, lines: count },
+      audit: {
+        targetType: 'shopify_connection',
+        targetId: input.connectionId,
+        outcome: count > 0 ? 'succeeded' : 'no_change',
+        changes: { released, lines: count },
+      },
+      outbox: acc.outbox,
+      events: acc.events,
+      webhooks: acc.webhooks,
+      ...(acc.alertVariants.length > 0 ? { alertCheck: { variantIds: acc.alertVariants } } : {}),
+    };
+  },
+});
+
+export const shopifyOrderCallbacks = [syncShopifyOrder, releaseUninstalledShopifyHolds] as const;

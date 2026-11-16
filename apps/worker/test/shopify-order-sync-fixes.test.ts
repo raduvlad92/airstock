@@ -358,4 +358,76 @@ describe('Shopify order sync fixes', () => {
     expect(await shopifyAlerts(m.shopId)).toEqual([]);
     expect(store.available(variant!)).toBe(4);
   });
+  it('uninstall keeps the holds; installed again in the shop, the store continues its orders', async () => {
+    const s = await setup('Reinstall', [5]);
+    const [only] = s.items as [Item];
+    const held = s.store.placeOrder([{ variant: only.shopify, quantity: 2 }]);
+    await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(held));
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    expect(s.store.available(only.shopify)).toBe(3);
+    const gone = await h.deliver(
+      s.store.domain,
+      'app/uninstalled',
+      JSON.stringify({ id: 1, domain: s.store.domain }),
+    );
+    expect(gone.status).toBe(200);
+    // Uninstalled: the order's units stay held (the store may come back).
+    expect(await h.available(s.m, only.variantId)).toBe('3.000000');
+    // While the app is away: the held order ships, and a new order is placed.
+    s.store.fulfill(held);
+    const during = s.store.placeOrder([{ variant: only.shopify, quantity: 1 }]);
+    expect(s.store.available(only.shopify)).toBe(2);
+    const again = await h.install(s.m, s.store);
+    expect(again).not.toBe(s.connectionId);
+    const [maps] = await ownerQuery<{ count: number }>(
+      'select count(*)::int as count from shopify_variant_maps where connection_id = $1',
+      [again],
+    );
+    expect(maps?.count).toBe(1);
+    await reconcileConnection(h.deps(), s.m.shopId, again, { daily: true });
+    await h.flushTogether(s.m.shopId);
+    const [stock] = await ownerQuery<{ on_hand: string; allocated: string }>(
+      `select sum(on_hand)::text as on_hand, sum(allocated)::text as allocated
+       from inventory_positions where shop_id = $1 and variant_id = $2 and condition = 'sellable'`,
+      [s.m.shopId, only.variantId],
+    );
+    // The shipped order left stock from its hold; the new one is held.
+    expect(stock).toEqual({ on_hand: '3.000000', allocated: '1.000000' });
+    const lines = await ownerQuery<{ shopify_order_id: string; connection_id: string }>(
+      'select shopify_order_id, connection_id from shopify_order_lines where shop_id = $1',
+      [s.m.shopId],
+    );
+    expect(lines.map((l) => l.connection_id)).toEqual([again, again]);
+    expect(lines.map((l) => l.shopify_order_id).sort()).toEqual(
+      [held.orderId, during.orderId].sort(),
+    );
+    expect(s.store.available(only.shopify)).toBe(2);
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
+  });
+
+  it('shop/redact releases what an uninstalled store’s orders still hold', async () => {
+    const s = await setup('Redacted', [5]);
+    const [only] = s.items as [Item];
+    const order = s.store.placeOrder([{ variant: only.shopify, quantity: 2 }]);
+    await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(order));
+    await h.runJobs(s.m.shopId);
+    await h.deliver(
+      s.store.domain,
+      'app/uninstalled',
+      JSON.stringify({ id: 1, domain: s.store.domain }),
+    );
+    expect(await h.available(s.m, only.variantId)).toBe('3.000000');
+    const body = JSON.stringify({ shop_id: 1, shop_domain: s.store.domain });
+    expect((await h.deliver(s.store.domain, 'shop/redact', body)).status).toBe(200);
+    expect(await h.available(s.m, only.variantId)).toBe('5.000000');
+    const [line] = await ownerQuery<{ open_items: number }>(
+      'select open_items from shopify_order_lines where shop_id = $1',
+      [s.m.shopId],
+    );
+    expect(line?.open_items).toBe(0);
+    // Delivered again, nothing changes.
+    expect((await h.deliver(s.store.domain, 'shop/redact', body)).status).toBe(200);
+    expect(await h.available(s.m, only.variantId)).toBe('5.000000');
+  });
 });

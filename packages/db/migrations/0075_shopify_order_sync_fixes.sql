@@ -22,3 +22,35 @@ alter table shopify_connections
 -- preview waited took units that opening stock still counts, so it is held here once mapped.
 -- Null for other maps (orders seen before the map stay Shopify's, ADR 0033).
 alter table shopify_variant_maps add column orders_from timestamptz;
+
+-- A store uninstalled and installed again in the same shop: the new connection takes over the
+-- previous one's orders, holds, maps, and records, so its open orders are still followed (their
+-- fulfillments and cancellations land on the holds made for them). `orders_from` is when the
+-- connection's orders start: the first connection's creation; earlier orders stay Shopify's.
+alter table shopify_connections add column orders_from timestamptz;
+
+alter table shopify_line_reservations
+  drop constraint shopify_line_reservations_shop_id_connection_id_shopify_li_fkey,
+  add constraint shopify_line_reservations_line_fkey foreign key (shop_id, connection_id,
+    shopify_line_id) references shopify_order_lines (shop_id, connection_id, shopify_line_id)
+    on update cascade;
+alter table shopify_listing_differences
+  drop constraint shopify_listing_differences_shop_id_connection_id_product__fkey,
+  add constraint shopify_listing_differences_listing_fkey foreign key (shop_id, connection_id,
+    product_id) references shopify_listings (shop_id, connection_id, product_id)
+    on delete cascade on update cascade;
+
+grant update on shopify_return_dispositions to airstock_app;
+
+-- Uninstalled connections of a store, in every shop: shop/redact (Shopify's notice, 48 hours after
+-- an uninstall, that the store is gone for good) releases what their orders still hold.
+create function shopify_uninstalled_connections_for_domain(p_domain text)
+  returns table (shop_id uuid, connection_id uuid, installed_by_membership_id uuid)
+  language sql stable security definer set search_path = public, pg_temp
+as $$
+  select c.shop_id, c.id, c.installed_by_membership_id
+  from shopify_connections c
+  where c.shop_domain = p_domain and c.status = 'uninstalled'
+$$;
+revoke execute on function shopify_uninstalled_connections_for_domain(text) from public;
+grant execute on function shopify_uninstalled_connections_for_domain(text) to airstock_app;

@@ -1,0 +1,560 @@
+{
+  "/api/v1/shops/{shopId}/counts/{sessionId}/submit": {
+    "post": {
+      "operationId": "inventory.counts.submit",
+      "summary": "Submit a count session: post the differences as count corrections",
+      "description": "Use this when counting is done. Each counted line sets its position to the number counted, posted as adjustments with the reason count correction; uncounted lines change nothing. A line whose position moved after it was counted needs review (the error count_needs_review lists the movements): say per line keep_count (the count is right now) or apply_movements (the count was right then, so add what moved since), or recount it. A count below reserved stock needs reservationChoices.",
+      "x-permission": "inventory.count",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.count.submitted",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "sessionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "reviews": {
+                  "maxItems": 5000,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "lineId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "resolution": {
+                        "type": "string",
+                        "enum": [
+                          "keep_count",
+                          "apply_movements"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "lineId",
+                      "resolution"
+                    ]
+                  }
+                },
+                "reservationChoices": {
+                  "description": "When a change leaves fewer units than are reserved: per claim, release it or move it elsewhere. The error below_reserved lists the claims.",
+                  "maxItems": 200,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "allocationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "release",
+                          "reallocate"
+                        ],
+                        "description": "release frees the claim; reallocate moves it to other free stock."
+                      },
+                      "quantity": {
+                        "description": "Leave out for the whole claim.",
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                      }
+                    },
+                    "required": [
+                      "allocationId",
+                      "action"
+                    ]
+                  }
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000,
+                  "description": "Anything worth keeping with the change; kept in the history."
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "condition": {
+                          "type": "string"
+                        },
+                        "lotId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serialId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "delta": {
+                          "type": "string",
+                          "description": "Signed base units."
+                        }
+                      },
+                      "required": [
+                        "variantId",
+                        "locationId",
+                        "condition",
+                        "lotId",
+                        "serialId",
+                        "delta"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "released": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "allocationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "allocationId",
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "reallocated": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "allocationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        },
+                        "to": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "allocationId",
+                        "reservationId",
+                        "quantity",
+                        "to"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "shortagesFilled": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "unitCosts": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Per variant, the cost the change used; needs costs.read."
+                  },
+                  "operationId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "session": {
+                    "type": "object",
+                    "properties": {
+                      "sessionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "submitted",
+                          "cancelled"
+                        ]
+                      },
+                      "blind": {
+                        "type": "boolean"
+                      },
+                      "quick": {
+                        "type": "boolean"
+                      },
+                      "location": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "locationId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "locationId",
+                              "path"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "submittedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "operationId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "totals": {
+                        "type": "object",
+                        "properties": {
+                          "lines": {
+                            "type": "number"
+                          },
+                          "counted": {
+                            "type": "number"
+                          },
+                          "needsReview": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "lines",
+                          "counted",
+                          "needsReview"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "lines": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "lineId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "variantId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sku": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "locationId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "locationPath": {
+                              "type": "string"
+                            },
+                            "condition": {
+                              "type": "string"
+                            },
+                            "lotCode": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "serial": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "expected": {
+                              "description": "Hidden (null) in a blind count until it is submitted.",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "counted": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "counted",
+                                "posted"
+                              ]
+                            },
+                            "countedAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "countedVersion": {
+                              "description": "The position version when counted.",
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "postedDelta": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "needsReview": {
+                              "type": "boolean",
+                              "description": "The position moved after it was counted."
+                            },
+                            "movementsSince": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "operationId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "quantity": {
+                                    "type": "string"
+                                  },
+                                  "at": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "operationId",
+                                  "kind",
+                                  "quantity",
+                                  "at"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "description": "Movements at the position after it was counted (shown when it needs review)."
+                            }
+                          },
+                          "required": [
+                            "lineId",
+                            "variantId",
+                            "sku",
+                            "name",
+                            "locationId",
+                            "locationPath",
+                            "condition",
+                            "lotCode",
+                            "serial",
+                            "expected",
+                            "counted",
+                            "status",
+                            "countedAt",
+                            "countedVersion",
+                            "postedDelta",
+                            "needsReview",
+                            "movementsSince"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "sessionId",
+                      "name",
+                      "status",
+                      "blind",
+                      "quick",
+                      "location",
+                      "note",
+                      "createdAt",
+                      "submittedAt",
+                      "operationId",
+                      "totals",
+                      "lines"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "changes",
+                  "released",
+                  "reallocated",
+                  "shortagesFilled",
+                  "costVisible",
+                  "unitCosts",
+                  "operationId",
+                  "session"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,341 @@
+{
+  "/api/v1/shops/{shopId}/counts/quick": {
+    "post": {
+      "operationId": "inventory.counts.quick",
+      "summary": "Record what was counted on a shelf and correct stock now",
+      "description": "Use this for \"I counted shelf B2: 4 of SKU X and none of SKU Y\", or a quantity typed for a location in the grid: sets each counted item to the number counted and posts the differences as adjustments with the reason count correction, in one step. Serial-tracked items list the serials present; lot-tracked items name the lot. If a count is below what is reserved, the error lists the claims: retry with reservationChoices. For a counting round over many shelves that is entered over time, start a count session instead.",
+      "x-permission": "inventory.count",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.count.quick",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "locationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "description": "The shelf counted (a location without sub-locations)."
+                },
+                "counts": {
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "counted": {
+                        "description": "Units counted: base units, or packs with packId. Serial-tracked items list serials instead.",
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                      },
+                      "packId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "locationId": {
+                        "description": "The shelf, when it is not the count’s own location.",
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "condition": {
+                        "default": "sellable",
+                        "type": "string",
+                        "enum": [
+                          "sellable",
+                          "quarantine",
+                          "damaged",
+                          "repair",
+                          "supplier_return"
+                        ]
+                      },
+                      "lotCode": {
+                        "description": "Lot-tracked items: the lot counted.",
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "serials": {
+                        "description": "Serial-tracked items: every serial present on the shelf; missing ones count as 0.",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        }
+                      }
+                    },
+                    "required": [
+                      "variantId"
+                    ]
+                  }
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000,
+                  "description": "Anything worth keeping with the change; kept in the history."
+                },
+                "reservationChoices": {
+                  "description": "When a change leaves fewer units than are reserved: per claim, release it or move it elsewhere. The error below_reserved lists the claims.",
+                  "maxItems": 200,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "allocationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "release",
+                          "reallocate"
+                        ],
+                        "description": "release frees the claim; reallocate moves it to other free stock."
+                      },
+                      "quantity": {
+                        "description": "Leave out for the whole claim.",
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                      }
+                    },
+                    "required": [
+                      "allocationId",
+                      "action"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "locationId",
+                "counts"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "condition": {
+                          "type": "string"
+                        },
+                        "lotId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serialId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "delta": {
+                          "type": "string",
+                          "description": "Signed base units."
+                        }
+                      },
+                      "required": [
+                        "variantId",
+                        "locationId",
+                        "condition",
+                        "lotId",
+                        "serialId",
+                        "delta"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "released": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "allocationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "allocationId",
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "reallocated": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "allocationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        },
+                        "to": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "allocationId",
+                        "reservationId",
+                        "quantity",
+                        "to"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "shortagesFilled": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "unitCosts": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Per variant, the cost the change used; needs costs.read."
+                  },
+                  "operationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                },
+                "required": [
+                  "changes",
+                  "released",
+                  "reallocated",
+                  "shortagesFilled",
+                  "costVisible",
+                  "unitCosts",
+                  "operationId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

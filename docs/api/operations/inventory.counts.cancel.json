@@ -1,0 +1,323 @@
+{
+  "/api/v1/shops/{shopId}/counts/{sessionId}/cancel": {
+    "post": {
+      "operationId": "inventory.counts.cancel",
+      "summary": "Cancel a count session",
+      "description": "Use this to drop a count session that will not be submitted. Changes no stock.",
+      "x-permission": "inventory.count",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.count.cancelled",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "sessionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000,
+                  "description": "Anything worth keeping with the change; kept in the history."
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "submitted",
+                      "cancelled"
+                    ]
+                  },
+                  "blind": {
+                    "type": "boolean"
+                  },
+                  "quick": {
+                    "type": "boolean"
+                  },
+                  "location": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "submittedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "operationId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "totals": {
+                    "type": "object",
+                    "properties": {
+                      "lines": {
+                        "type": "number"
+                      },
+                      "counted": {
+                        "type": "number"
+                      },
+                      "needsReview": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "lines",
+                      "counted",
+                      "needsReview"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "lines": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "lineId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationPath": {
+                          "type": "string"
+                        },
+                        "condition": {
+                          "type": "string"
+                        },
+                        "lotCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "serial": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expected": {
+                          "description": "Hidden (null) in a blind count until it is submitted.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "counted": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "counted",
+                            "posted"
+                          ]
+                        },
+                        "countedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "countedVersion": {
+                          "description": "The position version when counted.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "postedDelta": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "needsReview": {
+                          "type": "boolean",
+                          "description": "The position moved after it was counted."
+                        },
+                        "movementsSince": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "operationId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "string"
+                              },
+                              "at": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "operationId",
+                              "kind",
+                              "quantity",
+                              "at"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Movements at the position after it was counted (shown when it needs review)."
+                        }
+                      },
+                      "required": [
+                        "lineId",
+                        "variantId",
+                        "sku",
+                        "name",
+                        "locationId",
+                        "locationPath",
+                        "condition",
+                        "lotCode",
+                        "serial",
+                        "expected",
+                        "counted",
+                        "status",
+                        "countedAt",
+                        "countedVersion",
+                        "postedDelta",
+                        "needsReview",
+                        "movementsSince"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "name",
+                  "status",
+                  "blind",
+                  "quick",
+                  "location",
+                  "note",
+                  "createdAt",
+                  "submittedAt",
+                  "operationId",
+                  "totals",
+                  "lines"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -477,7 +477,10 @@ export async function processOrder(
     const at = await store.admin.lineLocations(order.orderId);
     withLocations = {
       ...order,
-      lines: order.lines.map((l) => ({ ...l, locationId: l.locationId ?? at.get(l.lineId) ?? null })),
+      lines: order.lines.map((l) => ({
+        ...l,
+        locationId: l.locationId ?? at.get(l.lineId) ?? null,
+      })),
     };
   }
   const synced = await execute(deps, ops.syncShopifyOrder, {

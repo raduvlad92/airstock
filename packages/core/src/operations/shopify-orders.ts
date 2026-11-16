@@ -2,13 +2,13 @@ import type { Tx } from '@airstock/db';
 import { z } from 'zod';
 import type { AuditEvent } from '../audit.ts';
 import { compare, normalize } from '../catalog/decimal.ts';
-import { exactProduct } from '../stock/engine.ts';
-import { applyChanges } from '../stock/adjust.ts';
 import { errors } from '../errors.ts';
 import type { AnyOperation, HandlerContext, HandlerResult } from '../registry.ts';
 import { defineOperation } from '../registry.ts';
 import { Id } from '../schemas.ts';
-import { salesMaps, shopifyChannel } from '../shopify/targets.ts';
+import { SHOPIFY_PUSH_TOPIC, salesMaps, shopifyChannel } from '../shopify/targets.ts';
+import { applyChanges } from '../stock/adjust.ts';
+import { exactProduct } from '../stock/engine.ts';
 import type { WebhookEmit } from '../webhooks/events.ts';
 import {
   fulfillReservation,
@@ -103,6 +103,8 @@ const SyncResult = z.object({
 });
 
 interface Acc {
+  /** Levels whose record of Shopify's quantity changed: pushed after commit. */
+  levels: Set<string>;
   outbox: Array<{ topic: string; payload: unknown }>;
   events: AuditEvent[];
   webhooks: WebhookEmit[];
@@ -175,6 +177,7 @@ function units(line: Pick<LineRow, 'bundle' | 'per_item'>, items: number): strin
 /** Lowers Airstock's record of Shopify's available, unless Shopify's own read is newer. */
 async function shopifyTook(
   tx: Tx,
+  acc: Acc,
   connectionId: string,
   item: string | null,
   shopifyLocationId: string | null,
@@ -182,6 +185,9 @@ async function shopifyTook(
   at: string,
 ): Promise<void> {
   if (!item || !shopifyLocationId || items === 0) return;
+  // Shopify now shows a number Airstock's availability may not match (an oversold order, a
+  // restock): the level is pushed after commit, from the corrected record.
+  acc.levels.add(`${item}@${shopifyLocationId}`);
   await tx.query(
     `update shopify_inventory_levels set expected_available = expected_available - $4,
        updated_at = now()
@@ -202,10 +208,10 @@ async function lineReservations(tx: Tx, connectionId: string, lineId: string) {
 }
 
 async function setReservationOpen(tx: Tx, reservationId: string, openItems: number) {
-  await tx.query(
-    'update shopify_line_reservations set open_items = $2 where reservation_id = $1',
-    [reservationId, openItems],
-  );
+  await tx.query('update shopify_line_reservations set open_items = $2 where reservation_id = $1', [
+    reservationId,
+    openItems,
+  ]);
 }
 
 /** Releases Shopify items of a line, newest reservation first. */
@@ -361,9 +367,7 @@ async function fulfillItems(
         parts.map((p) => ({
           reservationId: p.id,
           variantId: p.variant_id,
-          units: line.bundle
-            ? normalize(exactProduct(String(take), p.per))
-            : units(line, take),
+          units: line.bundle ? normalize(exactProduct(String(take), p.per)) : units(line, take),
         })),
       );
       // Whole Shopify items covered in the scope.
@@ -562,7 +566,13 @@ export const syncShopifyOrder = defineOperation({
       returns: [],
       skipped: null,
     };
-    const acc: Acc = { outbox: [], events: [], webhooks: [], alertVariants: [] };
+    const acc: Acc = {
+      levels: new Set(),
+      outbox: [],
+      events: [],
+      webhooks: [],
+      alertVariants: [],
+    };
     const [connection] = await ctx.tx.query<{ status: string; created_at: Date }>(
       'select status, created_at from shopify_connections where id = $1 for key share',
       [connectionId],
@@ -693,6 +703,7 @@ export const syncShopifyOrder = defineOperation({
       // Shopify took the ordered units out of its available when it accepted the order.
       await shopifyTook(
         ctx.tx,
+        acc,
         connectionId,
         row.inventory_item_id,
         row.shopify_location_id,
@@ -711,7 +722,12 @@ export const syncShopifyOrder = defineOperation({
           await ctx.tx.query<{
             shopify_fulfillment_id: string;
             status: string;
-            lines: Array<{ lineId: string; items: number; released: number; operationIds: string[] }>;
+            lines: Array<{
+              lineId: string;
+              items: number;
+              released: number;
+              operationIds: string[];
+            }>;
           }>(
             `select shopify_fulfillment_id, status, lines from shopify_fulfillments
              where connection_id = $1 and shopify_fulfillment_id = any($2::text[]) for update`,
@@ -727,8 +743,12 @@ export const syncShopifyOrder = defineOperation({
         const reference = `shopify:fulfillment/${f.fulfillmentId}`;
         if (!was && f.status === 'success') {
           const scope = scopeOf(f.locationId);
-          const done: Array<{ lineId: string; items: number; released: number; operationIds: string[] }> =
-            [];
+          const done: Array<{
+            lineId: string;
+            items: number;
+            released: number;
+            operationIds: string[];
+          }> = [];
           for (const fl of f.lines) {
             const line = byLine.get(fl.lineId);
             if (!line || !live(line) || fl.quantity === 0) continue;
@@ -835,6 +855,7 @@ export const syncShopifyOrder = defineOperation({
         if (effect !== before && !cancelled) {
           await shopifyTook(
             ctx.tx,
+            acc,
             connectionId,
             line.inventory_item_id,
             line.shopify_location_id,
@@ -867,6 +888,7 @@ export const syncShopifyOrder = defineOperation({
           if (line && live(line) && restocked) {
             await shopifyTook(
               ctx.tx,
+              acc,
               connectionId,
               line.inventory_item_id,
               rl.locationId,
@@ -878,14 +900,31 @@ export const syncShopifyOrder = defineOperation({
             rl.restockType === 'return' ||
             (rl.restockType === 'legacy_restock' && (line?.fulfilled_items ?? 0) > 0);
           if (line && live(line) && returned) {
-            returnId = await startReturn(ctx, acc, order.orderId, line, r.refundId, rl.quantity, scopeOf(rl.locationId));
+            returnId = await startReturn(
+              ctx,
+              acc,
+              order.orderId,
+              line,
+              r.refundId,
+              rl.quantity,
+              scopeOf(rl.locationId),
+            );
             result.returns.push(returnId);
           }
           await ctx.tx.query(
             `insert into shopify_refund_lines (shop_id, connection_id, shopify_refund_id, shopify_line_id,
                items, restock_type, shopify_location_id, refunded_at, return_id)
              values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7, $8)`,
-            [connectionId, r.refundId, rl.lineId, rl.quantity, rl.restockType, rl.locationId, r.createdAt, returnId],
+            [
+              connectionId,
+              r.refundId,
+              rl.lineId,
+              rl.quantity,
+              rl.restockType,
+              rl.locationId,
+              r.createdAt,
+              returnId,
+            ],
           );
         }
       }
@@ -909,6 +948,13 @@ export const syncShopifyOrder = defineOperation({
           line.outcome,
         ],
       );
+    }
+    for (const level of acc.levels) {
+      const [item, location] = level.split('@');
+      acc.outbox.push({
+        topic: SHOPIFY_PUSH_TOPIC,
+        payload: { connectionId, inventoryItemIds: [item], shopifyLocationIds: [location] },
+      });
     }
     return {
       result,
@@ -975,4 +1021,3 @@ async function startReturn(
 }
 
 export const shopifyOrderCallbacks = [syncShopifyOrder] as const;
-

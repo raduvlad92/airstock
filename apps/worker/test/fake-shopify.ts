@@ -292,7 +292,8 @@ export class FakeStore implements ShopifyAdmin {
     for (const l of lines) {
       const line = order.lines.find((x) => x.lineId === l.lineId)!;
       line.currentQuantity = (line.currentQuantity ?? line.quantity) - l.quantity;
-      if (l.restockType !== 'no_restock') this.take(line.variantId, l.location ?? '1001', -l.quantity);
+      if (l.restockType !== 'no_restock')
+        this.take(line.variantId, l.location ?? '1001', -l.quantity);
     }
     order.refunds!.push(refund);
     this.touch(order);

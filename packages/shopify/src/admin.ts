@@ -315,7 +315,12 @@ interface RawOrder {
   updatedAt: string | null;
   cancelledAt: string | null;
   lineItems: {
-    nodes: Array<{ id: string; quantity: number; currentQuantity: number; variant: { id: string } | null }>;
+    nodes: Array<{
+      id: string;
+      quantity: number;
+      currentQuantity: number;
+      variant: { id: string } | null;
+    }>;
   };
   fulfillments: Array<{
     id: string;
@@ -338,7 +343,14 @@ interface RawOrder {
   }>;
 }
 
-const FULFILLMENT_STATUSES = ['success', 'cancelled', 'error', 'failure', 'open', 'pending'] as const;
+const FULFILLMENT_STATUSES = [
+  'success',
+  'cancelled',
+  'error',
+  'failure',
+  'open',
+  'pending',
+] as const;
 const RESTOCK_TYPES = ['cancel', 'return', 'no_restock', 'legacy_restock'] as const;
 
 /** An Admin API order as the state the order sync applies. No customer fields are read. */
@@ -606,7 +618,8 @@ export function httpShopifyAdmin(
         const location = fo.assignedLocation?.location?.id;
         if (!location) continue;
         for (const li of fo.lineItems.nodes) {
-          if (!out.has(numeric(li.lineItem.id))) out.set(numeric(li.lineItem.id), numeric(location));
+          if (!out.has(numeric(li.lineItem.id)))
+            out.set(numeric(li.lineItem.id), numeric(location));
         }
       }
       return out;

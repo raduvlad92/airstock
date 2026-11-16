@@ -452,4 +452,40 @@ describe('Shopify connector review findings', () => {
     expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
     expect(s.store.available(second.shopify)).toBe(4);
   });
+  // FINDING 11 (missed updates never reconciled; main). The reconciler reads orders by update
+  // time from `orders_synced_through` less a 5-minute overlap, and stops a run after 250 orders
+  // or its 20-second budget (one Admin read per order, 25 per page). When a run stops early, the
+  // cursor is the last order read; the next run starts 5 minutes before it, so if more orders
+  // than one run reads were updated within those 5 minutes (a bulk fulfillment, a sale, or the
+  // backlog after an outage, exactly when webhooks go missing), every run reads the same first
+  // orders again and never reaches the rest. New orders are rescued by the level comparison's
+  // catch-up; fulfillments, which do not change Shopify's available, are not. Here maxOrders 2
+  // and pages of 1 stand in for the budget.
+  it.fails('F11: the reconciler gets past more orders than one run reads', async () => {
+    const s = await setupItems('Busy hour', [10]);
+    const [only] = s.items as [Many['items'][0]];
+    const orders = [];
+    for (let i = 0; i < 3; i++) {
+      const order = s.store.placeOrder([{ variant: only.shopify, quantity: 1 }]);
+      await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(order));
+      orders.push(order);
+    }
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    // The warehouse ships all three at once; the fulfillment webhooks never come.
+    for (const order of orders) s.store.fulfill(order);
+    s.store.orderPageSize = 1;
+    for (let run = 0; run < 4; run++) {
+      await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, {
+        daily: false,
+        maxOrders: 2,
+      });
+    }
+    const [stock] = await ownerQuery<{ on_hand: string; allocated: string }>(
+      `select sum(on_hand)::text as on_hand, sum(allocated)::text as allocated
+       from inventory_positions where shop_id = $1 and variant_id = $2`,
+      [s.m.shopId, only.variantId],
+    );
+    expect(stock).toEqual({ on_hand: '7.000000', allocated: '0.000000' });
+  });
 });

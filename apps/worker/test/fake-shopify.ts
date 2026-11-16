@@ -31,6 +31,8 @@ export class FakeStore implements ShopifyAdmin {
   reads = 0;
   /** The next writes fail as throttled (Shopify's cost limit). */
   throttleNext = 0;
+  /** Orders per page of the search by updated time (Shopify's is 25); one page by default. */
+  orderPageSize = Number.POSITIVE_INFINITY;
   /** Orders Shopify's search by updated time does not list yet (its index trails). */
   readonly searchLag = new Set<string>();
   /** Pictures uploaded to staged storage, by resource URL. */
@@ -493,11 +495,16 @@ export class FakeStore implements ShopifyAdmin {
     const order = this.orders.find((o) => o.orderId === orderId);
     return order ? structuredClone(order) : null;
   }
-  async ordersUpdatedSince(since: string) {
+  async ordersUpdatedSince(since: string, after: string | null = null) {
     const orders = this.orders
       .filter((o) => (o.updatedAt ?? o.createdAt) >= since && !this.searchLag.has(o.orderId))
       .sort((a, b) => ((a.updatedAt ?? '') < (b.updatedAt ?? '') ? -1 : 1));
-    return { orders: structuredClone(orders), next: null };
+    const start = after ? Number(after) : 0;
+    const end = start + this.orderPageSize;
+    return {
+      orders: structuredClone(orders.slice(start, end)),
+      next: end < orders.length ? String(end) : null,
+    };
   }
   async lineLocations(orderId: string) {
     const order = this.orders.find((o) => o.orderId === orderId);

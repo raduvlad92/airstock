@@ -3,7 +3,7 @@
     "post": {
       "operationId": "catalog.media.uploads.create",
       "summary": "Start uploading a picture or attachment",
-      "description": "Declare the file name, type, size in bytes, and SHA-256 (hex). The answer has upload URLs valid for 15 minutes: PUT the original to the first; for images also PUT a thumbnail (WebP or JPEG, longest side up to 320 px) and a display image (up to 1,600 px). Then finalize. A wrong checksum, a file that is not what it says, or an oversize file is refused and the upload fails.",
+      "description": "Declare the file name, type, size in bytes, and SHA-256 (hex). The answer has upload URLs valid for 15 minutes: PUT the original to the first; for images also PUT a thumbnail (WebP or JPEG, longest side up to 320 px) and a display image (up to 1,600 px). Then finalize. A wrong checksum, a file that is not what it says, or an oversize file is refused and the upload fails. An image original other than a GIF must fit the shop’s limit on its longest side (2,048 px unless the shop changed it; the original’s maxSide), or it is refused with original_too_large: shrink it first.",
       "x-permission": "catalog.write",
       "x-connection-scope": "catalog:write",
       "x-audit-action": "catalog.media.upload_started",
@@ -134,7 +134,7 @@
                           "type": "number"
                         },
                         "maxSide": {
-                          "description": "Longest side in pixels, for derivatives.",
+                          "description": "Longest side in pixels: for derivatives, and for an image original the shop’s limit (null keeps full size).",
                           "type": [
                             "number",
                             "null"

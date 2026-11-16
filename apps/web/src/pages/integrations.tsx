@@ -115,6 +115,12 @@ export function AiConnectionsPage() {
                   <td className="scopes">{c.scopes.join(', ')}</td>
                   <td>
                     <Badge tone={c.status === 'active' ? 'ok' : 'muted'}>{c.status}</Badge>
+                    {c.replacedBy ? (
+                      <div className="fine">
+                        Replaced by a new consent
+                        {c.revokedAt ? ` on ${formatDateTime(c.revokedAt)}` : ''}
+                      </div>
+                    ) : null}
                   </td>
                   <td>{formatDateTime(c.createdAt)}</td>
                   <td>{formatDateTime(c.lastUsedAt)}</td>

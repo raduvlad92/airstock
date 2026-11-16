@@ -37,6 +37,23 @@ export const MEDIA_LIMITS = {
   altTextLength: 1000,
 } as const;
 
+/**
+ * The longest side a shop may keep for an image original, in pixels (plan D19). The dashboard
+ * shrinks larger pictures before uploading them, and the upload refuses a larger original from
+ * any client. A shop can also keep full size (null).
+ */
+export const ORIGINAL_MAX_SIDES = [1024, 2048, 4096] as const;
+export type OriginalMaxSide = (typeof ORIGINAL_MAX_SIDES)[number];
+export const DEFAULT_ORIGINAL_MAX_SIDE: OriginalMaxSide = 2048;
+
+/**
+ * Whether the shop's original limit applies to a type: every image except GIF, which may be
+ * animated and is kept as it is.
+ */
+export function originalLimitApplies(type: MediaType): boolean {
+  return mediaKind(type) === 'image' && type !== 'image/gif';
+}
+
 /** Suggested roles (PRD 4.5); merchants can use any other. */
 export const STARTER_ROLES = [
   'primary',
@@ -118,9 +135,84 @@ const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
 const u16le = (b: Uint8Array, at: number) => b[at]! | (b[at + 1]! << 8);
 const u24le = (b: Uint8Array, at: number) => b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16);
 
+interface Box {
+  type: string;
+  /** Where the box's content starts, after its header. */
+  start: number;
+  end: number;
+}
+
+/** The ISO base media boxes between `from` and `to`; the last may run past the bytes given. */
+function boxesIn(b: Uint8Array, from: number, to: number): Box[] {
+  const out: Box[] = [];
+  let at = from;
+  while (at + 8 <= Math.min(to, b.length)) {
+    let size = readU32(b, at);
+    let header = 8;
+    if (size === 1) {
+      if (at + 16 > b.length) break;
+      size = readU32(b, at + 8) * 2 ** 32 + readU32(b, at + 12);
+      header = 16;
+    } else if (size === 0) {
+      size = to - at;
+    }
+    if (size < header) break;
+    const type = String.fromCharCode(b[at + 4]!, b[at + 5]!, b[at + 6]!, b[at + 7]!);
+    out.push({ type, start: at + header, end: at + size });
+    at += size;
+  }
+  return out;
+}
+
 /**
- * Pixel size from an image's header, without decoding it. Null when the header is not in
- * `head` (a JPEG with a long EXIF block, say) or the type keeps it elsewhere (AVIF).
+ * An AVIF's size from the `ispe` property of its primary item: `meta` names the item (`pitm`),
+ * `ipma` lists its properties, and `ipco` holds them. Null when any of these is missing or not in
+ * `head`, rather than a guess.
+ */
+function avifSize(head: Uint8Array): { width: number; height: number } | null {
+  const complete = (box: Box | undefined): box is Box => !!box && box.end <= head.length;
+  const meta = boxesIn(head, 0, head.length).find((x) => x.type === 'meta');
+  if (!complete(meta)) return null;
+  // meta, pitm, ipma, and ispe are full boxes: one byte of version and three of flags first.
+  const inMeta = boxesIn(head, meta.start + 4, meta.end);
+  const pitm = inMeta.find((x) => x.type === 'pitm');
+  const iprp = inMeta.find((x) => x.type === 'iprp');
+  if (!complete(pitm) || !complete(iprp)) return null;
+  const primary =
+    head[pitm.start] === 0 ? u16be(head, pitm.start + 4) : readU32(head, pitm.start + 4);
+  const inIprp = boxesIn(head, iprp.start, iprp.end);
+  const ipco = inIprp.find((x) => x.type === 'ipco');
+  if (!complete(ipco)) return null;
+  const properties = boxesIn(head, ipco.start, ipco.end);
+  for (const ipma of inIprp.filter((x) => x.type === 'ipma' && x.end <= head.length)) {
+    const version = head[ipma.start]!;
+    const wideIndex = (head[ipma.start + 3]! & 1) === 1;
+    let at = ipma.start + 8;
+    const entries = readU32(head, ipma.start + 4);
+    for (let e = 0; e < entries && at < ipma.end; e++) {
+      const item = version < 1 ? u16be(head, at) : readU32(head, at);
+      at += version < 1 ? 2 : 4;
+      const count = head[at]!;
+      at += 1;
+      for (let i = 0; i < count; i++) {
+        const index = wideIndex ? u16be(head, at) & 0x7fff : head[at]! & 0x7f;
+        at += wideIndex ? 2 : 1;
+        const property = properties[index - 1];
+        if (item === primary && property?.type === 'ispe' && property.start + 12 <= head.length) {
+          const width = readU32(head, property.start + 4);
+          const height = readU32(head, property.start + 8);
+          return width > 0 && height > 0 ? { width, height } : null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Pixel size from an image's header, without decoding it: JPEG start of frame, PNG IHDR, WebP
+ * VP8, VP8L, or VP8X, GIF screen size, and AVIF `ispe`. Null when the header is not in `head` (a
+ * JPEG with a long EXIF block, say) or cannot be read simply.
  */
 export function imageSize(
   head: Uint8Array,
@@ -168,6 +260,8 @@ export function imageSize(
       }
       return null;
     }
+    case 'image/avif':
+      return avifSize(head);
     default:
       return null;
   }

@@ -583,6 +583,107 @@ describe('connect consent and shop binding (plan Section 7.2, option A)', () => 
     expect((await mcpCall(await t.sign(usedClaims), 'get_shop_context')).status).toBe(200);
   });
 
+  it('revokes the same person’s earlier connections from the same client and shop (D20)', async () => {
+    const user = newUser();
+    const { cookie } = await signIn(user);
+    const shopA = await createShop(cookie, 'Reconsent A');
+    const shopB = await createShop(cookie, 'Reconsent B');
+    // Another member of shop A, connecting the same client.
+    const colleague = newUser();
+    const colleagueSession = await signIn(colleague);
+    await ownerQuery(
+      `insert into memberships (shop_id, id, user_id, role)
+       select $1, $2, id, 'manager' from users where workos_user_id = $3`,
+      [shopA, uuidv7(), colleague.id],
+    );
+
+    const grantOf = () => t.workos.completed.at(-1)!.consent[0]!.choices[0]!.value;
+    const consent = async (session: string, shop: string) => {
+      await approve(session, shop, ['shop:read']);
+      return grantOf();
+    };
+    const call = async (grant: string, clientId: string, sub = user.id) =>
+      (
+        await mcpCall(
+          await t.sign({ sub, client_id: clientId, [GRANT_CLAIM]: grant }),
+          'get_shop_context',
+        )
+      ).status;
+
+    const first = await consent(cookie, shopA);
+    expect(await call(first, 'client_chatgpt')).toBe(200);
+    const otherClient = await consent(cookie, shopA);
+    expect(await call(otherClient, 'client_claude')).toBe(200);
+    const otherShop = await consent(cookie, shopB);
+    expect(await call(otherShop, 'client_chatgpt')).toBe(200);
+    const otherUser = await consent(colleagueSession.cookie, shopA);
+    expect(await call(otherUser, 'client_chatgpt', colleague.id)).toBe(200);
+
+    // A new consent changes nothing until its first token binds it, so an abandoned one cannot
+    // cut off the working connection.
+    const second = await consent(cookie, shopA);
+    expect(await call(first, 'client_chatgpt')).toBe(200);
+    expect(await call(second, 'client_chatgpt')).toBe(200);
+
+    // The binding revoked the first connection; the earlier token fails on its next request.
+    expect(await call(first, 'client_chatgpt')).toBe(401);
+    expect(await call(otherClient, 'client_claude')).toBe(200);
+    expect(await call(otherShop, 'client_chatgpt')).toBe(200);
+    expect(await call(otherUser, 'client_chatgpt', colleague.id)).toBe(200);
+    const status = async (ids: string[]) =>
+      ownerQuery<{ id: string; status: string; replaced_by: string | null }>(
+        `select id, status, replaced_by from connection_grants
+         where id = any($1::uuid[]) order by id`,
+        [ids],
+      );
+    expect(await status([first, otherClient, otherShop, otherUser, second])).toEqual([
+      { id: first, status: 'revoked', replaced_by: second },
+      { id: otherClient, status: 'active', replaced_by: null },
+      { id: otherShop, status: 'active', replaced_by: null },
+      { id: otherUser, status: 'active', replaced_by: null },
+      { id: second, status: 'active', replaced_by: null },
+    ]);
+
+    // One revocation event, with the reason and the new connection.
+    const events = await ownerQuery(
+      `select target_id, actor_type, actor_id, client_id, source, outcome, reason, changes, context
+       from audit_events where action = 'connection.revoked' and shop_id = any($1::uuid[])`,
+      [[shopA, shopB]],
+    );
+    expect(events).toEqual([
+      {
+        target_id: first,
+        actor_type: 'connection',
+        actor_id: second,
+        client_id: 'client_chatgpt',
+        source: 'mcp',
+        outcome: 'succeeded',
+        reason: 'Replaced by a new consent from the same person and client.',
+        changes: { status: 'revoked', replacedBy: second },
+        context: { trigger: 'reconsent', replacedBy: second, clientId: 'client_chatgpt' },
+      },
+    ]);
+
+    // The dashboard says why the connection stopped.
+    const listed = await json(await dashboardApi(cookie, `/shops/${shopA}/connections`));
+    const row = listed.connections.find((c: { grantId: string }) => c.grantId === first);
+    expect(row).toMatchObject({ status: 'revoked', replacedBy: second });
+    expect(row.revokedAt).not.toBeNull();
+
+    // A consent bound after a newer one from the same client is the one replaced.
+    const older = await consent(cookie, shopA);
+    const newer = await consent(cookie, shopA);
+    expect(await call(newer, 'client_chatgpt')).toBe(200);
+    expect(await call(older, 'client_chatgpt')).toBe(401);
+    expect(await call(second, 'client_chatgpt')).toBe(401);
+    expect(await call(newer, 'client_chatgpt')).toBe(200);
+    expect(await status([second, older, newer])).toEqual([
+      { id: second, status: 'revoked', replaced_by: newer },
+      { id: older, status: 'revoked', replaced_by: newer },
+      { id: newer, status: 'active', replaced_by: null },
+    ]);
+  });
+
   it('rejects tokens issued to an agent identity rather than a person', async () => {
     const user = newUser();
     const { cookie } = await signIn(user);

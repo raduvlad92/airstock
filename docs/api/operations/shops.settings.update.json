@@ -2,8 +2,8 @@
   "/api/v1/shops/{shopId}/settings": {
     "post": {
       "operationId": "shops.settings.update",
-      "summary": "Change the shop name, time zone, or display units",
-      "description": "Display units choose metric or imperial in the dashboard (PRD 3.1). Stored values keep the unit they were entered in. The currency cannot change once set.",
+      "summary": "Change the shop name, time zone, display units, or largest picture original",
+      "description": "Display units choose metric or imperial in the dashboard (PRD 3.1). Stored values keep the unit they were entered in. The largest original is the longest side, in pixels, of the picture originals the shop keeps: 1,024, 2,048 (the default), or 4,096, or null for full size. The currency cannot change once set.",
       "x-permission": "shop.manage",
       "x-connection-scope": "session",
       "x-audit-action": "shop.settings.updated",
@@ -51,6 +51,22 @@
                     "metric",
                     "imperial"
                   ]
+                },
+                "mediaOriginalMaxSide": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "enum": [
+                        1024,
+                        2048,
+                        4096
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Longest side in pixels of the picture originals the shop keeps; larger ones are shrunk before upload or refused. Null keeps full size."
                 }
               }
             }
@@ -74,6 +90,22 @@
                   "displayUnits": {
                     "type": "string"
                   },
+                  "mediaOriginalMaxSide": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "enum": [
+                          1024,
+                          2048,
+                          4096
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Longest side in pixels of the picture originals the shop keeps; larger ones are shrunk before upload or refused. Null keeps full size."
+                  },
                   "version": {
                     "type": "number"
                   }
@@ -82,6 +114,7 @@
                   "name",
                   "timezone",
                   "displayUnits",
+                  "mediaOriginalMaxSide",
                   "version"
                 ],
                 "additionalProperties": false

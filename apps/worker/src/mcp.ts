@@ -70,6 +70,7 @@ async function authenticate(
   db: Database,
   config: McpAuthConfig,
   header: string | undefined,
+  requestId: string,
 ): Promise<AuthResult> {
   if (!header?.startsWith('Bearer ')) return { caller: null, reason: 'no_token' };
   let payload: Awaited<ReturnType<typeof jwtVerify>>['payload'];
@@ -97,7 +98,11 @@ async function authenticate(
     // Claim names only, never values: enough to see what an authorization server sends.
     return { caller: null, reason: 'claims_missing', detail: { claims: Object.keys(payload) } };
   }
-  const caller = await resolveConnectionGrant(db, grantId, { subject: payload.sub, clientId });
+  const caller = await resolveConnectionGrant(db, grantId, {
+    subject: payload.sub,
+    clientId,
+    requestId,
+  });
   return caller ? { caller } : { caller: null, reason: 'grant_rejected' };
 }
 
@@ -187,7 +192,12 @@ export function mountMcp(app: Hono<AppEnv>, deps: AppDeps, limits: RequestLimits
         c.get('requestId'),
       );
     }
-    const auth = await authenticate(c.get('db'), config, c.req.header('authorization'));
+    const auth = await authenticate(
+      c.get('db'),
+      config,
+      c.req.header('authorization'),
+      c.get('requestId'),
+    );
     const caller = auth.caller;
     if (!caller) {
       if (!auth.caller && auth.reason !== 'no_token') {

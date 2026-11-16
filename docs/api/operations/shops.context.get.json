@@ -48,6 +48,22 @@
                           "metric",
                           "imperial"
                         ]
+                      },
+                      "mediaOriginalMaxSide": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "enum": [
+                              1024,
+                              2048,
+                              4096
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Longest side in pixels of the picture originals the shop keeps; larger ones are shrunk before upload or refused. Null keeps full size."
                       }
                     },
                     "required": [
@@ -55,7 +71,8 @@
                       "name",
                       "currency",
                       "timezone",
-                      "displayUnits"
+                      "displayUnits",
+                      "mediaOriginalMaxSide"
                     ],
                     "additionalProperties": false
                   },

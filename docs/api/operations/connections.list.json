@@ -74,6 +74,23 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "revokedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "replacedBy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -85,7 +102,9 @@
                         "membershipId",
                         "createdAt",
                         "boundAt",
-                        "lastUsedAt"
+                        "lastUsedAt",
+                        "revokedAt",
+                        "replacedBy"
                       ],
                       "additionalProperties": false
                     }

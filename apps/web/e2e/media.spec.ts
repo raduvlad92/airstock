@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { crc32, deflateSync } from 'node:zlib';
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import pg from 'pg';
 
 // Milestone N4 (F11) in a real browser: the dashboard makes the WebP derivatives with a canvas,
@@ -52,21 +52,13 @@ function png(width: number, height: number): Buffer {
   ]);
 }
 
-test('a picture uploads with browser-made derivatives and shows as a signed thumbnail', async ({
-  page,
-}) => {
-  const violations: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error' && /Content Security Policy|Refused to/.test(message.text())) {
-      violations.push(message.text());
-    }
-  });
-
-  await page.goto('/__e2e/login?email=e2e-media@example.test');
-  await page.getByLabel('Shop name').fill('Media shop');
+/** Signs in, creates a shop with one product, and opens the product's Pictures tab. */
+async function openPictures(page: Page, email: string, shopName: string): Promise<string> {
+  await page.goto(`/__e2e/login?email=${email}`);
+  await page.getByLabel('Shop name').fill(shopName);
   await page.getByRole('button', { name: 'Create shop' }).click();
   await expect(page.getByRole('grid', { name: 'Products' })).toBeVisible();
-  const shopId = new URL(page.url()).pathname.split('/')[3];
+  const shopId = new URL(page.url()).pathname.split('/')[3]!;
   await page.evaluate(
     async ([shop]) => {
       const res = await fetch(`/api/v1/shops/${shop}/items`, {
@@ -89,6 +81,20 @@ test('a picture uploads with browser-made derivatives and shows as a signed thum
   await expect(panel.getByRole('heading', { name: 'Oak chair' })).toBeVisible();
   await panel.getByRole('tab', { name: 'Pictures' }).click();
   await expect(page.getByText('No pictures or attachments yet.')).toBeVisible();
+  return shopId;
+}
+
+test('a picture uploads with browser-made derivatives and shows as a signed thumbnail', async ({
+  page,
+}) => {
+  const violations: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /Content Security Policy|Refused to/.test(message.text())) {
+      violations.push(message.text());
+    }
+  });
+
+  const shopId = await openPictures(page, 'e2e-media@example.test', 'Media shop');
 
   const original = png(2000, 1500);
   await page.getByLabel('Choose files').setInputFiles({
@@ -156,4 +162,79 @@ test('a picture uploads with browser-made derivatives and shows as a signed thum
     ]),
   );
   expect(violations).toEqual([]);
+});
+
+test('an original larger than the shop keeps is shrunk in the browser before upload (D19)', async ({
+  page,
+}) => {
+  const shopId = await openPictures(page, 'e2e-media-limit@example.test', 'Limit shop');
+  type Asset = {
+    file_name: string;
+    content_type: string;
+    size_bytes: string;
+    sha256: string;
+    width: number;
+    height: number;
+    derivatives: Record<string, { width: number; height: number }>;
+  };
+  const assets = () =>
+    query<Asset>(
+      `select file_name, content_type, size_bytes, sha256, width, height, derivatives
+       from media_assets where shop_id = $1 order by created_at`,
+      [shopId],
+    );
+
+  // The default keeps 2,048 px: a 3,000 px PNG arrives as a 2,048 px PNG, hashed after shrinking.
+  const wide = png(3000, 2000);
+  await page.getByLabel('Choose files').setInputFiles({
+    name: 'wide.png',
+    mimeType: 'image/png',
+    buffer: wide,
+  });
+  await expect(page.locator('.media-thumb img')).toHaveCount(1, { timeout: 30_000 });
+  const [shrunk] = await assets();
+  expect(shrunk).toMatchObject({
+    file_name: 'wide.png',
+    content_type: 'image/png',
+    width: 2048,
+    height: 1365,
+  });
+  expect(shrunk!.sha256).not.toBe(createHash('sha256').update(wide).digest('hex'));
+  expect(shrunk!.derivatives.display).toMatchObject({ width: 1600, height: 1066 });
+
+  // A manager chooses 1,024 px in the shop settings; the next upload follows it.
+  await page.goto(`/app/shops/${shopId}/settings/shop`);
+  const setting = page.getByLabel('Largest original');
+  await expect(setting).toHaveValue('2048');
+  await setting.selectOption('1024');
+  await expect
+    .poll(
+      async () =>
+        (
+          await query<{ n: number }>(
+            'select media_original_max_side as n from shops where id = $1',
+            [shopId],
+          )
+        )[0]?.n,
+    )
+    .toBe(1024);
+  const [product] = await query<{ id: string }>('select id from products where shop_id = $1', [
+    shopId,
+  ]);
+  await page.goto(`/app/shops/${shopId}/products?item=${product!.id}`);
+  await page
+    .getByRole('complementary', { name: 'Product details' })
+    .getByRole('tab', { name: 'Pictures' })
+    .click();
+  await expect(page.locator('.media-thumb img')).toHaveCount(1);
+  await page.getByLabel('Choose files').setInputFiles({
+    name: 'tall.png',
+    mimeType: 'image/png',
+    buffer: png(1200, 1800),
+  });
+  await expect(page.locator('.media-thumb img')).toHaveCount(2, { timeout: 30_000 });
+  const [, second] = await assets();
+  expect(second).toMatchObject({ width: 683, height: 1024 });
+  // The display image is never larger than the original it was made from.
+  expect(second!.derivatives.display).toMatchObject({ width: 683, height: 1024 });
 });

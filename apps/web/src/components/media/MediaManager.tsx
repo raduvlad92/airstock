@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { roleLabel } from '@airstock/core/media';
+import { DEFAULT_ORIGINAL_MAX_SIDE, roleLabel } from '@airstock/core/media';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type DragEvent, useId, useRef, useState } from 'react';
 import { api, command, errorMessage, type Out } from '../../api.ts';
@@ -63,6 +63,10 @@ export function MediaManager({ shopId, productId }: { shopId: string; productId:
   const queryKey = ['shop', shopId, 'media', productId];
   const context = useShopContext(shopId);
   const canWrite = can(context.data, 'catalog.write');
+  // Null keeps originals at full size, so only a missing context falls back to the default.
+  const originalMaxSide = context.data
+    ? context.data.shop.mediaOriginalMaxSide
+    : DEFAULT_ORIGINAL_MAX_SIDE;
   // Signed links stay valid for at least 15 minutes; refetch well before.
   const list = useQuery({
     queryKey,
@@ -96,7 +100,7 @@ export function MediaManager({ shopId, productId }: { shopId: string; productId:
     for (const [i, file] of files.entries()) {
       const row = rows[i]!;
       try {
-        const prepared = await prepareFile(file);
+        const prepared = await prepareFile(file, undefined, { originalMaxSide });
         update(row.id, { state: 'uploading', name: prepared.fileName });
         await uploadToProduct(shopId, productId, prepared, (share) =>
           update(row.id, { progress: share }),

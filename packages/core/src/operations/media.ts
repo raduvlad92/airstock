@@ -10,6 +10,7 @@ import {
   maxBytes,
   mediaKind,
   normalizeRole,
+  originalLimitApplies,
   UPLOAD_PARTS,
 } from '../media/files.ts';
 import {
@@ -269,14 +270,19 @@ const UploadOut = z.object({
   method: z.literal('PUT'),
   contentTypes: z.array(z.string()),
   maxBytes: z.number(),
-  maxSide: z.number().nullable().describe('Longest side in pixels, for derivatives.'),
+  maxSide: z
+    .number()
+    .nullable()
+    .describe(
+      'Longest side in pixels: for derivatives, and for an image original the shop’s limit (null keeps full size).',
+    ),
 });
 
 export const createUpload = defineOperation({
   id: 'catalog.media.uploads.create',
   summary: 'Start uploading a picture or attachment',
   description:
-    'Declare the file name, type, size in bytes, and SHA-256 (hex). The answer has upload URLs valid for 15 minutes: PUT the original to the first; for images also PUT a thumbnail (WebP or JPEG, longest side up to 320 px) and a display image (up to 1,600 px). Then finalize. A wrong checksum, a file that is not what it says, or an oversize file is refused and the upload fails.',
+    'Declare the file name, type, size in bytes, and SHA-256 (hex). The answer has upload URLs valid for 15 minutes: PUT the original to the first; for images also PUT a thumbnail (WebP or JPEG, longest side up to 320 px) and a display image (up to 1,600 px). Then finalize. A wrong checksum, a file that is not what it says, or an oversize file is refused and the upload fails. An image original other than a GIF must fit the shop’s limit on its longest side (2,048 px unless the shop changed it; the original’s maxSide), or it is refused with original_too_large: shrink it first.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -328,6 +334,13 @@ export const createUpload = defineOperation({
         );
       }
     }
+    const [shop] = await ctx.tx.query<{ original_max_side: number | null }>(
+      'select media_original_max_side as original_max_side from shops where id = $1',
+      [ctx.shopId],
+    );
+    const originalMaxSide = originalLimitApplies(input.contentType)
+      ? (shop?.original_max_side ?? null)
+      : null;
     const intentId = ctx.newId();
     const mediaId = ctx.newId();
     const [row] = await ctx.tx.query<{ expires_at: Date }>(
@@ -356,7 +369,7 @@ export const createUpload = defineOperation({
         method: 'PUT' as const,
         contentTypes: derivative ? [...DERIVATIVE_TYPES] : [input.contentType],
         maxBytes: derivative ? derivative.maxBytes : input.size,
-        maxSide: derivative ? derivative.maxSide : null,
+        maxSide: derivative ? derivative.maxSide : originalMaxSide,
       };
     });
     return {

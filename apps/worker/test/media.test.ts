@@ -1,7 +1,23 @@
-import { hmacMediaDelivery, sweepMediaUploads } from '@airstock/core';
+import {
+  execute,
+  hmacMediaDelivery,
+  ops,
+  sessionCaller,
+  sweepMediaUploads,
+  uuidv7,
+} from '@airstock/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery, type SeededShop, seedShop } from '../../../test/helpers.ts';
-import { fakeJpeg, fakePdf, fakePng, fakeWebp, sha256Hex } from '../../../test/media-fixtures.ts';
+import {
+  fakeAvif,
+  fakeCameraJpeg,
+  fakeJpeg,
+  fakePdf,
+  fakePng,
+  fakeWebp,
+  fakeWebpLossy,
+  sha256Hex,
+} from '../../../test/media-fixtures.ts';
 import { memoryMediaStore, nodeHasher } from '../src/media-memory.ts';
 import { mcpSession } from './mcp-client.ts';
 import { apiToken, json, type TestApp, testApp } from './setup.ts';
@@ -61,7 +77,7 @@ function put(url: string, bytes: Uint8Array, contentType: string, bearer = token
 interface Intent {
   intentId: string;
   mediaId: string;
-  uploads: Array<{ part: string; url: string }>;
+  uploads: Array<{ part: string; url: string; maxSide?: number | null }>;
 }
 
 async function startUpload(
@@ -85,7 +101,8 @@ const urlOf = (intent: Intent, part: string) => intent.uploads.find((u) => u.par
 
 /** A full image upload: original, 320 px thumbnail, 1,600 px display image. */
 async function uploadImage(name = 'photo.png') {
-  const original = fakePng(3000, 2000);
+  // Exactly the default limit on an original's longest side (D19).
+  const original = fakePng(2048, 1365);
   const intent = await startUpload(original, 'image/png', name);
   expect((await put(urlOf(intent, 'original'), original, 'image/png')).status).toBe(200);
   expect((await put(urlOf(intent, 'thumbnail'), fakeWebp(320, 213), 'image/webp')).status).toBe(
@@ -135,8 +152,8 @@ describe('F11: pictures and attachments through the API', () => {
       contentType: 'image/png',
       size: first.original.byteLength,
       sha256: sha256Hex(first.original),
-      width: 3000,
-      height: 2000,
+      width: 2048,
+      height: 1365,
       thumbnail: { contentType: 'image/webp', width: 320, height: 213 },
       display: { contentType: 'image/webp', width: 1600, height: 1067 },
     });
@@ -690,5 +707,141 @@ describe('manage_media over MCP', () => {
     } finally {
       await off.close();
     }
+  });
+});
+
+describe('D19: the largest original a shop keeps', () => {
+  let limited: SeededShop;
+  let send: ReturnType<typeof client>;
+  let bearer: string;
+
+  beforeAll(async () => {
+    limited = await seedShop(t.db, t.sink, 'Original limit shop');
+    bearer = (
+      await apiToken(t, limited, ['shop:read', 'catalog:read', 'catalog:write'], limited.caller)
+    ).token;
+    send = client(limited, bearer);
+  });
+
+  async function begin(bytes: Uint8Array, contentType: string, fileName: string) {
+    const res = await send('/media/uploads', {
+      fileName,
+      contentType,
+      size: bytes.byteLength,
+      sha256: sha256Hex(bytes),
+    });
+    expect(res.status).toBe(201);
+    return (await json(res)) as Intent;
+  }
+
+  const setLimit = (mediaOriginalMaxSide: number | null, caller = limited.caller) =>
+    execute({ db: t.db, audit: t.sink }, ops.updateShopSettings, {
+      caller,
+      shopId: limited.shopId,
+      input: { mediaOriginalMaxSide },
+      idempotencyKey: uuidv7(),
+    });
+
+  it('refuses an original above the shop’s limit, in every format it can read', async () => {
+    const big = [
+      [fakeJpeg(4032, 3024), 'image/jpeg', 'camera.jpg', 4032, 3024],
+      [fakeCameraJpeg(3024, 4032), 'image/jpeg', 'exif.jpg', 3024, 4032],
+      [fakePng(2049, 10), 'image/png', 'wide.png', 2049, 10],
+      [fakeWebpLossy(3000, 2000), 'image/webp', 'lossy.webp', 3000, 2000],
+      [fakeAvif(4096, 3072), 'image/avif', 'phone.avif', 4096, 3072],
+    ] as const;
+    for (const [bytes, type, name, width, height] of big) {
+      const intent = await begin(bytes, type, name);
+      // The limit is in the intent, so an API client knows it before sending the bytes.
+      expect(intent.uploads.find((u) => u.part === 'original')?.maxSide).toBe(2048);
+      const res = await put(urlOf(intent, 'original'), bytes, type, bearer);
+      expect(res.status, name).toBe(422);
+      expect(await json(res), name).toMatchObject({
+        code: 'original_too_large',
+        maxSide: 2048,
+        width,
+        height,
+      });
+      const [row] = await ownerQuery<{ status: string; failure_code: string }>(
+        'select status, failure_code from media_upload_intents where id = $1',
+        [intent.intentId],
+      );
+      expect(row).toEqual({ status: 'failed', failure_code: 'original_too_large' });
+      expect([...store.objects.keys()].some((k) => k.includes(intent.mediaId))).toBe(false);
+    }
+  });
+
+  it('accepts originals within the limit, GIFs, and PDFs as they are', async () => {
+    const fine = [
+      [fakeJpeg(2048, 1536), 'image/jpeg', 'edge.jpg'],
+      [fakeAvif(2048, 2048), 'image/avif', 'square.avif'],
+      [
+        Uint8Array.from([...'GIF89a'].map((c) => c.charCodeAt(0)).concat([0x00, 0x10, 0x00, 0x10])),
+        'image/gif',
+        'animated.gif',
+      ],
+      [fakePdf(), 'application/pdf', 'manual.pdf'],
+    ] as const;
+    for (const [bytes, type, name] of fine) {
+      const intent = await begin(bytes, type, name);
+      const original = intent.uploads.find((u) => u.part === 'original');
+      expect(original?.maxSide, name).toBe(
+        type.startsWith('image/') && type !== 'image/gif' ? 2048 : null,
+      );
+      expect((await put(urlOf(intent, 'original'), bytes, type, bearer)).status, name).toBe(200);
+    }
+  });
+
+  it('follows the shop setting: managers change it, it is logged, and null keeps full size', async () => {
+    const before = await execute({ db: t.db, audit: t.sink }, ops.getShopContext, {
+      caller: limited.caller,
+      shopId: limited.shopId,
+      input: {},
+    });
+    expect(
+      (before.result as { shop: { mediaOriginalMaxSide: number } }).shop.mediaOriginalMaxSide,
+    ).toBe(2048);
+
+    // Only shop.manage may change it; a catalog editor is refused.
+    const [editor] = await ownerQuery<{ id: string }>(
+      `insert into users (id, workos_user_id, email) values ($1, $2, $3) returning id`,
+      [uuidv7(), `editor_${uuidv7()}`, `${uuidv7()}@example.test`],
+    );
+    await ownerQuery(
+      `insert into memberships (shop_id, id, user_id, role) values ($1, $2, $3, 'catalog_editor')`,
+      [limited.shopId, uuidv7(), editor!.id],
+    );
+    await expect(setLimit(4096, sessionCaller(editor!.id))).rejects.toMatchObject({ status: 403 });
+    // Only the listed sizes.
+    await expect(setLimit(3000)).rejects.toMatchObject({ code: 'validation_failed' });
+
+    const changed = await setLimit(4096);
+    expect(changed.result).toMatchObject({ mediaOriginalMaxSide: 4096 });
+    const [event] = await ownerQuery<{ changes: unknown; actor_id: string }>(
+      `select changes, actor_id from audit_events
+       where shop_id = $1 and action = 'shop.settings.updated' and outcome = 'succeeded'`,
+      [limited.shopId],
+    );
+    expect(event?.changes).toEqual({
+      fields: { media_original_max_side: { from: 2048, to: 4096 } },
+    });
+    const photo = fakeJpeg(4032, 3024);
+    const accepted = await begin(photo, 'image/jpeg', 'camera.jpg');
+    expect(accepted.uploads.find((u) => u.part === 'original')?.maxSide).toBe(4096);
+    expect((await put(urlOf(accepted, 'original'), photo, 'image/jpeg', bearer)).status).toBe(200);
+
+    await setLimit(null);
+    const huge = fakePng(9000, 6000);
+    const full = await begin(huge, 'image/png', 'scan.png');
+    expect(full.uploads.find((u) => u.part === 'original')?.maxSide).toBeNull();
+    expect((await put(urlOf(full, 'original'), huge, 'image/png', bearer)).status).toBe(200);
+    const after = await execute({ db: t.db, audit: t.sink }, ops.getShopContext, {
+      caller: limited.caller,
+      shopId: limited.shopId,
+      input: {},
+    });
+    expect(
+      (after.result as { shop: { mediaOriginalMaxSide: null } }).shop.mediaOriginalMaxSide,
+    ).toBeNull();
   });
 });

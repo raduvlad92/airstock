@@ -67,7 +67,7 @@ Values are never committed. Names only:
 | Worker secret | `WORKOS_API_KEY` | WorkOS key `airstock-staging-worker` |
 | Worker secret | `SESSION_SECRET` | Seals the session cookie |
 | Worker secret | `MEDIA_SIGNING_KEY` | 32 random bytes (Base64) that sign short-lived media links (ADR 0015). Until it is set, media uploads answer 503 and media links are null |
-| Worker secret | `WEBHOOK_SECRET_KEY` | 32 random bytes (Base64) that encrypt stored webhook signing secrets (ADR 0020); key ID `w1` unless `WEBHOOK_SECRET_KEY_ID` says otherwise. Until it is set, creating a webhook answers 503 |
+| Worker secret | `WEBHOOK_SECRET_KEY` | 32 random bytes (Base64) that encrypt stored webhook signing secrets (ADR 0021); key ID `w1` unless `WEBHOOK_SECRET_KEY_ID` says otherwise. Until it is set, creating a webhook answers 503 |
 | Hyperdrive origin | `airstock_app` password | Set with `alter role` and stored only in the Hyperdrive config |
 
 To rotate a Worker secret: `pnpm --filter @airstock/worker exec wrangler secret put NAME`. To

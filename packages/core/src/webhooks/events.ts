@@ -108,7 +108,10 @@ const StockPosition = z.object({
   location: Location,
   condition: z.string(),
   lotId: z.string().nullable(),
+  lotCode: z.string().nullable(),
+  expiresOn: z.string().nullable(),
   serialId: z.string().nullable(),
+  serial: z.string().nullable(),
   onHand: z.string(),
   reserved: z.string(),
   available: z.string(),
@@ -138,6 +141,8 @@ async function buildStockChanged(tx: Tx, input: unknown): Promise<BuiltWebhookEv
   const variantId = p.variantId && UUID_PATTERN.test(p.variantId) ? p.variantId : null;
   const locationIds = (p.locationIds ?? []).filter((id) => UUID_PATTERN.test(id));
   const positionIds = (p.positionIds ?? []).filter((id) => UUID_PATTERN.test(id));
+  // Reserved and available come from stock_positions(), the one definition every stock read
+  // uses (reservation and lot expiry, in-transit stock), as they are when the event is sent.
   const rows = await tx.query<{
     position_id: string;
     variant_id: string;
@@ -150,39 +155,34 @@ async function buildStockChanged(tx: Tx, input: unknown): Promise<BuiltWebhookEv
     warehouse_id: string;
     condition: string;
     lot_id: string | null;
+    lot_code: string | null;
+    expires_on: string | null;
     serial_id: string | null;
+    serial: string | null;
     on_hand: string;
     reserved: string;
     available: string;
     version: string;
   }>(
     `with targets as (
-       select p.id from inventory_positions p
+       select p.id, p.variant_id from inventory_positions p
        where $1::uuid is not null and p.variant_id = $1 and p.location_id = any($2::uuid[])
        union
-       select p.id from inventory_positions p where p.id = any($3::uuid[]))
-     select p.id as position_id, p.variant_id, v.product_id, v.sku,
+       select p.id, p.variant_id from inventory_positions p where p.id = any($3::uuid[]))
+     select sp.position_id, sp.variant_id, v.product_id, v.sku,
        coalesce(nullif(v.name, ''), pr.name) as name,
-       l.id as location_id, l.name as location_name, l.path as location_path,
-       l.warehouse_id, p.condition, p.lot_id, p.serial_id,
-       p.on_hand::text,
-       (p.allocated - coalesce(x.expired, 0))::text as reserved,
-       (case when p.condition = 'sellable' and l.status = 'active'
-          and location_fulfillment_eligible(l.shop_id, l.path_ids)
-        then p.on_hand - p.allocated + coalesce(x.expired, 0) else 0 end)::text as available,
-       p.version::text
-     from targets t
-     join inventory_positions p on p.id = t.id
-     join variants v on v.shop_id = p.shop_id and v.id = p.variant_id
+       sp.location_id, l.name as location_name, sp.location_path, sp.warehouse_id, sp.condition,
+       sp.lot_id, lt.code as lot_code, sp.expires_on::text, sp.serial_id, su.serial,
+       sp.on_hand::text, sp.reserved::text, sp.available::text, p.version::text
+     from stock_positions(array(select distinct variant_id from targets)) sp
+     join targets t on t.id = sp.position_id
+     join inventory_positions p on p.shop_id = app_shop_id() and p.id = sp.position_id
+     join variants v on v.shop_id = p.shop_id and v.id = sp.variant_id
      join products pr on pr.shop_id = v.shop_id and pr.id = v.product_id
-     join locations l on l.shop_id = p.shop_id and l.id = p.location_id
-     left join lateral (
-       select sum(a.quantity - a.released - a.fulfilled) as expired
-       from reservation_allocations a
-       join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
-       where a.shop_id = p.shop_id and a.position_id = p.id and a.released + a.fulfilled < a.quantity
-         and r.status in ('active', 'partially_fulfilled') and r.expires_at <= now()) x on true
-     order by l.path, v.sku, p.condition, p.id
+     join locations l on l.shop_id = p.shop_id and l.id = sp.location_id
+     left join lots lt on lt.shop_id = p.shop_id and lt.id = sp.lot_id
+     left join serial_units su on su.shop_id = p.shop_id and su.id = sp.serial_id
+     order by sp.location_path, v.sku, sp.condition, sp.position_id
      limit $4`,
     [variantId, locationIds, positionIds, MAX_POSITIONS + 1],
   );
@@ -201,7 +201,10 @@ async function buildStockChanged(tx: Tx, input: unknown): Promise<BuiltWebhookEv
     },
     condition: r.condition,
     lotId: r.lot_id,
+    lotCode: r.lot_code,
+    expiresOn: r.expires_on,
     serialId: r.serial_id,
+    serial: r.serial,
     onHand: r.on_hand,
     reserved: r.reserved,
     available: r.available,
@@ -479,7 +482,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   {
     id: 'stock.changed',
     description:
-      'Stock changed: one event per operation (receipt, reservation, release, expiry, import), naming every position it changed with SKU, location, on hand, reserved, available, and the position version.',
+      'Stock changed: one event per operation (receipt, reservation, release, expiry, import, and the stock commands to come), naming every position it changed with SKU, location, lot or serial, on hand, reserved, available, and the position version.',
     status: 'available',
     permission: 'inventory.read',
     filters: ['locations'],
@@ -496,7 +499,10 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
           location: sampleLocation,
           condition: 'sellable',
           lotId: null,
+          lotCode: null,
+          expiresOn: null,
           serialId: null,
+          serial: null,
           onHand: '12',
           reserved: '3',
           available: '9',

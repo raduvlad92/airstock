@@ -425,4 +425,31 @@ describe('Shopify connector review findings', () => {
     );
     expect(ret?.status).toBe('authorized');
   });
+  // FINDING 10 (false conflict, level frozen; main). A line seen for the first time lowers the
+  // record of Shopify's quantity "as of" the order's createdAt (step 1 of shopify.orders.sync),
+  // and applyTook skips it when the record was read or pushed after that time. A line added by an
+  // order edit took its units when the edit was made, not when the order was created: if the
+  // level was pushed in between (any stock change does that), Shopify's quantity is lower than
+  // the record, the next push is refused, no order created since the record explains it, and a
+  // conflict freezes the level.
+  it.fails('F10: a line added by an order edit is not a conflict', async () => {
+    const s = await setupItems('Added line', [5, 5]);
+    const [first, second] = s.items as [Many['items'][0], Many['items'][0]];
+    const order = s.store.placeOrder([{ variant: first.shopify, quantity: 1 }]);
+    await h.deliver(s.store.domain, 'orders/create', s.store.webhookBody(order));
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    // A receipt pushes the second item after the order was created.
+    await h.receive(s.m, second.variantId, 1);
+    await h.flushTogether(s.m.shopId);
+    expect(s.store.available(second.shopify)).toBe(6);
+    // The customer adds 2 of the second item to the order.
+    s.store.addLine(order, second.shopify, 2);
+    await h.deliver(s.store.domain, 'orders/edited', s.store.topicBody('orders/edited', order));
+    await h.runJobs(s.m.shopId);
+    await h.flushTogether(s.m.shopId);
+    expect(await h.available(s.m, second.variantId)).toBe('4.000000');
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
+    expect(s.store.available(second.shopify)).toBe(4);
+  });
 });

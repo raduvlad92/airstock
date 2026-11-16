@@ -482,7 +482,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   {
     id: 'stock.changed',
     description:
-      'Stock changed: one event per operation (receipt, reservation, release, expiry, import, and the stock commands to come), naming every position it changed with SKU, location, lot or serial, on hand, reserved, available, and the position version.',
+      'Stock that can be sold changed: one event per operation (receipt, reservation, release, fulfillment, expiry, import, and the stock commands to come), naming every position it changed with SKU, location, lot or serial, on hand, reserved, available, and the position version.',
     status: 'available',
     permission: 'inventory.read',
     filters: ['locations'],

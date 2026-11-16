@@ -2,7 +2,7 @@
 
 Airstock sends events to your own systems, such as an n8n workflow, right after a change is saved. Each shop chooses its own subscriptions: a URL, the event types it wants, and optional filters. Nothing is sent for a change that did not commit.
 
-Decision: [Phase 2 plan, D14 and Section 5.13](phase-2-build-plan.md#513-webhooks). Architecture: [ADR 0021](adr/0021-outgoing-webhooks.md).
+Decision: [Phase 2 plan, D14 and Section 5.13](phase-2-build-plan.md#513-webhooks). Architecture: [ADR 0023](adr/0023-outgoing-webhooks.md).
 
 ## Contents
 
@@ -190,7 +190,7 @@ Each type lists the permission the person subscribing must hold (the events carr
 
 ### `stock.changed`
 
-Stock changed: one event per operation (receipt, reservation, release, expiry, import, and the stock commands to come), naming every position it changed with SKU, location, lot or serial, on hand, reserved, available, and the position version.
+Stock that can be sold changed: one event per operation (receipt, reservation, release, fulfillment, expiry, import, and the stock commands to come), naming every position it changed with SKU, location, lot or serial, on hand, reserved, available, and the position version.
 
 - **Needs:** `inventory.read` (held by whoever subscribes)
 - **Filters:** warehouses and locations

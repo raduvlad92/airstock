@@ -1,4 +1,4 @@
-# 0021. Outgoing webhooks
+# 0023. Outgoing webhooks
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D14 and Section 5.13 (milestone I5).
 

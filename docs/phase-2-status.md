@@ -39,7 +39,7 @@ ADRs are numbered when they merge. This table links each decision as it lands.
 | D16 | MCP tools: measured tool choice, not a count | [ADR 0005, update](adr/0005-operation-registry.md) and Section 5.1 |
 | D19 | Media originals shrink above 2,048 px | In progress |
 | D20 | Re-consent revokes earlier connections | In progress |
-| D14 | Webhooks: registry of event types, per-shop subscriptions, signed deliveries with retries | [ADR 0021](adr/0021-outgoing-webhooks.md), [docs/webhooks.md](webhooks.md) |
+| D14 | Webhooks: registry of event types, per-shop subscriptions, signed deliveries with retries | [ADR 0023](adr/0023-outgoing-webhooks.md), [docs/webhooks.md](webhooks.md) |
 
 ## 4. Bench project
 

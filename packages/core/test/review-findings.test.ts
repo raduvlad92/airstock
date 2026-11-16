@@ -134,12 +134,14 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
     });
     const c = await connector();
     // Both variants get an open shortage, so the sweep visits both (A first, by variant id).
+    const orders: string[] = [];
     for (const variantId of [variantA, variantB]) {
-      await h.run(
+      const r = await h.run(
         ops.reserveStock,
         { variantId, quantity: '3', allowShortage: true },
         { caller: c },
       );
+      orders.push(r.reservationId);
     }
     const [pA] = await ownerQuery<{ id: string }>(
       'select id from inventory_positions where shop_id = $1 and variant_id = $2',
@@ -156,6 +158,9 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
     const command = await rawClient();
     try {
       await command.query('begin');
+      // Detect the deadlock here within 100 ms, so the window in which another file's global
+      // sweep could meet these locks stays short (this session becomes the victim).
+      await command.query(`set local deadlock_timeout = '100ms'`);
       await command.query('select id from inventory_positions where id = $1 for update', [pB!.id]);
       const sweep = sweepShortages(db, 50, [shop.shopId]).then(
         () => 'ok',
@@ -172,13 +177,17 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
       const commandOutcome = await second;
       await command.query(commandOutcome === 'ok' ? 'commit' : 'rollback');
       const sweepOutcome = await sweep;
-      // Neither side may be chosen as a deadlock victim (40P01).
+      // Neither side may be chosen as a deadlock victim (40P01); today one of them is.
       expect({ command: commandOutcome, sweep: sweepOutcome }).toEqual({
         command: 'ok',
         sweep: 'ok',
       });
     } finally {
       await command.end();
+      // Close the shortages, so global sweeps in other files skip this shop afterwards.
+      for (const reservationId of orders) {
+        await h.run(ops.releaseReservation, { reservationId }, { caller: c }).catch(() => null);
+      }
     }
   });
 });

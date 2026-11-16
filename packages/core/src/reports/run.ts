@@ -1018,7 +1018,9 @@ function decode(text: string, signature: string): CursorData {
   try {
     const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
     const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
-    const c = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as CursorData;
+    const c = JSON.parse(
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes),
+    ) as CursorData;
     if (c.s !== signature || typeof c.k !== 'string') throw new Error();
     return c;
   } catch {

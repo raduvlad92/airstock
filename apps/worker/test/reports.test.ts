@@ -13,6 +13,7 @@ const files = {
   put: async (key: string, body: string) => {
     stored.set(key, body);
   },
+  list: async (prefix: string) => [...stored.keys()].filter((k) => k.startsWith(prefix)),
   get: async (key: string) => stored.get(key) ?? null,
   delete: async (key: string) => {
     stored.delete(key);

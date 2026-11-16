@@ -381,12 +381,14 @@ export async function receiveWebhook(
     },
   });
   const result = recorded.result as { jobId: string | null; duplicate: boolean };
-  if (input.topic === 'app/uninstalled' && !result.duplicate) {
+  if (input.topic === 'app/uninstalled') {
+    // Marked for a duplicate too: an earlier delivery may have recorded the receipt and failed
+    // before this step, and Shopify retries with the same event. Marking twice changes nothing.
     await execute(deps, ops.markShopifyUninstalled, {
       caller,
       shopId,
       requestId: input.requestId,
-      input: { connectionId },
+      input: { connectionId, triggeredAt },
     });
   }
   return { status: 'recorded', shopId, jobId: result.jobId, duplicate: result.duplicate };

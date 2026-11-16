@@ -433,7 +433,11 @@ export const markShopifyUninstalled = defineOperation({
   summary: 'Mark a Shopify store as uninstalled and forget its tokens',
   kind: 'command',
   scope: 'shop',
-  input: z.object({ connectionId: Id }),
+  input: z.object({
+    connectionId: Id,
+    /** When Shopify sent the event: one sent before this connection was made is ignored. */
+    triggeredAt: z.string().nullable().optional(),
+  }),
   output: z.object({ connectionId: Id, status: z.literal('uninstalled') }),
   permission: 'integrations.sync',
   connectionScope: 'inventory:write',
@@ -446,8 +450,10 @@ export const markShopifyUninstalled = defineOperation({
       `update shopify_connections set status = 'uninstalled', uninstalled_at = now(),
          access_token_ciphertext = null, refresh_token_ciphertext = null,
          updated_at = now(), version = version + 1
-       where id = $1 and status = 'active' returning id`,
-      [input.connectionId],
+       where id = $1 and status = 'active'
+         and ($2::timestamptz is null or created_at <= $2::timestamptz)
+       returning id`,
+      [input.connectionId, input.triggeredAt ?? null],
     );
     return {
       result: { connectionId: input.connectionId, status: 'uninstalled' as const },

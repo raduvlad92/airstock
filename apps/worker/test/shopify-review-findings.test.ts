@@ -275,7 +275,7 @@ describe('Shopify connector review findings', () => {
   // Shopify retries with the same event ID, which is now a duplicate: the uninstall is skipped and
   // answered 200. The connection stays active with its tokens, the store stays locked to this shop
   // (it cannot be connected elsewhere), and the reconciler keeps calling Shopify.
-  it.fails('F6: an uninstall that failed once is applied when Shopify retries the webhook', async () => {
+  it('F6: an uninstall that failed once is applied when Shopify retries the webhook', async () => {
     const s = await setup('Uninstall retry', 1);
     const fn = `test_fail_uninstall_${s.connectionId.replace(/-/g, '')}`;
     // A failure injected for this connection only (other test files share the table).

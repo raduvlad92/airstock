@@ -2,6 +2,7 @@ import type { CatalogImage, CatalogProduct } from '@airstock/core';
 import {
   type BulkOperationState,
   type ListingInput,
+  type SetResult,
   SHOPIFY_SCOPES,
   type ShopifyAdmin,
   ShopifyApiError,
@@ -33,6 +34,15 @@ export class FakeStore implements ShopifyAdmin {
   throttleNext = 0;
   /** Inventory items whose product was deleted in Shopify. */
   readonly deletedItems = new Set<string>();
+  /**
+   * Writes by idempotency key, as Shopify keeps them: the same key with the same quantities gets
+   * the first result again (nothing applied twice); with other quantities it is refused.
+   */
+  readonly idempotency = new Map<string, { quantities: string; result: SetResult | null }>();
+  /** Writes answered from an idempotency key. */
+  replays = 0;
+  /** User errors with a field path for deleted items (one quantity refused), as Shopify names them. */
+  namesDeletedItems = false;
   /** Orders per page of the search by updated time (Shopify's is 25); one page by default. */
   orderPageSize = Number.POSITIVE_INFINITY;
   /** Orders Shopify's search by updated time does not list yet (its index trails). */
@@ -465,16 +475,64 @@ export class FakeStore implements ShopifyAdmin {
       throw new ShopifyApiError('Throttled', 200, true, 'THROTTLED');
     }
     this.setCalls.push(input.quantities.length);
-    // An item deleted in Shopify: the whole call is refused with a user error (nothing applied),
-    // which the HTTP client raises as a non-retryable ShopifyApiError.
-    const gone = input.quantities.find((q) => this.deletedItems.has(q.inventoryItemId));
-    if (gone) {
-      throw new ShopifyApiError(
-        'The specified inventory item could not be found.',
-        200,
-        false,
-        'INVALID_INVENTORY_ITEM',
-      );
+    const quantities = JSON.stringify(input.quantities);
+    const before = this.idempotency.get(input.idempotencyKey);
+    if (before) {
+      if (before.quantities !== quantities) {
+        throw new ShopifyApiError(
+          'The same idempotency key cannot be used with different operation parameters.',
+          200,
+          false,
+          'IDEMPOTENCY_KEY_PARAMETER_MISMATCH',
+        );
+      }
+      if (!before.result) {
+        throw new ShopifyApiError(
+          'A previous request with this idempotency key failed. Retry with a new idempotency key.',
+          200,
+          false,
+          'IDEMPOTENCY_PREVIOUS_ATTEMPT_FAILED',
+        );
+      }
+      this.replays++;
+      return structuredClone(before.result);
+    }
+    const result = this.applySet(input.quantities);
+    if (result instanceof ShopifyApiError) {
+      this.idempotency.set(input.idempotencyKey, { quantities, result: null });
+      throw result;
+    }
+    this.idempotency.set(input.idempotencyKey, { quantities, result });
+    return result;
+  }
+
+  private applySet(
+    quantities: Array<{
+      inventoryItemId: string;
+      locationId: string;
+      quantity: number;
+      from: number;
+    }>,
+  ): SetResult | ShopifyApiError {
+    const input = { quantities };
+    // An item deleted in Shopify: the whole call is refused with a user error (nothing applied).
+    // Without a field path the HTTP client raises it as a non-retryable ShopifyApiError; with one
+    // (namesDeletedItems) it names the quantity.
+    const gone = input.quantities.findIndex((q) => this.deletedItems.has(q.inventoryItemId));
+    if (gone >= 0) {
+      const message = 'The specified inventory item could not be found.';
+      if (this.namesDeletedItems) {
+        return {
+          kind: 'refused' as const,
+          stale: [],
+          failed: input.quantities.flatMap((q, index) =>
+            this.deletedItems.has(q.inventoryItemId)
+              ? [{ index, code: 'INVALID_INVENTORY_ITEM', message }]
+              : [],
+          ),
+        };
+      }
+      return new ShopifyApiError(message, 200, false, 'INVALID_INVENTORY_ITEM');
     }
     const stale: number[] = [];
     input.quantities.forEach((q, i) => {

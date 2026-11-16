@@ -6,6 +6,7 @@ export default defineConfig({
       'packages/*/test/**/*.test.ts',
       'apps/*/test/**/*.test.ts',
       'apps/web/test/**/*.test.tsx',
+      'scripts/test/**/*.test.ts',
     ],
     globalSetup: ['./test/global-setup.ts'],
     testTimeout: 60_000,

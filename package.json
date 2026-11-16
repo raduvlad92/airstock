@@ -15,6 +15,7 @@
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "parity": "tsx scripts/parity-check.ts",
+    "chatgpt-run": "tsx scripts/chatgpt-run.ts",
     "openapi": "tsx scripts/generate-openapi.ts",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
     "openapi:bundle": "node scripts/openapi-bundle.mjs",

@@ -573,3 +573,6 @@ export const generateVariants = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogVariantsOperations = [setProductOptions, generateVariants] as const;

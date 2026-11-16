@@ -1593,3 +1593,18 @@ export async function sweepExportFiles(db: Database, files: FileAccess): Promise
   }
   return due.length;
 }
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const importsOperations = [
+  createImport,
+  recordImportUpload,
+  previewImport,
+  commitImport,
+  getImport,
+  listImports,
+  listImportRows,
+  createExport,
+  getExport,
+  listExports,
+  downloadExport,
+] as const;

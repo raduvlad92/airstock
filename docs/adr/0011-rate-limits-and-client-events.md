@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decision D11 and Section 5.14 (milestone N0).
 
+**Summary:** Workers Rate Limiting per user, credential, and connection with per-minute refusal summaries; client events batched into one queue message
+
 ## Decision
 
 ### Rate limits

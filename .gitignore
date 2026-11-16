@@ -10,6 +10,8 @@ coverage/
 # Cloudflare
 # The React dashboard, built into the Worker's static assets (ADR 0010).
 apps/worker/public/app/
+# The OpenAPI document, joined from docs/api at build time (scripts/openapi-bundle.mjs).
+apps/worker/public/openapi.json
 .wrangler/
 .dev.vars
 .dev.vars.*

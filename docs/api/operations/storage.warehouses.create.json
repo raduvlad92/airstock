@@ -1,0 +1,554 @@
+{
+  "/api/v1/shops/{shopId}/warehouses": {
+    "post": {
+      "operationId": "storage.warehouses.create",
+      "summary": "Create a warehouse or storage site",
+      "description": "Owned, rented, or run by a third party. Rented and third-party sites record their operator and, with the storage.commercial.read permission, their contract. Add locations to hold stock.",
+      "x-permission": "storage.manage",
+      "x-connection-scope": "storage:write",
+      "x-audit-action": "storage.warehouse.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "ownership": {
+                  "description": "owned, rented, or third_party. New warehouses: owned.",
+                  "type": "string",
+                  "enum": [
+                    "owned",
+                    "rented",
+                    "third_party"
+                  ]
+                },
+                "operatorName": {
+                  "description": "Who runs the site, for rented and third-party warehouses.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "timezone": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "IANA time zone such as Europe/Berlin; null uses the shop time zone."
+                },
+                "address": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "line1": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "line2": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "city": {
+                          "type": "string",
+                          "maxLength": 100
+                        },
+                        "region": {
+                          "type": "string",
+                          "maxLength": 100
+                        },
+                        "postalCode": {
+                          "type": "string",
+                          "maxLength": 20
+                        },
+                        "country": {
+                          "type": "string",
+                          "pattern": "^([A-Za-z]{2})?$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "contact": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "email": {
+                          "type": "string",
+                          "maxLength": 320,
+                          "pattern": "^$|^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+                        },
+                        "phone": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "providerRefs": {
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 50,
+                        "description": "The other system, such as shipbob."
+                      },
+                      "externalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "externalId"
+                    ]
+                  },
+                  "description": "This site’s IDs in other systems, such as a fulfillment partner."
+                },
+                "operatingStatus": {
+                  "type": "string",
+                  "enum": [
+                    "operating",
+                    "paused"
+                  ],
+                  "description": "How the site is running. A record only; fulfillmentEligible decides allocation."
+                },
+                "fulfillmentEligible": {
+                  "type": "boolean",
+                  "description": "Whether orders may be allocated from here. Applies to everything inside it too."
+                },
+                "contract": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "startDate": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "endDate": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "feeDescription": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "currency": {
+                          "description": "Defaults to the shop currency.",
+                          "type": "string",
+                          "pattern": "^[A-Z]{3}$"
+                        },
+                        "rates": {
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "description": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "For example \"Storage per pallet\"."
+                              },
+                              "amount": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                                "description": "Decimal string, zero or more, at most 14 integer digits and 6 decimal places."
+                              },
+                              "unit": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 50,
+                                "description": "What the amount is charged per, such as \"pallet per week\" or \"order\"."
+                              }
+                            },
+                            "required": [
+                              "description",
+                              "amount",
+                              "unit"
+                            ]
+                          }
+                        },
+                        "notes": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 5000
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "attachmentMediaIds": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Commercial terms. Needs the storage.commercial.read permission. Replaces the whole contract; null removes it. A record only, not billing."
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "warehouseId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "warehouse": {
+                    "type": "object",
+                    "properties": {
+                      "warehouseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "ownership": {
+                        "type": "string",
+                        "enum": [
+                          "owned",
+                          "rented",
+                          "third_party"
+                        ]
+                      },
+                      "operatorName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "timezone": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "address": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "line1": {
+                                "type": "string"
+                              },
+                              "line2": {
+                                "type": "string"
+                              },
+                              "city": {
+                                "type": "string"
+                              },
+                              "region": {
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "country": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "contact": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "email": {
+                                "type": "string"
+                              },
+                              "phone": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "providerRefs": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string"
+                            },
+                            "externalId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "externalId"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "operatingStatus": {
+                        "type": "string",
+                        "enum": [
+                          "operating",
+                          "paused"
+                        ]
+                      },
+                      "fulfillmentEligible": {
+                        "type": "boolean"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "archived"
+                        ]
+                      },
+                      "activeLocations": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      },
+                      "archivedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "contract": {
+                        "description": "Present only for members with the storage.commercial.read permission.",
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "startDate": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "endDate": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "feeDescription": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "currency": {
+                                "type": "string"
+                              },
+                              "rates": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "description": {
+                                      "type": "string"
+                                    },
+                                    "amount": {
+                                      "type": "string"
+                                    },
+                                    "unit": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "description",
+                                    "amount",
+                                    "unit"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "notes": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "attachmentMediaIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "startDate",
+                              "endDate",
+                              "feeDescription",
+                              "currency",
+                              "rates",
+                              "notes",
+                              "attachmentMediaIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "warehouseId",
+                      "name",
+                      "ownership",
+                      "operatorName",
+                      "timezone",
+                      "address",
+                      "contact",
+                      "providerRefs",
+                      "operatingStatus",
+                      "fulfillmentEligible",
+                      "status",
+                      "activeLocations",
+                      "version",
+                      "createdAt",
+                      "updatedAt",
+                      "archivedAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "warehouseId",
+                  "warehouse"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

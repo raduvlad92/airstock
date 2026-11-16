@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decision D2 and Sections 5.7 and 5.10 (milestone N2).
 
+**Summary:** Typed filter compiler with keyset paging, two row modes, full-text and trigram search, one duplicate check, saved views
+
 ## Decision
 
 - **A small typed compiler, no query builder.** `packages/core/src/catalog/query.ts` turns a whitelisted grammar into parameterized SQL over `products p` and `variants v`, behind the existing `Tx` interface:

@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026. Implements PRD 6.1 and 6.3 for receive, reserve, and release.
 
+**Summary:** Position locks in id order, a database check on allocations, lazy expiry
+
 ## Decision
 
 - **Lock order.** Every stock command locks `inventory_positions` rows in ascending id order, then `reservations` rows, then anything else. Allocations at a position change only while that position is locked.

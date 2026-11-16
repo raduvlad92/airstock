@@ -1,0 +1,135 @@
+{
+  "/api/v1/shops/{shopId}/barcodes/lookup": {
+    "get": {
+      "operationId": "catalog.barcodes.lookup",
+      "summary": "Find the variant or pack a barcode belongs to",
+      "description": "Matches a scanned or typed code the way uniqueness does: GTINs in any length (UPC-A and EAN-13 match each other), other codes ignoring case. A pack match says how many base units the pack stands for.",
+      "x-permission": "catalog.read",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.barcode.looked_up",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "code",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "normalized": {
+                    "type": "string"
+                  },
+                  "match": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "barcodeId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "code": {
+                            "type": "string"
+                          },
+                          "symbology": {
+                            "type": "string",
+                            "enum": [
+                              "ean13",
+                              "ean8",
+                              "upca",
+                              "code128",
+                              "qr",
+                              "other"
+                            ]
+                          },
+                          "variantId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "sku": {
+                            "type": "string"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "packId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "packName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "baseQuantity": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "barcodeId",
+                          "code",
+                          "symbology",
+                          "variantId",
+                          "productId",
+                          "sku",
+                          "productName",
+                          "packId",
+                          "packName",
+                          "baseQuantity"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "normalized",
+                  "match"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

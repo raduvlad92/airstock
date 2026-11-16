@@ -1,0 +1,72 @@
+{
+  "/api/v1/shops": {
+    "get": {
+      "operationId": "shops.list",
+      "summary": "List your shops",
+      "description": "The shops where you are an active member, with your role in each.",
+      "x-permission": "authenticated",
+      "x-connection-scope": "session",
+      "x-audit-action": "shops.listed",
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shops": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "timezone": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "manager",
+                            "catalog_editor",
+                            "inventory_operator",
+                            "viewer"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "currency",
+                        "timezone",
+                        "role"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "shops"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

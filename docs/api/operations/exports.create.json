@@ -1,0 +1,249 @@
+{
+  "/api/v1/shops/{shopId}/exports": {
+    "post": {
+      "operationId": "exports.create",
+      "summary": "Export products or variants as CSV",
+      "description": "Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Runs as a job; the file is ready for 24 hours and deleted after 7 days. The person downloads it in the Airstock dashboard: Products, then Import, under Recent exports (or through the API).",
+      "x-permission": "exports.run",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.export.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "default": "variants",
+                  "description": "variants: one row per variant (SKU, price, stock). products: one row per product, variant values summarised.",
+                  "type": "string",
+                  "enum": [
+                    "variants",
+                    "products"
+                  ]
+                },
+                "search": {
+                  "description": "Matches SKUs exactly or by prefix, words in names and descriptions, and names with typos.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "filter": {
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100,
+                            "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
+                          },
+                          "op": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 30,
+                            "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                          },
+                          "value": {
+                            "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "op"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "any": {
+                            "minItems": 1,
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "description": "A field key, or a built-in: name, sku, price, status, family, tags, weight, available, created_at, updated_at, has_picture, has_shipping_package, has_barcode (booleans: op is, value true or false), supplier_sku (the preferred supplier’s SKU)."
+                                },
+                                "op": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 30,
+                                  "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
+                                },
+                                "value": {
+                                  "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
+                                }
+                              },
+                              "required": [
+                                "field",
+                                "op"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "any"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "All items must match; an {any: [...]} item matches when one of its conditions does."
+                },
+                "sort": {
+                  "description": "Defaults to name, or to relevance when searching.",
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "direction": {
+                      "default": "asc",
+                      "type": "string",
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "field"
+                  ]
+                },
+                "fields": {
+                  "description": "Custom field keys (and weight, available) to return with each row.",
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "archived": {
+                  "default": "exclude",
+                  "type": "string",
+                  "enum": [
+                    "exclude",
+                    "include",
+                    "only"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "export": {
+                    "type": "object",
+                    "properties": {
+                      "exportId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "rowCount": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "completedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadUntil": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadPath": {
+                        "description": "An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "exportId",
+                      "status",
+                      "rowCount",
+                      "error",
+                      "createdAt",
+                      "completedAt",
+                      "downloadUntil",
+                      "downloadPath"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "export"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

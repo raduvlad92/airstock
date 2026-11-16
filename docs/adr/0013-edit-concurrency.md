@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decision D3 and the owner's answer Q4 (milestone N1).
 
+**Summary:** Field-level compare-and-set on the value the caller read; conflicts name who changed the field
+
 ## Decision
 
 - `catalog.items.update` takes a list of changes to one product and its variants. Each change names a field and carries `expected`: the value the caller last read, as the API returns it (the effective value, so an inherited value counts as what the person saw).

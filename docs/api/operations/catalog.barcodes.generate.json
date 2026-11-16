@@ -1,0 +1,479 @@
+{
+  "/api/v1/shops/{shopId}/variants/{variantId}/barcodes/generate": {
+    "post": {
+      "operationId": "catalog.barcodes.generate",
+      "summary": "Generate an internal barcode for a variant or pack",
+      "description": "Adds a new internal code from the shop’s sequence (such as AS00000042) as a Code 128 barcode or a QR code. The code identifies the record inside this shop only; it is never a URL. Use it for items without a supplier barcode.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "catalog.barcode.generated",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "packId": {
+                  "description": "One of the variant’s packs; leave out for the variant itself.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "symbology": {
+                  "default": "code128",
+                  "type": "string",
+                  "enum": [
+                    "code128",
+                    "qr"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "barcode": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "code": {
+                        "type": "string"
+                      },
+                      "symbology": {
+                        "type": "string",
+                        "enum": [
+                          "ean13",
+                          "ean8",
+                          "upca",
+                          "code128",
+                          "qr",
+                          "other"
+                        ]
+                      },
+                      "packId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Null for the variant’s own barcode."
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "entered",
+                          "generated"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "code",
+                      "symbology",
+                      "packId",
+                      "source"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "packaging": {
+                    "type": "object",
+                    "properties": {
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "productId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "productName": {
+                        "type": "string"
+                      },
+                      "sku": {
+                        "type": "string"
+                      },
+                      "baseUnit": {
+                        "type": "string"
+                      },
+                      "quantityScale": {
+                        "type": "number"
+                      },
+                      "price": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "packsVersion": {
+                        "type": "number"
+                      },
+                      "barcodesVersion": {
+                        "type": "number"
+                      },
+                      "shippingPackagesVersion": {
+                        "type": "number"
+                      },
+                      "bundleVersion": {
+                        "type": "number",
+                        "description": "0 until the variant is first made a bundle."
+                      },
+                      "packs": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "quantity": {
+                              "type": "string",
+                              "description": "Base units, or inner packs when innerPackId is set."
+                            },
+                            "innerPackId": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "innerPackName": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "baseQuantity": {
+                              "type": "string",
+                              "description": "Base units in one pack, through any inner packs."
+                            },
+                            "uses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "purchasing",
+                                  "counting",
+                                  "transfer",
+                                  "sales"
+                                ]
+                              }
+                            },
+                            "dimensions": {},
+                            "weight": {},
+                            "price": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "archived"
+                              ]
+                            },
+                            "version": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "quantity",
+                            "innerPackId",
+                            "innerPackName",
+                            "baseQuantity",
+                            "uses",
+                            "dimensions",
+                            "weight",
+                            "price",
+                            "status",
+                            "version"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "barcodes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "code": {
+                              "type": "string"
+                            },
+                            "symbology": {
+                              "type": "string",
+                              "enum": [
+                                "ean13",
+                                "ean8",
+                                "upca",
+                                "code128",
+                                "qr",
+                                "other"
+                              ]
+                            },
+                            "packId": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Null for the variant’s own barcode."
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "entered",
+                                "generated"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "code",
+                            "symbology",
+                            "packId",
+                            "source"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "shippingPackages": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "name": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "dimensions": {},
+                            "weight": {}
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "dimensions",
+                            "weight"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "bundle": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "version": {
+                                "type": "number"
+                              },
+                              "active": {
+                                "type": "boolean"
+                              },
+                              "components": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "variantId": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    "sku": {
+                                      "type": "string"
+                                    },
+                                    "productName": {
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "packId": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "packName": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "quantity": {
+                                      "type": "string",
+                                      "description": "Packs when packId is set, otherwise base units."
+                                    },
+                                    "baseQuantity": {
+                                      "type": "string",
+                                      "description": "Base units of the component in one bundle."
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "description": "The component variant’s status."
+                                    }
+                                  },
+                                  "required": [
+                                    "variantId",
+                                    "sku",
+                                    "productName",
+                                    "title",
+                                    "packId",
+                                    "packName",
+                                    "quantity",
+                                    "baseQuantity",
+                                    "status"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "version",
+                              "active",
+                              "components"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Set when the variant is or was a bundle; inactive means it has no components."
+                      },
+                      "componentOf": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "variantId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sku": {
+                              "type": "string"
+                            },
+                            "productName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "variantId",
+                            "sku",
+                            "productName"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "Bundles that contain this variant."
+                      }
+                    },
+                    "required": [
+                      "variantId",
+                      "productId",
+                      "productName",
+                      "sku",
+                      "baseUnit",
+                      "quantityScale",
+                      "price",
+                      "packsVersion",
+                      "barcodesVersion",
+                      "shippingPackagesVersion",
+                      "bundleVersion",
+                      "packs",
+                      "barcodes",
+                      "shippingPackages",
+                      "bundle",
+                      "componentOf"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "barcode",
+                  "packaging"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

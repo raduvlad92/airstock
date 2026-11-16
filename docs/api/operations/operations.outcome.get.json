@@ -1,0 +1,81 @@
+{
+  "/api/v1/shops/{shopId}/operation-outcomes": {
+    "get": {
+      "operationId": "operations.outcome.get",
+      "summary": "Look up the result of a command by its idempotency key",
+      "description": "Use after a lost response or an outcome_unknown error. `completed` returns the original result; `not_found` means the command made no change and is safe to retry with the same key.",
+      "x-permission": "shop.read",
+      "x-connection-scope": "shop:read",
+      "x-audit-action": "operation.outcome.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "operation",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Operation ID, for example inventory.reservations.create."
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "not_found"
+                    ]
+                  },
+                  "result": {},
+                  "completedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "result",
+                  "completedAt"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

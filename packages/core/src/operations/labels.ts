@@ -502,3 +502,11 @@ export const saveLabelTemplate = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const labelsOperations = [
+  renderItemLabels,
+  renderLocationLabels,
+  listLabelTemplates,
+  saveLabelTemplate,
+] as const;

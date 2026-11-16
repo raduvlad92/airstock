@@ -1,10 +1,10 @@
 import { hmacMediaDelivery, sweepMediaUploads } from '@airstock/core';
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery, type SeededShop, seedShop } from '../../../test/helpers.ts';
 import { fakeJpeg, fakePdf, fakePng, fakeWebp, sha256Hex } from '../../../test/media-fixtures.ts';
 import { memoryMediaStore, nodeHasher } from '../src/media-memory.ts';
-import { apiToken, connectionGrant, GRANT_CLAIM, json, type TestApp, testApp } from './setup.ts';
+import { mcpSession } from './mcp-client.ts';
+import { apiToken, json, type TestApp, testApp } from './setup.ts';
 
 // Milestone N4 (plan Section 5.8, F11): upload with checks while streaming, browser-made
 // derivatives, links with roles, order, and primary flags, signed delivery, access logging (Q1).
@@ -579,27 +579,9 @@ describe('A13: another shop’s media is unreachable', () => {
 
 describe('manage_media over MCP', () => {
   it('lists, links, updates, reorders, and removes media, and cannot upload', async () => {
-    const grant = await connectionGrant(shop, ['shop:read', 'catalog:read', 'catalog:write']);
-    const mcp = new Client({ name: 'media-test', version: '1.0.0' });
-    const bearer = await t.sign({
-      sub: grant.sub,
-      client_id: grant.clientId,
-      [GRANT_CLAIM]: grant.grantId,
-    });
-    await mcp.connect(
-      new StreamableHTTPClientTransport(new URL('http://airstock.test/mcp'), {
-        fetch: async (url, init) => t.app.fetch(new Request(url, init)),
-        requestInit: { headers: { authorization: `Bearer ${bearer}` } },
-      }),
-    );
-    const call = async (args: Record<string, unknown>) => {
-      const res = (await mcp.callTool({ name: 'manage_media', arguments: args })) as {
-        isError?: boolean;
-        content: Array<{ text: string }>;
-      };
-      return { error: res.isError === true, body: JSON.parse(res.content[0]!.text) };
-    };
-    const { tools } = await mcp.listTools();
+    const mcp = await mcpSession(t, shop, ['shop:read', 'catalog:read', 'catalog:write']);
+    const call = (args: Record<string, unknown>) => mcp.call('manage_media', args);
+    const { tools } = await mcp.client.listTools();
     const tool = tools.find((x) => x.name === 'manage_media')!;
     const actions = (tool.inputSchema.properties as { action: { enum: string[] } }).action.enum;
     expect(actions.sort()).toEqual([
@@ -673,27 +655,13 @@ describe('manage_media over MCP', () => {
     });
 
     // A read-only connection cannot change links.
-    const readOnly = await connectionGrant(shop, ['catalog:read']);
-    const viewer = new Client({ name: 'media-viewer', version: '1.0.0' });
-    await viewer.connect(
-      new StreamableHTTPClientTransport(new URL('http://airstock.test/mcp'), {
-        fetch: async (url, init) => t.app.fetch(new Request(url, init)),
-        requestInit: {
-          headers: {
-            authorization: `Bearer ${await t.sign({
-              sub: readOnly.sub,
-              client_id: readOnly.clientId,
-              [GRANT_CLAIM]: readOnly.grantId,
-            })}`,
-          },
-        },
-      }),
-    );
-    const refused = (await viewer.callTool({
-      name: 'manage_media',
-      arguments: { action: 'remove', mediaId: a.intent.mediaId, productId: chair.productId },
-    })) as { isError?: boolean };
-    expect(refused.isError).toBe(true);
+    const viewer = await mcpSession(t, shop, ['catalog:read']);
+    const refused = await viewer.call('manage_media', {
+      action: 'remove',
+      mediaId: a.intent.mediaId,
+      productId: chair.productId,
+    });
+    expect(refused.error).toBe(true);
     await viewer.close();
     await mcp.close();
   });

@@ -1,0 +1,184 @@
+{
+  "/api/v1/shops/{shopId}/media/primary": {
+    "get": {
+      "operationId": "catalog.media.primary",
+      "summary": "Get the primary picture of each product or variant",
+      "description": "For gallery cards and checks such as “which items have no primary picture”: give up to 200 product or variant IDs. A variant without its own primary picture shows its product’s.",
+      "x-permission": "catalog.read",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.media.primary_viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "productIds",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "maxItems": 2048,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              },
+              {
+                "type": "string",
+                "maxLength": 80000
+              }
+            ],
+            "description": "IDs as an array, or comma-separated."
+          }
+        },
+        {
+          "name": "variantIds",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "maxItems": 2048,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              },
+              {
+                "type": "string",
+                "maxLength": 80000
+              }
+            ],
+            "description": "IDs as an array, or comma-separated."
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pictures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "recordType": {
+                          "type": "string",
+                          "enum": [
+                            "product",
+                            "variant"
+                          ]
+                        },
+                        "recordId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "mediaId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Null when the record has no primary picture."
+                        },
+                        "inherited": {
+                          "type": "boolean",
+                          "description": "True when a variant shows its product’s primary picture."
+                        },
+                        "altText": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "thumbnail": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "type": "number",
+                                  "description": "Bytes."
+                                },
+                                "width": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "height": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "contentType",
+                                "size",
+                                "width",
+                                "height"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "recordType",
+                        "recordId",
+                        "mediaId",
+                        "inherited",
+                        "altText",
+                        "thumbnail"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "pictures"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

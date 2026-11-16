@@ -1,13 +1,22 @@
 /**
- * Writes docs/api/openapi.json from the operation registry. `--check` fails when the
- * committed file is out of date, so the published contract cannot drift from the code.
+ * Writes the OpenAPI 3.1 contract from the operation registry, one file per operation, so
+ * branches that add or change different operations never edit the same file:
+ *
+ *   docs/api/document.json             the document without `paths`
+ *   docs/api/operations/<id>.json      one entry of `paths` per operation, by operation ID
+ *
+ * scripts/openapi-bundle.mjs joins them into the single document the Worker serves at
+ * /openapi.json. `--check` fails when a file is stale, missing, or not generated.
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type AnyOperation, operations } from '@airstock/core';
 import { z } from 'zod';
 
-const OUT = fileURLToPath(new URL('../docs/api/openapi.json', import.meta.url));
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const API_DIR = join(ROOT, 'docs/api');
+const OPERATIONS_DIR = join(API_DIR, 'operations');
 
 function jsonSchema(schema: z.ZodType, io: 'input' | 'output') {
   const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, {
@@ -81,13 +90,6 @@ function operationObject(op: AnyOperation) {
   };
 }
 
-const paths: Record<string, Record<string, unknown>> = {};
-for (const op of operations) {
-  const path = `/api/v1${op.http.path}`;
-  paths[path] ??= {};
-  paths[path][op.http.method.toLowerCase()] = operationObject(op);
-}
-
 const document = {
   openapi: '3.1.0',
   info: {
@@ -135,20 +137,45 @@ const document = {
       },
     },
   },
-  paths,
 };
 
-const text = `${JSON.stringify(document, null, 2)}\n`;
+const toText = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+
+/** Every generated file, by path relative to docs/api. */
+const expected = new Map<string, string>([['document.json', toText(document)]]);
+for (const op of operations) {
+  const entry = {
+    [`/api/v1${op.http.path}`]: { [op.http.method.toLowerCase()]: operationObject(op) },
+  };
+  expected.set(`operations/${op.id}.json`, toText(entry));
+}
+
+/** JSON files now in docs/api; the README and anything else is left alone. */
+const entries = await readdir(API_DIR, { recursive: true, withFileTypes: true }).catch(() => []);
+const present = entries
+  .filter((e) => e.isFile() && e.name.endsWith('.json'))
+  .map((e) => relative(API_DIR, join(e.parentPath, e.name)));
 if (process.argv.includes('--check')) {
-  const current = await readFile(OUT, 'utf8').catch(() => '');
-  if (current !== text) {
+  const problems: string[] = [];
+  for (const [file, text] of expected) {
+    const current = await readFile(join(API_DIR, file), 'utf8').catch(() => null);
+    if (current === null) problems.push(`missing ${file}`);
+    else if (current !== text) problems.push(`stale ${file}`);
+  }
+  for (const file of present) if (!expected.has(file)) problems.push(`not generated: ${file}`);
+  if (problems.length > 0) {
     console.error(
-      'docs/api/openapi.json is out of date. Run `pnpm openapi` and commit the result.',
+      `docs/api is out of date. Run \`pnpm openapi\` and commit the result.\n- ${problems.join('\n- ')}`,
     );
     process.exit(1);
   }
-  console.log('OpenAPI document is up to date.');
+  console.log(`OpenAPI files are up to date (${expected.size - 1} operations).`);
 } else {
-  await writeFile(OUT, text);
-  console.log(`Wrote ${OUT}`);
+  await mkdir(OPERATIONS_DIR, { recursive: true });
+  for (const file of present) if (!expected.has(file)) await rm(join(API_DIR, file));
+  for (const [file, text] of expected) {
+    const current = await readFile(join(API_DIR, file), 'utf8').catch(() => null);
+    if (current !== text) await writeFile(join(API_DIR, file), text);
+  }
+  console.log(`Wrote ${expected.size - 1} operation files and document.json to docs/api.`);
 }

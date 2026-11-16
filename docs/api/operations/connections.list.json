@@ -1,0 +1,108 @@
+{
+  "/api/v1/shops/{shopId}/connections": {
+    "get": {
+      "operationId": "connections.list",
+      "summary": "List AI and OAuth connections",
+      "description": "Your own connections, or every connection in the shop with the connections.manage permission.",
+      "x-permission": "shop.read",
+      "x-connection-scope": "session",
+      "x-audit-action": "connections.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connections": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "grantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "clientId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "clientName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "membershipId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "boundAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastUsedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "grantId",
+                        "clientId",
+                        "clientName",
+                        "scopes",
+                        "status",
+                        "membershipId",
+                        "createdAt",
+                        "boundAt",
+                        "lastUsedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "connections"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

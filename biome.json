@@ -6,15 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": [
-      "**",
-      "!**/*.md",
-      "!assets",
-      "!docs/api/openapi.json",
-      "!**/dist",
-      "!**/vendor",
-      "!**/*.svg"
-    ]
+    "includes": ["**", "!**/*.md", "!assets", "!docs/api", "!**/dist", "!**/vendor", "!**/*.svg"]
   },
   "formatter": {
     "enabled": true,

@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026. Resolves plan Section 7.2 and finding P9 (option A).
 
+**Summary:** MCP shop binding through WorkOS standalone Connect: Airstock consent creates the grant, the first token binds its client
+
 ## Context
 
 An MCP connection must act in exactly one shop, with the access its user chose, and stop on the next call after revocation (PRD 9.4). WorkOS authenticates users but does not know about shops. Plan Section 7.2 proposed two options: a platform consent step (A) or one WorkOS organization per shop (B).

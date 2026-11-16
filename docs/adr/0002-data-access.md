@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026. Resolves the PRD's open "Postgres query library" decision for Phase 0.
 
+**Summary:** Plain SQL over `pg`, no query builder; tenant context per transaction; row-level security
+
 ## Decision
 
 - Queries are parameterized SQL strings run through a small `Database`/`Tx` interface over `pg` (node-postgres), in Node and in Workers behind Hyperdrive. No ORM or query builder in Phase 0.

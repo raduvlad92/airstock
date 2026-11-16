@@ -1,0 +1,109 @@
+{
+  "/api/v1/shops/{shopId}/exports/{exportId}": {
+    "get": {
+      "operationId": "exports.get",
+      "summary": "Get an export’s status",
+      "x-permission": "exports.run",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.export.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "exportId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "export": {
+                    "type": "object",
+                    "properties": {
+                      "exportId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "rowCount": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "completedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadUntil": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadPath": {
+                        "description": "An API path, not a link to share: the file downloads in the dashboard (Products, then Import, Recent exports) while signed in.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "exportId",
+                      "status",
+                      "rowCount",
+                      "error",
+                      "createdAt",
+                      "completedAt",
+                      "downloadUntil",
+                      "downloadPath"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "export"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

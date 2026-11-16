@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decision D10 and Section 5.12 (milestone N7).
 
+**Summary:** CSV in R2; preview stores validated rows; set-based chunks of 200 with checkpoints, opening-stock receipts in the same transaction; exports from the catalog query
+
 ## Decision
 
 - **Files in R2.** `imports.create` returns an upload path. `PUT /api/v1/shops/{shopId}/imports/{importId}/file` takes the raw CSV: UTF-8, comma or semicolon, up to 20 MB and 50,000 rows.

@@ -1,0 +1,533 @@
+{
+  "/api/v1/shops/{shopId}/products/{productId}/options": {
+    "post": {
+      "operationId": "catalog.product_options.set",
+      "summary": "Set a product’s options and their values (rename, reorder, add, remove)",
+      "description": "Give the full list of options in order. Existing options and values are matched by ID, then by name or label; ones left out are removed. Existing variants keep their values and take the first value of any new option. A value still used by a variant cannot be removed, and removing every option needs exactly one active variant.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "catalog.product_options.set",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "productId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "expectedVersion": {
+                  "description": "The product version you read.",
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "options": {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "description": "An existing option, to rename or reorder it.",
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "description": "Such as Size or Colour."
+                      },
+                      "values": {
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                }
+                              },
+                              "required": [
+                                "label"
+                              ]
+                            }
+                          ]
+                        },
+                        "description": "Value labels in order, or {id, label} to rename an existing value."
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "values"
+                    ]
+                  },
+                  "description": "Up to 3 options, in order."
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item": {
+                    "type": "object",
+                    "properties": {
+                      "product": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "active",
+                              "archived"
+                            ]
+                          },
+                          "family": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "weight": {},
+                          "dimensions": {},
+                          "version": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "fields": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "value": {},
+                                "display": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "own",
+                                    "inherited",
+                                    "cleared",
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "value",
+                                "display",
+                                "source"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "Custom fields by key."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "description",
+                          "status",
+                          "family",
+                          "tags",
+                          "weight",
+                          "dimensions",
+                          "version",
+                          "createdAt",
+                          "updatedAt",
+                          "fields"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "position": {
+                              "type": "number"
+                            },
+                            "values": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "position": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "label",
+                                  "position"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "position",
+                            "values"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "variants": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sku": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string",
+                              "description": "Option values, such as \"Black / M\"; empty for a single variant."
+                            },
+                            "optionValues": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "description": "Option name → value label."
+                            },
+                            "optionValueIds": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              }
+                            },
+                            "price": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "baseUnit": {
+                              "type": "string"
+                            },
+                            "quantityScale": {
+                              "type": "number"
+                            },
+                            "trackingMode": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "archived"
+                              ]
+                            },
+                            "isDefault": {
+                              "type": "boolean"
+                            },
+                            "version": {
+                              "type": "number"
+                            },
+                            "weight": {
+                              "type": "object",
+                              "properties": {
+                                "value": {},
+                                "display": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "own",
+                                    "inherited",
+                                    "cleared",
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "value",
+                                "display",
+                                "source"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "dimensions": {
+                              "type": "object",
+                              "properties": {
+                                "value": {},
+                                "display": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "own",
+                                    "inherited",
+                                    "cleared",
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "value",
+                                "display",
+                                "source"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "fields": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {},
+                                  "display": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "source": {
+                                    "type": "string",
+                                    "enum": [
+                                      "own",
+                                      "inherited",
+                                      "cleared",
+                                      "none"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "display",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "description": "Custom fields by key."
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "sku",
+                            "title",
+                            "optionValues",
+                            "optionValueIds",
+                            "price",
+                            "baseUnit",
+                            "quantityScale",
+                            "trackingMode",
+                            "status",
+                            "isDefault",
+                            "version",
+                            "weight",
+                            "dimensions",
+                            "fields"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "incoming": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "field": {
+                              "type": "string"
+                            },
+                            "relationKind": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "sourceType": {
+                              "type": "string",
+                              "enum": [
+                                "product",
+                                "variant"
+                              ]
+                            },
+                            "sourceId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sourceName": {
+                              "type": "string"
+                            },
+                            "targetId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "relationKind",
+                            "sourceType",
+                            "sourceId",
+                            "sourceName",
+                            "targetId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "Relationships other records have to this one, such as \"replaces\"."
+                      }
+                    },
+                    "required": [
+                      "product",
+                      "options",
+                      "variants",
+                      "incoming"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "item"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

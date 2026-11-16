@@ -1,7 +1,7 @@
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type SeededShop, seedShop } from '../../../test/helpers.ts';
-import { apiToken, connectionGrant, GRANT_CLAIM, json, type TestApp, testApp } from './setup.ts';
+import { mcpSession } from './mcp-client.ts';
+import { apiToken, json, type TestApp, testApp } from './setup.ts';
 
 // N1 done-when: A01 and A02 through REST and MCP.
 
@@ -37,31 +37,7 @@ function rest(path: string, body?: unknown, key = crypto.randomUUID()) {
   });
 }
 
-async function mcp(scopes: string[]) {
-  const grant = await connectionGrant(shop, scopes);
-  const client = new Client({ name: 'catalog-test', version: '1.0.0' });
-  const bearer = await t.sign({
-    sub: grant.sub,
-    client_id: grant.clientId,
-    [GRANT_CLAIM]: grant.grantId,
-  });
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL('http://airstock.test/mcp'), {
-      fetch: async (url, init) => t.app.fetch(new Request(url, init)),
-      requestInit: { headers: { authorization: `Bearer ${bearer}` } },
-    }),
-  );
-  return {
-    client,
-    async call(name: string, args: Record<string, unknown>) {
-      const res = (await client.callTool({ name, arguments: args })) as {
-        isError?: boolean;
-        content: Array<{ text: string }>;
-      };
-      return { error: res.isError === true, body: JSON.parse(res.content[0]!.text) };
-    },
-  };
-}
+const mcp = (scopes: string[]) => mcpSession(t, shop, scopes);
 
 describe('A01 through REST', () => {
   it('adds families, creates products with typed values, and reads them back', async () => {

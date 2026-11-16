@@ -1,7 +1,7 @@
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMember, ownerQuery, type SeededShop, seedShop } from '../../../test/helpers.ts';
-import { apiToken, GRANT_CLAIM, json, type TestApp, testApp } from './setup.ts';
+import { mcpSession } from './mcp-client.ts';
+import { apiToken, type GrantMember, json, type TestApp, testApp } from './setup.ts';
 
 // N5 through REST and MCP: packs, barcodes, bundles, suppliers, labels; cross-shop isolation (A13)
 // and cost visibility at the API layer.
@@ -68,40 +68,7 @@ async function product(
 }
 
 /** An MCP client connected as a given member (the owner by default). */
-async function mcp(scopes: string[], membership?: { membershipId: string; userId: string }) {
-  const [owner] = await ownerQuery<{ id: string; workos_user_id: string }>(
-    `select m.id, u.workos_user_id from memberships m join users u on u.id = m.user_id
-     where m.shop_id = $1 and m.user_id = $2`,
-    [shop.shopId, shop.userId],
-  );
-  const membershipId = membership?.membershipId ?? owner!.id;
-  const sub = membership ? `test_${membership.userId}` : owner!.workos_user_id;
-  const grantId = crypto.randomUUID();
-  await ownerQuery(
-    `insert into connection_grants
-       (shop_id, id, membership_id, client_id, client_name, scopes, token_subject, bound_at)
-     values ($1, $2, $3, 'chatgpt-test', 'ChatGPT', $4, $5, now())`,
-    [shop.shopId, grantId, membershipId, scopes, sub],
-  );
-  const client = new Client({ name: 'packaging-test', version: '1.0.0' });
-  const bearer = await t.sign({ sub, client_id: 'chatgpt-test', [GRANT_CLAIM]: grantId });
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL('http://airstock.test/mcp'), {
-      fetch: async (url, init) => t.app.fetch(new Request(url, init)),
-      requestInit: { headers: { authorization: `Bearer ${bearer}` } },
-    }),
-  );
-  return {
-    client,
-    async call(name: string, args: Record<string, unknown>) {
-      const res = (await client.callTool({ name, arguments: args })) as {
-        isError?: boolean;
-        content: Array<{ text: string }>;
-      };
-      return { error: res.isError === true, body: JSON.parse(res.content[0]!.text) };
-    },
-  };
-}
+const mcp = (scopes: string[], member?: GrantMember) => mcpSession(t, shop, scopes, member);
 
 describe('packs, barcodes, and shipping packages through REST', () => {
   it('sets nested packs, barcodes, and boxes, with list versions and idempotent replays', async () => {

@@ -20,7 +20,7 @@ import {
 } from '../src/workos.ts';
 
 // biome-ignore lint/suspicious/noExplicitAny: tests read many different JSON shapes
-type Json = Record<string, any>;
+export type Json = Record<string, any>;
 export const json = (res: Response): Promise<Json> => res.json() as Promise<Json>;
 
 export const ISSUER = 'https://auth.test.example';
@@ -231,26 +231,38 @@ export async function apiToken(
   return res.result as { token: string; credentialId: string };
 }
 
-/** Inserts an MCP connection grant already bound to its client and token subject. */
+/** A shop member to connect as, instead of the shop's owner. */
+export interface GrantMember {
+  membershipId: string;
+  userId: string;
+}
+
+/**
+ * Inserts an MCP connection grant already bound to its client and token subject, for the
+ * shop's owner unless `member` is given.
+ */
 export async function connectionGrant(
   shop: SeededShop,
   scopes: string[],
-  clientId = 'chatgpt-test',
+  { clientId = 'chatgpt-test', member }: { clientId?: string; member?: GrantMember } = {},
 ) {
+  const userId = member?.userId ?? shop.userId;
   const [user] = await ownerQuery<{ workos_user_id: string }>(
     'select workos_user_id from users where id = $1',
-    [shop.userId],
+    [userId],
   );
-  const [member] = await ownerQuery<{ id: string }>(
-    'select id from memberships where shop_id = $1 and user_id = $2',
-    [shop.shopId, shop.userId],
-  );
+  const [membership] = member
+    ? [{ id: member.membershipId }]
+    : await ownerQuery<{ id: string }>(
+        'select id from memberships where shop_id = $1 and user_id = $2',
+        [shop.shopId, userId],
+      );
   const grantId = uuidv7();
   await ownerQuery(
     `insert into connection_grants
        (shop_id, id, membership_id, client_id, client_name, scopes, token_subject, bound_at)
      values ($1, $2, $3, $4, $5, $6, $7, now())`,
-    [shop.shopId, grantId, member!.id, clientId, 'ChatGPT', scopes, user!.workos_user_id],
+    [shop.shopId, grantId, membership!.id, clientId, 'ChatGPT', scopes, user!.workos_user_id],
   );
   return { grantId, sub: user!.workos_user_id, clientId };
 }

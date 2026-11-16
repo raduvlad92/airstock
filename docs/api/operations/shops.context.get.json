@@ -1,0 +1,161 @@
+{
+  "/api/v1/shops/{shopId}": {
+    "get": {
+      "operationId": "shops.context.get",
+      "summary": "Get the current shop and your access",
+      "description": "Returns the shop, your role and permissions, any location limits, and the scopes this connection was granted.",
+      "x-permission": "shop.read",
+      "x-connection-scope": "shop:read",
+      "x-audit-action": "shop.context.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shop": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "currency": {
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "displayUnits": {
+                        "type": "string",
+                        "enum": [
+                          "metric",
+                          "imperial"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "currency",
+                      "timezone",
+                      "displayUnits"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "shop.read",
+                        "shop.manage",
+                        "catalog.read",
+                        "catalog.write",
+                        "catalog.schema.manage",
+                        "costs.read",
+                        "storage.read",
+                        "storage.manage",
+                        "storage.commercial.read",
+                        "inventory.read",
+                        "inventory.receive",
+                        "inventory.reserve",
+                        "activity.read",
+                        "credentials.manage",
+                        "connections.manage",
+                        "members.manage",
+                        "integrations.sync",
+                        "imports.run",
+                        "exports.run"
+                      ]
+                    }
+                  },
+                  "allLocations": {
+                    "type": "boolean"
+                  },
+                  "locationScopeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "connectionScopes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "all"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "rateLimits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "perSecond": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "label",
+                        "perSecond"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Requests allowed per second; more are refused with 429 and Retry-After."
+                  }
+                },
+                "required": [
+                  "shop",
+                  "role",
+                  "permissions",
+                  "allLocations",
+                  "locationScopeIds",
+                  "connectionScopes",
+                  "rateLimits"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

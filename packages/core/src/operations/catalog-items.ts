@@ -1263,3 +1263,14 @@ export const restoreVariant = defineOperation({
   mcp: { tool: TOOL, action: 'restore_variant', readOnly: false, destructive: false },
   handler: (ctx, input) => statusHandler('variant', false)(ctx, input.variantId),
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogItemsOperations = [
+  createItem,
+  getItem,
+  updateItem,
+  archiveProduct,
+  restoreProduct,
+  archiveVariant,
+  restoreVariant,
+] as const;

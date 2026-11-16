@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decisions D4 and D7 (milestone N3).
 
+**Summary:** Variants and products rows over one query, virtualized grid with compare-and-set cells; bulk edits previewed, then committed all or nothing
+
 ## Decision
 
 ### Grid rows (D7)

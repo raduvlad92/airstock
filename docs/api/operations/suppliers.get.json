@@ -1,0 +1,271 @@
+{
+  "/api/v1/shops/{shopId}/suppliers/{supplierId}": {
+    "get": {
+      "operationId": "suppliers.get",
+      "summary": "Get a supplier with its items",
+      "description": "The supplier’s details and the variants it supplies, with supplier SKUs and minimum order quantities. Costs are included only with the costs.read permission.",
+      "x-permission": "catalog.read",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "suppliers.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "supplierId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "supplier": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "contactName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "email": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "phone": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "website": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "address": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "currency": {
+                        "type": "string"
+                      },
+                      "leadTimeDays": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "notes": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "archived"
+                        ]
+                      },
+                      "version": {
+                        "type": "number"
+                      },
+                      "itemCount": {
+                        "type": "number"
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "contactName",
+                      "email",
+                      "phone",
+                      "website",
+                      "address",
+                      "currency",
+                      "leadTimeDays",
+                      "notes",
+                      "status",
+                      "version",
+                      "itemCount",
+                      "createdAt",
+                      "updatedAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "supplierId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "supplierName": {
+                          "type": "string"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productName": {
+                          "type": "string"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "packId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "packName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "packBaseQuantity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "supplierSku": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "costVisible": {
+                          "type": "boolean",
+                          "description": "False when you lack costs.read: lastCost is then hidden."
+                        },
+                        "lastCost": {
+                          "description": "Per pack when packId is set, else per base unit.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastCostAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "minimumOrderQuantity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "preferred": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "archived"
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "supplierId",
+                        "supplierName",
+                        "variantId",
+                        "productId",
+                        "productName",
+                        "sku",
+                        "packId",
+                        "packName",
+                        "packBaseQuantity",
+                        "supplierSku",
+                        "costVisible",
+                        "lastCost",
+                        "lastCostAt",
+                        "minimumOrderQuantity",
+                        "preferred",
+                        "status",
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "supplier",
+                  "items",
+                  "costVisible"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

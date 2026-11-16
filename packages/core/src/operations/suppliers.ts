@@ -793,3 +793,14 @@ export const removeSupplierItem = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const suppliersOperations = [
+  listSuppliers,
+  getSupplier,
+  createSupplier,
+  updateSupplier,
+  listSupplierItems,
+  saveSupplierItem,
+  removeSupplierItem,
+] as const;

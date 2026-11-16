@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026. Implements plan Section 8 (M6) and the P1 finding.
 
+**Summary:** Shopify: expiring encrypted tokens, receipts with jobs, orders reserved by the connector, compare-and-set push that processes unseen orders before calling a conflict
+
 ## Decision
 
 - **Install.** Authorization-code grant for a non-embedded app, started from the dashboard for one shop. The sealed flow cookie holds the OAuth `state`, the shop, the store domain, and the signed-in user; the callback checks Shopify's HMAC, the timestamp (10 minutes), the state, and that the same user is still signed in. An install link made by one user therefore cannot connect a store to that user's shop from someone else's browser.

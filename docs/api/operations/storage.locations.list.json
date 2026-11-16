@@ -1,0 +1,140 @@
+{
+  "/api/v1/shops/{shopId}/locations": {
+    "get": {
+      "operationId": "storage.locations.list",
+      "summary": "List warehouses and their locations",
+      "description": "Every location with its path, code, status, and version, in path order. Stock is held only at locations without children.",
+      "x-permission": "storage.read",
+      "x-connection-scope": "storage:read",
+      "x-audit-action": "storage.locations.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partial": {
+                    "type": "boolean",
+                    "description": "True when your access is limited to some locations."
+                  },
+                  "locations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "warehouseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "warehouseName": {
+                          "type": "string"
+                        },
+                        "ownership": {
+                          "type": "string"
+                        },
+                        "parentId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "path": {
+                          "type": "string",
+                          "description": "Warehouse, then the locations above, then this one, joined by /."
+                        },
+                        "holdsStockAllowed": {
+                          "type": "boolean",
+                          "description": "True for locations without children."
+                        },
+                        "fulfillmentEligible": {
+                          "type": "boolean",
+                          "description": "This location’s own setting."
+                        },
+                        "effectiveFulfillmentEligible": {
+                          "type": "boolean",
+                          "description": "False when this location, one above it, or its warehouse is not eligible."
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "locationId",
+                        "warehouseId",
+                        "warehouseName",
+                        "ownership",
+                        "parentId",
+                        "name",
+                        "code",
+                        "path",
+                        "holdsStockAllowed",
+                        "fulfillmentEligible",
+                        "effectiveFulfillmentEligible",
+                        "status",
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "partial",
+                  "locations"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "/api/v1/shops/{shopId}/warehouses/{warehouseId}/archive": {
+    "post": {
+      "operationId": "storage.warehouses.archive",
+      "summary": "Archive a warehouse and its locations",
+      "description": "Refused while any of its locations holds stock or open reservations, or a Shopify store sells from one. A shop keeps at least one active warehouse. History stays; restoring brings back the locations archived with it.",
+      "x-permission": "storage.manage",
+      "x-connection-scope": "storage:write",
+      "x-audit-action": "storage.warehouse.archived",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "archived"
+                    ]
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "locationsChanged": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Locations archived or restored with it."
+                  }
+                },
+                "required": [
+                  "id",
+                  "status",
+                  "version",
+                  "locationsChanged"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

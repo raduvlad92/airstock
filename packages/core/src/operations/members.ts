@@ -522,3 +522,6 @@ export async function sendInvitationEmail(
   });
   return 'sent';
 }
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const membersOperations = [inviteMember, listMembers, setLocationScope] as const;

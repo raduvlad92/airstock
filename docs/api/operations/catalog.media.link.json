@@ -1,0 +1,194 @@
+{
+  "/api/v1/shops/{shopId}/media/{mediaId}/links": {
+    "post": {
+      "operationId": "catalog.media.link",
+      "summary": "Attach a file to a product, some of its variants, or both",
+      "description": "scope product (default) shows it for the product and every variant; variants or both need variantIds. The first image in a scope becomes its primary picture. Linking where a link already exists changes nothing; use update_link for role, alt text, and primary.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "catalog.media.linked",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "mediaId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "productId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "description": "The product."
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "product",
+                    "variants",
+                    "both"
+                  ],
+                  "description": "product: the product itself, shown for every variant. variants: only the listed variants. both: the product and the listed variants."
+                },
+                "variantIds": {
+                  "anyOf": [
+                    {
+                      "maxItems": 2048,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      }
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 80000
+                    }
+                  ],
+                  "description": "IDs as an array, or comma-separated."
+                },
+                "role": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60,
+                  "description": "Any role, such as primary, lifestyle, detail, packaging, dimension_diagram, or swatch."
+                },
+                "altText": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Text describing the picture for people who cannot see it; null clears it."
+                },
+                "primary": {
+                  "type": "boolean",
+                  "description": "Make this the primary picture of its scope (images only)."
+                }
+              },
+              "required": [
+                "productId"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "links": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "linkId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "mediaId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Null for the product itself."
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "roleLabel": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "number"
+                        },
+                        "primary": {
+                          "type": "boolean"
+                        },
+                        "altText": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "linkId",
+                        "mediaId",
+                        "productId",
+                        "variantId",
+                        "role",
+                        "roleLabel",
+                        "position",
+                        "primary",
+                        "altText"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Every link of this media item on the product."
+                  }
+                },
+                "required": [
+                  "links"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

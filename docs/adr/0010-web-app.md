@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decision D8 (milestone N0).
 
+**Summary:** React, Vite, and TanStack app at `/app`, built into the Worker's static assets under the same CSP
+
 ## Decision
 
 - `apps/web` is a React 19 single-page app built with Vite 8, routed with TanStack Router (code-based routes, base path `/app`), and fed by TanStack Query. TanStack Virtual arrived with the grid (N3); TanStack Table, planned for it, turned out unnecessary and was removed ([ADR 0017](0017-grid-and-bulk-edits.md)).

@@ -1432,3 +1432,19 @@ export const restoreLocation = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const storageOperations = [
+  listWarehouses,
+  getWarehouse,
+  createWarehouse,
+  updateWarehouse,
+  archiveWarehouse,
+  restoreWarehouse,
+  listLocations,
+  createLocation,
+  updateLocation,
+  moveLocation,
+  archiveLocation,
+  restoreLocation,
+] as const;

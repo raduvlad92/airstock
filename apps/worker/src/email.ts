@@ -35,6 +35,16 @@ export function resendSender(config: {
           subject: email.subject,
           text: email.text,
           html: email.html,
+          ...(email.replyTo ? { reply_to: email.replyTo } : {}),
+          ...(email.attachments?.length
+            ? {
+                attachments: email.attachments.map((a) => ({
+                  filename: a.filename,
+                  content: base64(a.content),
+                  content_type: a.contentType,
+                })),
+              }
+            : {}),
           tags: Object.entries(email.tags ?? {}).map(([name, value]) => ({ name, value })),
         }),
       });
@@ -49,4 +59,12 @@ export function resendSender(config: {
       return { id: body.id };
     },
   };
+}
+
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }

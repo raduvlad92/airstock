@@ -18,6 +18,7 @@ import {
   runExportJob,
   runImportJob,
   sendInvitationEmail,
+  sendPurchaseOrderEmail,
   sendWebhookDisabledEmail,
   sweepExpiredReservations,
   sweepExportFiles,
@@ -32,6 +33,7 @@ import {
   WebhookSecretCipher,
 } from '@airstock/core';
 import { type Database, type DatabaseHooks, PgDatabase } from '@airstock/db';
+import type { FontLoader } from '@airstock/pdf';
 import {
   type AvailabilityChanged,
   httpShopifyAdmin,
@@ -48,6 +50,7 @@ import { resendSender } from './email.ts';
 import type { Env } from './env.ts';
 import { mcpConfigFromEnv } from './mcp.ts';
 import { digestStreamHasher, r2MediaStore } from './media.ts';
+import { assetFontLoader, purchaseOrderPdf } from './purchasing.ts';
 import { bindingLimiter } from './rate-limit.ts';
 import { requestScopedSource } from './request-db.ts';
 import type { FileStore } from './scan.ts';
@@ -220,6 +223,13 @@ function jobDeps(env: Env, db: Database): JobDeps {
   };
 }
 
+/** One font loader per isolate, so the PDF font library caches each file once. */
+let fonts: FontLoader | null = null;
+function fontLoader(assets: Fetcher): FontLoader {
+  fonts ??= assetFontLoader(assets);
+  return fonts;
+}
+
 let app: ReturnType<typeof createApp> | null = null;
 
 export default {
@@ -258,6 +268,7 @@ export default {
         client_events: env.RATE_LIMIT_CLIENT_EVENTS,
       }),
       files: filesFor(env),
+      ...(env.ASSETS ? { fonts: fontLoader(env.ASSETS) } : {}),
       media: {
         store: r2MediaStore(env.FILES),
         hasher: digestStreamHasher,
@@ -589,6 +600,25 @@ async function runJobsMessage(
         },
         body.shopId,
         (body.payload as { subscriptionId: string }).subscriptionId,
+      );
+      return null;
+    }
+    if (body.topic === 'email.purchase_order') {
+      if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.ASSETS) {
+        logger.error('email_not_configured', { topic: body.topic });
+        return 600;
+      }
+      const fonts = fontLoader(env.ASSETS);
+      await sendPurchaseOrderEmail(
+        {
+          db,
+          audit: queueSink(env),
+          email: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
+          renderPdf: (order) => purchaseOrderPdf(fonts, order),
+          recipients: env.EMAIL_RECIPIENTS === 'members' ? 'members' : 'any',
+        },
+        body.shopId,
+        (body.payload as { sendId: string }).sendId,
       );
       return null;
     }

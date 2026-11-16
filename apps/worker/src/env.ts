@@ -35,6 +35,13 @@ export interface Env {
   RESEND_API_KEY?: string;
   /** Sender, for example: Airstock <invites@mail.airstock.example>. */
   EMAIL_FROM?: string;
+  /**
+   * `members` limits email to addresses of the shop's own members (staging: test suppliers never
+   * get mail); unset or `any` sends to any address, such as a supplier's.
+   */
+  EMAIL_RECIPIENTS?: string;
+  /** The static assets: the PDF fonts for purchase orders (ADR 0019). */
+  ASSETS?: Fetcher;
   /** This Worker, bound to itself: the jobs consumer runs batches through its fetch handler. */
   SELF?: Fetcher;
   /** Authenticates the jobs consumer's calls to /internal/jobs. */

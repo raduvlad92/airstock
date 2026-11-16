@@ -422,6 +422,9 @@ export interface OutgoingEmail {
   /** The provider sends at most once per key (24 hours at Resend). */
   idempotencyKey: string;
   tags?: Record<string, string>;
+  /** Where replies go, such as the member who sent a purchase order. */
+  replyTo?: string;
+  attachments?: Array<{ filename: string; content: Uint8Array; contentType: string }>;
 }
 
 /** Transactional email provider (ADR 0009). */
@@ -429,7 +432,8 @@ export interface EmailSender {
   send(email: OutgoingEmail): Promise<{ id: string }>;
 }
 
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+export const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
 const ROLE_NAMES: Record<string, string> = {
   manager: 'a manager',

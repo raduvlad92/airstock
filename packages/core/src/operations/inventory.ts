@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { compare, normalize } from '../catalog/decimal.ts';
+import { compare, add as exactSum, normalize } from '../catalog/decimal.ts';
 import { NonNegativeDecimal, PositiveDecimal } from '../decimal.ts';
 import { errors } from '../errors.ts';
 import { defineOperation, type HandlerContext, type HandlerResult } from '../registry.ts';
@@ -570,6 +570,9 @@ const Totals = z.object({
   shortage: z
     .string()
     .describe('Demand from accepted orders that no stock covers yet (whole shop).'),
+  onOrder: z
+    .string()
+    .describe('Still expected on sent purchase orders to these warehouses. Never sellable.'),
 });
 
 export const getAvailability = defineOperation({
@@ -605,6 +608,17 @@ export const getAvailability = defineOperation({
         available: z.string(),
       }),
     ),
+    onOrder: z
+      .array(
+        z.object({
+          purchaseOrderId: Id,
+          number: z.string(),
+          warehouseId: Id,
+          expectedOn: z.string().nullable(),
+          quantity: z.string().describe('Base units still open on the order’s lines.'),
+        }),
+      )
+      .describe('Open purchase orders for this variant, by destination (PRD 5.3).'),
     costVisible: z.boolean(),
     cost: z
       .object({
@@ -691,6 +705,27 @@ export const getAvailability = defineOperation({
       [[input.variantId], input.locationId ?? null, ctx.locationScope, input.warehouseId ?? null],
     );
     if (!view) throw errors.internal();
+    // On order (PRD 5.3): open lines of sent orders, by destination, within the caller's scope.
+    const onOrder = await ctx.tx.query<{
+      purchase_order_id: string;
+      number: number;
+      warehouse_id: string;
+      expected_on: string | null;
+      quantity: string;
+    }>(
+      `select o.purchase_order_id, po.number, o.warehouse_id,
+         to_char(o.expected_on, 'YYYY-MM-DD') as expected_on, sum(o.quantity)::text as quantity
+       from purchase_on_order(array[$1::uuid]) o
+       join purchase_orders po on po.shop_id = app_shop_id() and po.id = o.purchase_order_id
+       left join locations l on l.shop_id = app_shop_id() and l.id = o.location_id
+       where ($2::uuid is null or o.warehouse_id = $2)
+         and ($3::uuid[] is null or o.warehouse_id = any($3::uuid[]) or l.path_ids && $3::uuid[])
+         and ($4::uuid is null or l.path_ids @> array[$4::uuid])
+       group by o.purchase_order_id, po.number, o.warehouse_id, o.expected_on
+       order by o.expected_on nulls last, po.number`,
+      [input.variantId, input.warehouseId ?? null, ctx.locationScope, input.locationId ?? null],
+    );
+    view.totals.onOrder = normalize(onOrder.reduce((sum, r) => exactSum(sum, r.quantity), '0'));
     const visible = canSeeCosts(ctx);
     let cost = null;
     if (visible) {
@@ -720,6 +755,13 @@ export const getAvailability = defineOperation({
         partial: ctx.locationScope !== null,
         totals: view.totals,
         positions: view.positions,
+        onOrder: onOrder.map((r) => ({
+          purchaseOrderId: r.purchase_order_id,
+          number: `PO-${String(r.number).padStart(4, '0')}`,
+          warehouseId: r.warehouse_id,
+          expectedOn: r.expected_on,
+          quantity: normalize(r.quantity),
+        })),
         costVisible: visible,
         cost,
       },

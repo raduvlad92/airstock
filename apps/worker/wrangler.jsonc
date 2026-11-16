@@ -55,7 +55,8 @@
   "triggers": { "crons": ["*/30 * * * *", "0 3 * * *"] },
   // Static files: the server-rendered pages' assets and the React dashboard built by apps/web into
   // public/app (ADR 0010). A path that matches no file runs the Worker.
-  "assets": { "directory": "./public" },
+  // The Worker reads the PDF fonts through the ASSETS binding (purchase orders, D11).
+  "assets": { "directory": "./public", "binding": "ASSETS" },
   // Before every build and dev session: join the per-operation OpenAPI files in docs/api into
   // public/openapi.json, so the Worker serves the committed contract (ADR 0005).
   "build": { "command": "node ../../scripts/openapi-bundle.mjs", "watch_dir": "../../docs/api" },
@@ -93,6 +94,8 @@
     "SHOPIFY_TOKEN_KEY_ID": "k1",
     // Transactional email (ADR 0009). The owner asked for mail.airstock.deletecookies.dev; until
     // the Resend team has a free domain slot, staging sends from the verified tracker subdomain.
-    "EMAIL_FROM": "Airstock staging <airstock@mail.tracker.deletecookies.dev>"
+    "EMAIL_FROM": "Airstock staging <airstock@mail.tracker.deletecookies.dev>",
+    // Staging emails only the shop's own members, so test suppliers never get a purchase order.
+    "EMAIL_RECIPIENTS": "members"
   }
 }

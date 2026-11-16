@@ -1,0 +1,139 @@
+{
+  "/api/v1/shops/{shopId}/alert-preferences": {
+    "post": {
+      "operationId": "alerts.preferences.set",
+      "summary": "Choose which alerts I receive",
+      "description": "Use this when someone wants more or fewer alerts: per kind, whether it counts in the app and whether it comes by email. Applies to the person you act for, within their locations.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "alerts.preferences.set",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "preferences": {
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "low_stock",
+                          "lot_expiring",
+                          "shortage",
+                          "shopify_sync",
+                          "reconciliation_mismatch"
+                        ]
+                      },
+                      "inApp": {
+                        "type": "boolean"
+                      },
+                      "email": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "preferences"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "preferences": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "low_stock",
+                            "lot_expiring",
+                            "shortage",
+                            "shopify_sync",
+                            "reconciliation_mismatch"
+                          ]
+                        },
+                        "inApp": {
+                          "type": "boolean",
+                          "description": "Counts in the badge."
+                        },
+                        "email": {
+                          "type": "boolean",
+                          "description": "Email when such an alert opens, within your locations."
+                        },
+                        "isDefault": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "inApp",
+                        "email",
+                        "isDefault"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "lotExpiryAlertDays": {
+                    "type": "number",
+                    "description": "Shop setting: lots expiring within this many days alert."
+                  }
+                },
+                "required": [
+                  "preferences",
+                  "lotExpiryAlertDays"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

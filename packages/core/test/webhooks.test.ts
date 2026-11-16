@@ -324,6 +324,8 @@ describe('event-type registry (plan 7.1, webhook settings)', () => {
       'catalog.item.changed',
       'job.completed',
       'webhook.test',
+      'alert.opened',
+      'alert.resolved',
       'transfer.status_changed',
       'purchase_order.status_changed',
       'return.status_changed',
@@ -410,11 +412,13 @@ describe('subscriptions, fan-out, and delivery', () => {
       r.run(ops.createWebhookSubscription, {
         name: 'x',
         url: 'https://hooks.example.com/x',
-        eventTypes: ['alert.opened'],
+        eventTypes: ['shopify.sync_conflict'],
       }),
     ).rejects.toMatchObject({
       code: 'validation_failed',
-      extra: { errors: [{ path: 'eventTypes.0', message: 'alert.opened is not available yet.' }] },
+      extra: {
+        errors: [{ path: 'eventTypes.0', message: 'shopify.sync_conflict is not available yet.' }],
+      },
     });
     await expect(
       r.run(ops.createWebhookSubscription, {

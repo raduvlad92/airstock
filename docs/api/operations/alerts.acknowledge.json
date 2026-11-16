@@ -1,0 +1,215 @@
+{
+  "/api/v1/shops/{shopId}/alerts/{alertId}/acknowledge": {
+    "post": {
+      "operationId": "alerts.acknowledge",
+      "summary": "Acknowledge an alert",
+      "description": "Use this when someone has seen an alert and is handling it: it stops counting as open and in the badge, and stays listed until the condition clears (for example, stock recovers), when it resolves by itself.",
+      "x-permission": "alerts.manage",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "alerts.acknowledged",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "alertId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "note": {
+                  "description": "What is being done about it.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "alert": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "low_stock",
+                          "lot_expiring",
+                          "shortage",
+                          "shopify_sync",
+                          "reconciliation_mismatch"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "acknowledged",
+                          "resolved"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "description": "One line for a person, such as \"Low stock: MUG-01 at Main\"."
+                      },
+                      "variantId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "warehouseId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "ruleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "lotId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "details": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      },
+                      "openedAt": {
+                        "type": "string"
+                      },
+                      "lastSeenAt": {
+                        "type": "string"
+                      },
+                      "acknowledgedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "acknowledgedBy": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "resolvedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "resolution": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "version": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "status",
+                      "title",
+                      "variantId",
+                      "warehouseId",
+                      "ruleId",
+                      "lotId",
+                      "details",
+                      "openedAt",
+                      "lastSeenAt",
+                      "acknowledgedAt",
+                      "acknowledgedBy",
+                      "resolvedAt",
+                      "resolution",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "alert"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

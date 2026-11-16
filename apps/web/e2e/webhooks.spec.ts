@@ -15,7 +15,7 @@ test('an owner creates a webhook, copies its secret, and sends a test', async ({
   // The checklist comes from the event-type registry.
   await expect(page.getByRole('checkbox', { name: /stock\.changed/ })).toBeChecked();
   await page.getByRole('checkbox', { name: /catalog\.item\.changed/ }).check();
-  await expect(page.getByRole('checkbox', { name: /alert\.opened/ })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: /alert\.opened/ })).toHaveCount(1);
   await page.getByRole('button', { name: 'Create webhook' }).click();
 
   await expect(page.getByText(/It is shown only once/)).toBeVisible();

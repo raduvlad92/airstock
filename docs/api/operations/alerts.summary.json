@@ -1,0 +1,59 @@
+{
+  "/api/v1/shops/{shopId}/alerts/summary": {
+    "get": {
+      "operationId": "alerts.summary",
+      "summary": "Count open stock alerts",
+      "description": "Use this for a quick count of what needs attention: open (not yet acknowledged) alerts within your locations, by kind, counting the kinds you follow in the app.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "alerts.summary.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "number",
+                    "description": "Open alerts of the kinds you follow in the app."
+                  },
+                  "byKind": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "description": "Open alerts per kind, followed or not."
+                  }
+                },
+                "required": [
+                  "open",
+                  "byKind"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

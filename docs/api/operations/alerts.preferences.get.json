@@ -1,0 +1,85 @@
+{
+  "/api/v1/shops/{shopId}/alert-preferences": {
+    "get": {
+      "operationId": "alerts.preferences.get",
+      "summary": "Get my alert preferences",
+      "description": "Use this to see which alert kinds you follow in the app and receive by email. Owners and managers get email by default.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "alerts.preferences.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "preferences": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "low_stock",
+                            "lot_expiring",
+                            "shortage",
+                            "shopify_sync",
+                            "reconciliation_mismatch"
+                          ]
+                        },
+                        "inApp": {
+                          "type": "boolean",
+                          "description": "Counts in the badge."
+                        },
+                        "email": {
+                          "type": "boolean",
+                          "description": "Email when such an alert opens, within your locations."
+                        },
+                        "isDefault": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "inApp",
+                        "email",
+                        "isDefault"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "lotExpiryAlertDays": {
+                    "type": "number",
+                    "description": "Shop setting: lots expiring within this many days alert."
+                  }
+                },
+                "required": [
+                  "preferences",
+                  "lotExpiryAlertDays"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

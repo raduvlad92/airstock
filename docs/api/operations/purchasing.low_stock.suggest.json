@@ -1,0 +1,264 @@
+{
+  "/api/v1/shops/{shopId}/purchase-orders/suggestions": {
+    "get": {
+      "operationId": "purchasing.low_stock.suggest",
+      "summary": "Suggest purchase orders from low stock",
+      "description": "Use this when someone asks what to reorder, or to draft purchase orders for what is running low. Proposes one purchase order per preferred supplier and warehouse for every rule at or below its reorder point: the reorder quantity, or the amount up to the maximum level, minus what is already on order, rounded up to the supplier’s pack and minimum order quantity. It saves nothing: show the proposal, then call draft for each order the person approves.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "purchasing.low_stock.suggested",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only rules for this warehouse.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "supplierId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only lines for this supplier.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "ruleIds",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only these low-stock rules (the lines the person selected).",
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "drafts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "supplierId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "supplierName": {
+                          "type": "string"
+                        },
+                        "warehouseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "warehouseName": {
+                          "type": "string"
+                        },
+                        "lines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "ruleId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "variantId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "sku": {
+                                "type": "string"
+                              },
+                              "productName": {
+                                "type": "string"
+                              },
+                              "available": {
+                                "type": "string"
+                              },
+                              "onOrder": {
+                                "type": "string"
+                              },
+                              "reorderPoint": {
+                                "type": "string"
+                              },
+                              "need": {
+                                "type": "string",
+                                "description": "Base units the rule asks for, minus what is already on order."
+                              },
+                              "supplierItemId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "supplierSku": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "packId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "packName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "packFactor": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "minimumOrderQuantity": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "quantity": {
+                                "type": "string",
+                                "description": "Suggested quantity: packs when packId is set, else base units, after rounding."
+                              },
+                              "ordered": {
+                                "type": "string",
+                                "description": "The suggested quantity in base units."
+                              },
+                              "unitCost": {
+                                "description": "The supplier’s last cost; needs costs.read.",
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "ruleId",
+                              "variantId",
+                              "sku",
+                              "productName",
+                              "available",
+                              "onOrder",
+                              "reorderPoint",
+                              "need",
+                              "supplierItemId",
+                              "supplierSku",
+                              "packId",
+                              "packName",
+                              "packFactor",
+                              "minimumOrderQuantity",
+                              "quantity",
+                              "ordered",
+                              "unitCost"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "supplierId",
+                        "supplierName",
+                        "warehouseId",
+                        "warehouseName",
+                        "lines"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "withoutSupplier": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "ruleId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "productName": {
+                          "type": "string"
+                        },
+                        "need": {
+                          "type": "string",
+                          "description": "Base units the rule asks for, minus what is already on order."
+                        }
+                      },
+                      "required": [
+                        "ruleId",
+                        "variantId",
+                        "sku",
+                        "productName",
+                        "need"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Low rules with no preferred supplier or supplier item: set one to include them."
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "drafts",
+                  "withoutSupplier",
+                  "costVisible"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -80,13 +80,20 @@ export async function drainOutbox(
  * Releases expired reservations shop by shop. Commands already ignore expired claims, so
  * this sweeper only tidies state; running late never keeps stock unavailable (PRD 6.3).
  */
-export async function sweepExpiredReservations(db: Database, maxShops = 50): Promise<number> {
-  const shops = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
-    tx.query<{ shop_id: string }>(
-      'select s as shop_id from shops_with_expired_reservations($1) s',
-      [maxShops],
-    ),
-  );
+export async function sweepExpiredReservations(
+  db: Database,
+  maxShops = 50,
+  /** Sweep only these shops (tests: other files' reservations are theirs to assert on). */
+  onlyShops?: readonly string[],
+): Promise<number> {
+  const shops = onlyShops
+    ? onlyShops.map((shop_id) => ({ shop_id }))
+    : await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
+        tx.query<{ shop_id: string }>(
+          'select s as shop_id from shops_with_expired_reservations($1) s',
+          [maxShops],
+        ),
+      );
   let expired = 0;
   for (const { shop_id: shopId } of shops) {
     const caller = systemCaller('reservation-expiry', shopId);

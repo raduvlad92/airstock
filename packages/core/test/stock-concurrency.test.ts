@@ -78,7 +78,7 @@ describe('fulfillment racing expiry (A08)', () => {
         i === 0
           ? h.run(ops.fulfillReservation, { reservationId: r.reservationId })
           : i === 1
-            ? sweepExpiredReservations(db)
+            ? sweepExpiredReservations(db, 50, [shop.shopId])
             : h.run(ops.reserveStock, { variantId, quantity: '1' }),
       );
       expect(
@@ -99,7 +99,7 @@ describe('fulfillment racing expiry (A08)', () => {
         // Expired: possibly still active until a command or the sweeper releases it.
         expect(Number(row!.fulfilled)).toBe(0);
       }
-      await sweepExpiredReservations(db);
+      await sweepExpiredReservations(db, 50, [shop.shopId]);
     }
     const view = await h.run(ops.getAvailability, { variantId });
     expect(view.totals.onHand).toBe(`${100 - shipped}.000000`);

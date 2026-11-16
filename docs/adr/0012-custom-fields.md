@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decisions D1 and D13 (milestone N1).
 
+**Summary:** Typed JSONB attributes keyed by field ID, one shared encoder, inheritance by key presence, stable option IDs; Markdown rich text
+
 ## Decision
 
 ### Storage (D1)

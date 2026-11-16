@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026
 
+**Summary:** pnpm workspace, TypeScript 7, Biome, Vitest; exact pins with a 14-day cooldown
+
 ## Decision
 
 - One pnpm workspace: `apps/worker`, `packages/core`, `packages/db`. Internal packages are consumed as TypeScript source, with no build step of their own; wrangler bundles the Worker, Vitest and tsx run everything else.

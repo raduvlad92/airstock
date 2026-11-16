@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026. Implements PRD 7.3 with the owner's decisions P2 and P3.
 
+**Summary:** Queue for attempts, reads, and failures; success events in the business transaction; monthly partitions
+
 ## Decision
 
 - **Authenticated callers only (P3).** A request without a valid credential is answered with 401 before anything is queued, and is not a shop audit event. Failed sign-ins arrive later as verified WorkOS events.

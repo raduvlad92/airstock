@@ -16,7 +16,7 @@ apps/worker      Cloudflare Worker: REST API, MCP endpoint, queue consumers, cro
 apps/web         Dashboard: React, Vite, and TanStack, served by the Worker at /app
 packages/core    Operation registry, command pipeline, inventory and catalog operations
 packages/db      PostgreSQL migrations, roles and row-level security, transaction layer
-scripts          Parity check, OpenAPI generation and bundling, local dev setup
+scripts          Parity check, OpenAPI generation and bundling, ADR index, local dev setup
 test             Shared test setup: a fresh PostgreSQL database per run
 ```
 

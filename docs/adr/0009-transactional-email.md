@@ -2,6 +2,8 @@
 
 **Status:** Accepted for Phase 0 and the pilot, 14 November 2026. Implements plan M7 (E9). The owner chose Resend ("for now") instead of the plan's five-provider evaluation.
 
+**Summary:** Resend for invitations, links without secrets, idempotent sends; account data in the US until revisited
+
 ## Decision
 
 - **Provider:** Resend, over its HTTP API from the Worker (`apps/worker/src/email.ts`). Every send carries an `Idempotency-Key` (`invitation/{id}` for invitations), so a retried job delivers once.

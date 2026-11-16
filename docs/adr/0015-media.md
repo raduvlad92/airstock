@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan decisions D6 and D5 (the owner's answer Q1), milestone N4.
 
+**Summary:** Media uploads stream through the Worker to R2 with checks; the browser makes derivatives; signed links; one access event per request
+
 ## Decision
 
 ### Records and storage

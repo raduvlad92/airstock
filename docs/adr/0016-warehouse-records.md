@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan Section 5.9 and exit criterion F14 (milestone N6).
 
+**Summary:** Warehouse records with contract terms visible only with `storage.commercial.read`; location paths, cascading archive and exact restore, eligibility that applies downwards
+
 ## Decision
 
 ### Warehouse records

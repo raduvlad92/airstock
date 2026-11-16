@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 14 November 2026. Implements PRD 9.3.
 
+**Summary:** One registry generates REST, OpenAPI, permissions, audit names, and task-shaped MCP tools
+
 ## Decision
 
 - Each operation is defined once in `packages/core/src/operations` with its ID, Zod input and output, permission, connection scope, audit action, idempotency rule, REST method and path, and MCP exposure.

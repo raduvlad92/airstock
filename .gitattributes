@@ -1,0 +1,4 @@
+# Generated, append-mostly lists: a local merge or rebase keeps the lines from both sides
+# instead of stopping on a conflict. Regenerate afterwards; the check in `pnpm verify` fails
+# until the file matches its sources again.
+docs/adr/README.md merge=union

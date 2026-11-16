@@ -2,6 +2,8 @@
 
 **Status:** Accepted, 15 November 2026. Implements Phase 1 plan Sections 5.3–5.6, decision D9, and exit criteria F7 and F8 (milestone N5).
 
+**Summary:** Packs resolve exactly to base units with versions; barcodes unique per shop on the normalized code; labels resolved on the server and drawn in the browser; bundle availability computed on read; supplier costs behind `costs.read`
+
 ## Decision
 
 ### Packs

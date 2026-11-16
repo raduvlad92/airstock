@@ -41,6 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Runs on every change, documentation-only ones included: the script needs only Node.
+      - name: ADR index and numbers
+        run: node scripts/adr-index.mjs --check
+
       # Documentation-only changes skip the heavy steps but still report this check, so a
       # required status never waits forever (a workflow-level path filter would).
       - name: Detect code changes

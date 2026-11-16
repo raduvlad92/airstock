@@ -497,6 +497,10 @@ describe('packs and suppliers in CSV (ADR 0018)', () => {
       'Stock qty': 'ignore',
       'Box size': 'ignore',
     });
+    // A shop's own field keeps its header: Shopify's "Vendor" is often a brand field.
+    expect(suggestMapping(['Vendor'], [{ key: 'vendor', label: 'Vendor' } as never])).toEqual({
+      Vendor: 'field:vendor',
+    });
   });
 
   it('refuses unknown suppliers, taken supplier SKUs and barcodes, and unsafe pack changes', async () => {

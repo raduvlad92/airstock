@@ -102,7 +102,7 @@ export interface PreviewContext {
 
 const BARCODE_HEADERS = ['ean', 'ean13', 'ean-13', 'upc', 'gtin', 'barcode number'];
 /** Headers compared after lower-casing and turning `_`, `-`, and `.` into spaces. */
-const SUPPLIER_HEADERS = ['supplier', 'vendor', 'supplier name', 'vendor name'];
+const SUPPLIER_HEADERS = ['vendor', 'supplier name', 'vendor name'];
 const SUPPLIER_SKU_HEADERS = [
   'supplier sku',
   'vendor sku',
@@ -142,13 +142,14 @@ export function suggestMapping(header: string[], fields: FieldDefinition[]): Map
       (b) =>
         b === lower ||
         (b === 'product' && lower === 'product_id') ||
-        (b === 'barcode' && BARCODE_HEADERS.includes(lower)) ||
-        (b === 'supplier' && SUPPLIER_HEADERS.includes(words)) ||
-        (b === 'supplier_sku' && SUPPLIER_SKU_HEADERS.includes(words)),
+        (b === 'barcode' && BARCODE_HEADERS.includes(lower)),
     );
     const field = fields.find((f) => f.key === lower || f.label.toLowerCase() === lower);
     if (byBuiltin) out[t] = byBuiltin;
     else if (field) out[t] = `field:${field.key}`;
+    // After the shop's own fields: a "Vendor" field stays that field.
+    else if (SUPPLIER_HEADERS.includes(words)) out[t] = 'supplier';
+    else if (SUPPLIER_SKU_HEADERS.includes(words)) out[t] = 'supplier_sku';
     else if (/^option:/i.test(t)) out[t] = `option:${t.slice(7).trim()}`;
     else if (/^pack:/i.test(t)) out[t] = `pack:${t.slice(5).trim()}`;
     else if (/^pack_barcode:/i.test(t)) out[t] = `pack_barcode:${t.slice(13).trim()}`;
@@ -468,7 +469,7 @@ export async function loadExistingPacks(tx: Tx, variantIds: string[]): Promise<E
  * What a pack column does to one variant's packs (ADR 0018): create a top-level pack, change the
  * quantity of one (a new pack version), or nothing. Nested packs stay out of CSV: a nested pack's
  * column must match its base quantity, and a pack other packs are made of keeps its quantity.
- * Returns the problem, or null. Used by the preview and again by the commit.
+ * Used by the preview and again by the commit, against the packs as they are then.
  */
 export function planPack(
   pack: ImportPack,

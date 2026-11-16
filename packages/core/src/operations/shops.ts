@@ -240,3 +240,6 @@ export const updateShopSettings = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const shopsOperations = [createShop, listShops, getShopContext, updateShopSettings] as const;

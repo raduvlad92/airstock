@@ -1131,3 +1131,13 @@ export const lookupBarcode = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogPackagingOperations = [
+  getPackaging,
+  setPacks,
+  setShippingPackages,
+  setBarcodes,
+  generateBarcode,
+  lookupBarcode,
+] as const;

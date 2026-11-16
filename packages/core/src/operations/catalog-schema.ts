@@ -1100,3 +1100,15 @@ export async function createSystemFields(ctx: HandlerContext): Promise<void> {
     );
   }
 }
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogSchemaOperations = [
+  describeCatalog,
+  createField,
+  updateField,
+  updateFieldOptions,
+  convertField,
+  createFamily,
+  updateFamily,
+  addTemplate,
+] as const;

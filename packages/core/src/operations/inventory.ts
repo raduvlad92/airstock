@@ -715,3 +715,11 @@ export const getAvailability = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const inventoryOperations = [
+  receiveStock,
+  reserveStock,
+  releaseReservation,
+  getAvailability,
+] as const;

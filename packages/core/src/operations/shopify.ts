@@ -463,3 +463,14 @@ export const markShopifyUninstalled = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const shopifyOperations = [listShopifyConnections, setShopifyMappings] as const;
+
+/** Shopify install and webhook callbacks: run through the pipeline, never routed (index.ts). */
+export const shopifyIntegrationCallbacks = [
+  connectShopifyStore,
+  updateShopifyConnectionDetails,
+  recordShopifyWebhook,
+  markShopifyUninstalled,
+] as const;

@@ -815,3 +815,12 @@ export const deleteView = defineOperation({
 function hasPermission(ctx: HandlerContext, permission: 'catalog.write'): boolean {
   return ctx.membership ? effectivePermissions(ctx.membership).has(permission) : false;
 }
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogQueryOperations = [
+  queryItems,
+  checkDuplicates,
+  listSavedViews,
+  saveView,
+  deleteView,
+] as const;

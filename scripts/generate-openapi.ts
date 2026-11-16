@@ -81,8 +81,11 @@ function operationObject(op: AnyOperation) {
   };
 }
 
+// Sorted by path and method, so the document does not depend on registry order.
 const paths: Record<string, Record<string, unknown>> = {};
-for (const op of operations) {
+const order = (op: AnyOperation) => `${op.http.path} ${op.http.method}`;
+const byPath = [...operations].sort((a, b) => (order(a) < order(b) ? -1 : 1));
+for (const op of byPath) {
   const path = `/api/v1${op.http.path}`;
   paths[path] ??= {};
   paths[path][op.http.method.toLowerCase()] = operationObject(op);

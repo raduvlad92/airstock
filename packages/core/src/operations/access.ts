@@ -324,3 +324,13 @@ export const revokeConnection = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const accessOperations = [
+  createApiCredential,
+  listApiCredentials,
+  revokeApiCredential,
+  createConnection,
+  listConnections,
+  revokeConnection,
+] as const;

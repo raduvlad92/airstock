@@ -417,3 +417,6 @@ async function componentIds(
   );
   return rows.map((r) => r.variant_id);
 }
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogBundlesOperations = [setBundle, getBundleAvailability] as const;

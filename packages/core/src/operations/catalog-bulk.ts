@@ -242,3 +242,6 @@ export const commitBulkEdit = defineOperation({
     };
   },
 });
+
+/** This module's operations, in registry order: MCP lists a tool's actions in this order. */
+export const catalogBulkOperations = [previewBulkEdit, commitBulkEdit] as const;

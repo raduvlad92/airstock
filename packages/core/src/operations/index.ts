@@ -1,220 +1,53 @@
+/**
+ * The operation registry: the single source for REST, OpenAPI, MCP tools, and audit names.
+ *
+ * Each module lists its own operations at its end (`<module>Operations`). To add an operation,
+ * define and export it in its module and append it to that list; this file does not change.
+ * A new module adds one line in each of the three sorted groups below. `registry.test.ts`
+ * fails when an exported operation is in no list, or in more than one (ADR 0005).
+ */
 import type { AnyOperation } from '../registry.ts';
-import {
-  createApiCredential,
-  createConnection,
-  listApiCredentials,
-  listConnections,
-  revokeApiCredential,
-  revokeConnection,
-} from './access.ts';
-import { getOperationOutcome, listActivity, recordClientEvents } from './activity.ts';
-import { searchVariants } from './catalog.ts';
-import { commitBulkEdit, previewBulkEdit } from './catalog-bulk.ts';
-import { getBundleAvailability, setBundle } from './catalog-bundles.ts';
-import {
-  archiveProduct,
-  archiveVariant,
-  createItem,
-  getItem,
-  restoreProduct,
-  restoreVariant,
-  updateItem,
-} from './catalog-items.ts';
-import {
-  generateBarcode,
-  getPackaging,
-  lookupBarcode,
-  setBarcodes,
-  setPacks,
-  setShippingPackages,
-} from './catalog-packaging.ts';
-import {
-  checkDuplicates,
-  deleteView,
-  listSavedViews,
-  queryItems,
-  saveView,
-} from './catalog-query.ts';
+import { accessOperations } from './access.ts';
+import { activityOperations } from './activity.ts';
+import { catalogOperations } from './catalog.ts';
+import { catalogBulkOperations } from './catalog-bulk.ts';
+import { catalogBundlesOperations } from './catalog-bundles.ts';
+import { catalogItemsOperations } from './catalog-items.ts';
+import { catalogPackagingOperations } from './catalog-packaging.ts';
+import { catalogQueryOperations } from './catalog-query.ts';
+import { catalogSchemaOperations } from './catalog-schema.ts';
+import { catalogVariantsOperations } from './catalog-variants.ts';
+import { importsOperations } from './imports.ts';
+import { inventoryOperations } from './inventory.ts';
+import { labelsOperations } from './labels.ts';
+import { mediaOperations } from './media.ts';
+import { membersOperations } from './members.ts';
+import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
+import { shopsOperations } from './shops.ts';
+import { storageOperations } from './storage.ts';
+import { suppliersOperations } from './suppliers.ts';
 
-import {
-  addTemplate,
-  convertField,
-  createFamily,
-  createField,
-  describeCatalog,
-  updateFamily,
-  updateField,
-  updateFieldOptions,
-} from './catalog-schema.ts';
-import { generateVariants, setProductOptions } from './catalog-variants.ts';
-import {
-  commitImport,
-  createExport,
-  createImport,
-  downloadExport,
-  getExport,
-  getImport,
-  listExports,
-  listImportRows,
-  listImports,
-  previewImport,
-  recordImportUpload,
-} from './imports.ts';
-import { getAvailability, receiveStock, releaseReservation, reserveStock } from './inventory.ts';
-import {
-  listLabelTemplates,
-  renderItemLabels,
-  renderLocationLabels,
-  saveLabelTemplate,
-} from './labels.ts';
-import {
-  createUpload,
-  downloadOriginal,
-  finalizeUpload,
-  findMedia,
-  getPrimaryPictures,
-  linkMedia,
-  listProductMedia,
-  reorderMedia,
-  unlinkMedia,
-  updateMediaLink,
-} from './media.ts';
-import { inviteMember, listMembers, setLocationScope } from './members.ts';
-import {
-  connectShopifyStore,
-  listShopifyConnections,
-  markShopifyUninstalled,
-  recordShopifyWebhook,
-  setShopifyMappings,
-  updateShopifyConnectionDetails,
-} from './shopify.ts';
-import { createShop, getShopContext, listShops, updateShopSettings } from './shops.ts';
-import {
-  archiveLocation,
-  archiveWarehouse,
-  createLocation,
-  createWarehouse,
-  getWarehouse,
-  listLocations,
-  listWarehouses,
-  moveLocation,
-  restoreLocation,
-  restoreWarehouse,
-  updateLocation,
-  updateWarehouse,
-} from './storage.ts';
-import {
-  createSupplier,
-  getSupplier,
-  listSupplierItems,
-  listSuppliers,
-  removeSupplierItem,
-  saveSupplierItem,
-  updateSupplier,
-} from './suppliers.ts';
-
-/** The operation registry: the single source for REST, OpenAPI, MCP tools, and audit names. */
+/** Every routed operation, module by module in file-name order. */
 export const operations: readonly AnyOperation[] = [
-  createShop,
-  listShops,
-  getShopContext,
-  updateShopSettings,
-  describeCatalog,
-  createField,
-  updateField,
-  updateFieldOptions,
-  convertField,
-  createFamily,
-  updateFamily,
-  addTemplate,
-  createItem,
-  getItem,
-  queryItems,
-  checkDuplicates,
-  listSavedViews,
-  saveView,
-  deleteView,
-  updateItem,
-  previewBulkEdit,
-  commitBulkEdit,
-  setProductOptions,
-  generateVariants,
-  archiveProduct,
-  restoreProduct,
-  archiveVariant,
-  restoreVariant,
-  searchVariants,
-  createImport,
-  recordImportUpload,
-  previewImport,
-  commitImport,
-  getImport,
-  listImports,
-  listImportRows,
-  createExport,
-  getExport,
-  listExports,
-  downloadExport,
-  listWarehouses,
-  getWarehouse,
-  createUpload,
-  finalizeUpload,
-  listProductMedia,
-  findMedia,
-  getPrimaryPictures,
-  downloadOriginal,
-  linkMedia,
-  updateMediaLink,
-  reorderMedia,
-  unlinkMedia,
-  // Packs, barcodes, shipping packages, bundles, labels, suppliers (N5, ADR 0019).
-  getPackaging,
-  setPacks,
-  setShippingPackages,
-  setBarcodes,
-  generateBarcode,
-  lookupBarcode,
-  setBundle,
-  getBundleAvailability,
-  renderItemLabels,
-  renderLocationLabels,
-  listLabelTemplates,
-  saveLabelTemplate,
-  listSuppliers,
-  getSupplier,
-  createSupplier,
-  updateSupplier,
-  listSupplierItems,
-  saveSupplierItem,
-  removeSupplierItem,
-  createWarehouse,
-  updateWarehouse,
-  archiveWarehouse,
-  restoreWarehouse,
-  listLocations,
-  createLocation,
-  updateLocation,
-  moveLocation,
-  archiveLocation,
-  restoreLocation,
-  receiveStock,
-  reserveStock,
-  releaseReservation,
-  getAvailability,
-  listActivity,
-  recordClientEvents,
-  getOperationOutcome,
-  createApiCredential,
-  listApiCredentials,
-  revokeApiCredential,
-  createConnection,
-  listConnections,
-  revokeConnection,
-  listShopifyConnections,
-  setShopifyMappings,
-  inviteMember,
-  listMembers,
-  setLocationScope,
+  ...accessOperations,
+  ...activityOperations,
+  ...catalogOperations,
+  ...catalogBulkOperations,
+  ...catalogBundlesOperations,
+  ...catalogItemsOperations,
+  ...catalogPackagingOperations,
+  ...catalogQueryOperations,
+  ...catalogSchemaOperations,
+  ...catalogVariantsOperations,
+  ...importsOperations,
+  ...inventoryOperations,
+  ...labelsOperations,
+  ...mediaOperations,
+  ...membersOperations,
+  ...shopifyOperations,
+  ...shopsOperations,
+  ...storageOperations,
+  ...suppliersOperations,
 ];
 
 export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
@@ -225,115 +58,24 @@ export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
  * Integration callbacks: run through the pipeline like any operation, but only from the
  * Shopify install flow and verified webhooks. No REST route or MCP tool (plan Section 5.4).
  */
-export const integrationCallbacks: readonly AnyOperation[] = [
-  connectShopifyStore,
-  updateShopifyConnectionDetails,
-  recordShopifyWebhook,
-  markShopifyUninstalled,
-];
+export const integrationCallbacks: readonly AnyOperation[] = [...shopifyIntegrationCallbacks];
 
-export {
-  addTemplate,
-  archiveLocation,
-  archiveProduct,
-  archiveVariant,
-  archiveWarehouse,
-  checkDuplicates,
-  commitBulkEdit,
-  commitImport,
-  connectShopifyStore,
-  convertField,
-  createApiCredential,
-  createConnection,
-  createExport,
-  createFamily,
-  createField,
-  createImport,
-  createItem,
-  createLocation,
-  createShop,
-  createSupplier,
-  createUpload,
-  createWarehouse,
-  deleteView,
-  describeCatalog,
-  downloadExport,
-  downloadOriginal,
-  finalizeUpload,
-  findMedia,
-  generateBarcode,
-  generateVariants,
-  getAvailability,
-  getBundleAvailability,
-  getExport,
-  getImport,
-  getItem,
-  getOperationOutcome,
-  getPackaging,
-  getPrimaryPictures,
-  getShopContext,
-  getSupplier,
-  getWarehouse,
-  inviteMember,
-  linkMedia,
-  listActivity,
-  listApiCredentials,
-  listConnections,
-  listExports,
-  listImportRows,
-  listImports,
-  listLabelTemplates,
-  listLocations,
-  listMembers,
-  listProductMedia,
-  listSavedViews,
-  listShopifyConnections,
-  listShops,
-  listSupplierItems,
-  listSuppliers,
-  listWarehouses,
-  lookupBarcode,
-  markShopifyUninstalled,
-  moveLocation,
-  previewBulkEdit,
-  previewImport,
-  queryItems,
-  receiveStock,
-  recordClientEvents,
-  recordImportUpload,
-  recordShopifyWebhook,
-  releaseReservation,
-  removeSupplierItem,
-  renderItemLabels,
-  renderLocationLabels,
-  reorderMedia,
-  reserveStock,
-  restoreLocation,
-  restoreProduct,
-  restoreVariant,
-  restoreWarehouse,
-  revokeApiCredential,
-  revokeConnection,
-  saveLabelTemplate,
-  saveSupplierItem,
-  saveView,
-  searchVariants,
-  setBarcodes,
-  setBundle,
-  setLocationScope,
-  setPacks,
-  setProductOptions,
-  setShippingPackages,
-  setShopifyMappings,
-  unlinkMedia,
-  updateFamily,
-  updateField,
-  updateFieldOptions,
-  updateItem,
-  updateLocation,
-  updateMediaLink,
-  updateShopifyConnectionDetails,
-  updateShopSettings,
-  updateSupplier,
-  updateWarehouse,
-};
+export * from './access.ts';
+export * from './activity.ts';
+export * from './catalog.ts';
+export * from './catalog-bulk.ts';
+export * from './catalog-bundles.ts';
+export * from './catalog-items.ts';
+export * from './catalog-packaging.ts';
+export * from './catalog-query.ts';
+export * from './catalog-schema.ts';
+export * from './catalog-variants.ts';
+export * from './imports.ts';
+export * from './inventory.ts';
+export * from './labels.ts';
+export * from './media.ts';
+export * from './members.ts';
+export * from './shopify.ts';
+export * from './shops.ts';
+export * from './storage.ts';
+export * from './suppliers.ts';

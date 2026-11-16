@@ -8,9 +8,8 @@ import {
   ShopifyApiError,
   type ShopifyVariant,
 } from '@airstock/shopify';
-import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { ownerQuery } from '../../../test/helpers.ts';
+import { connectClient, ownerQuery, waitUntilBlockedBy } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
 import { json } from './setup.ts';
 import { type Merchant, type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
@@ -331,16 +330,13 @@ describe('Shopify connector fixes', () => {
     await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
     expect(await shopifyAlerts(s.m.shopId)).toEqual([{ status: 'open' }]);
     // An order sync holds the item's stock rows (step 1 of the lock order) ...
-    const sync = new pg.Client({ connectionString: inject('databases').ownerUrl });
-    await sync.connect();
+    const sync = await connectClient(inject('databases').ownerUrl);
     try {
       await sync.query('begin');
       await sync.query(
         'select id from inventory_positions where variant_id = $1 order by id for update',
         [only.variantId],
       );
-      const [{ pid }] = (await sync.query<{ pid: number }>('select pg_backend_pid() as pid'))
-        .rows as [{ pid: number }];
       // ... while a person takes Shopify's number: it waits for the stock rows.
       const resolving = h.command(
         s.m.cookie,
@@ -352,14 +348,7 @@ describe('Shopify connector fixes', () => {
           choice: 'take_shopify',
         },
       );
-      for (let i = 0; i < 200; i++) {
-        const [waiting] = await ownerQuery<{ n: number }>(
-          'select count(*)::int as n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))',
-          [pid],
-        );
-        if (waiting!.n > 0) break;
-        await new Promise((r) => setTimeout(r, 25));
-      }
+      await waitUntilBlockedBy(sync, '%inventory_positions%');
       // The order sync then reaches the level row (applying what Shopify took): it is free, so
       // the two never wait on each other.
       await sync.query(

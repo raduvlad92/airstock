@@ -1854,8 +1854,7 @@ button.danger {
   cursor: pointer;
 }
 
-.table tr.clickable:hover td,
-.table tr.selected td {
+.table tr.clickable:hover td {
   background: var(--surface-2);
 }
 

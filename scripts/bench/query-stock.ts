@@ -40,6 +40,7 @@ const { values: args } = parseArgs({
     'per-worker': { type: 'string', default: '10' },
     names: { type: 'string', default: 'Bench %' },
     only: { type: 'string', multiple: true, default: [] },
+    'skip-shops': { type: 'boolean', default: false },
     json: { type: 'string' },
   },
 });
@@ -268,7 +269,7 @@ console.log(`Round trip per statement: p50 ${rtt.toFixed(1)} ms; ${WORKERS} call
 const neonBefore = await neonUsage();
 const N = WORKERS * PER;
 
-for (const shop of await shops()) {
+for (const shop of args['skip-shops'] ? [] : await shops()) {
   // Leaf storage locations that are fulfillment-eligible, with their warehouse.
   const leaves = await oq<{ id: string; warehouse_id: string }>(
     `select l.id, l.warehouse_id from locations l
@@ -499,9 +500,13 @@ if (food) {
        order by l.path limit 20`,
       [food.id],
     );
+    // Lots with sellable stock now (older lots may be empty or past their sell-by date).
     const have = (
       await oq<{ n: number }>(
-        `select count(*)::int as n from lots where shop_id = $1 and variant_id = $2`,
+        `select count(distinct p.lot_id)::int as n from inventory_positions p
+         join lots lt on lt.shop_id = p.shop_id and lt.id = p.lot_id
+         where p.shop_id = $1 and p.variant_id = $2 and p.on_hand > 0 and p.condition = 'sellable'
+           and lt.expires_on > current_date + 30`,
         [food.id, v.id],
       )
     )[0]!.n;
@@ -514,8 +519,8 @@ if (food) {
         call(w, food, ops.receiveStock, {
           variantId: v.id,
           locationId: leaves[i % leaves.length]!.id,
-          quantity: '6',
-          lotCode: `I7-200-${String(i).padStart(3, '0')}`,
+          quantity: '24',
+          lotCode: `I7-200-${randomUUID().slice(0, 6)}`,
           // Spread over the next 400 days, so earliest expiry first has to sort them all.
           expiresOn: day(40 + ((i * 37) % 400)),
           unitCost: '2.10',
@@ -535,7 +540,7 @@ if (food) {
       ['reserve, 200 lots, 1 unit', '1', 1],
       ['reserve, 200 lots, 30 units (several lots)', '30', 1],
       ['reserve, 200 lots, 1 unit', '1', WORKERS],
-      ['reserve, 200 lots, 30 units (several lots)', '30', WORKERS],
+      ['reserve, 200 lots, 12 units (one or two lots)', '12', WORKERS],
     ] as const) {
       const runs = await phase(
         label,

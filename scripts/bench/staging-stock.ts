@@ -26,6 +26,9 @@ const { values: args } = parseArgs({
     n: { type: 'string', default: '30' },
     json: { type: 'string' },
     'skip-setup': { type: 'boolean', default: false },
+    contention: { type: 'boolean', default: false },
+    'webhook-only': { type: 'boolean', default: false },
+    workers: { type: 'string', default: '10' },
     'webhook-url': { type: 'string' },
     'webhook-port': { type: 'string', default: '8787' },
     'webhook-n': { type: 'string', default: '30' },
@@ -162,10 +165,161 @@ if (!args['skip-setup']) {
     `Setup: ${items.length} items with opening stock in ${((performance.now() - t0) / 1000).toFixed(0)} s`,
   );
 } else {
-  const { json } = await api<{ rows: Array<{ variantId: string }> }>('POST', '/items/query', {
-    limit: 200,
+  // Items an earlier run created: SKU I7-<tag>-<n>, every sixth tracked by lot.
+  const { json } = await api<{ rows: Array<{ variantId: string; sku: string | null }> }>(
+    'POST',
+    '/items/query',
+    { limit: 200, search: 'I7' },
+  );
+  for (const r of json.rows) {
+    const m = /^I7-[0-9a-f]{4}-(\d{4})$/.exec(r.sku ?? '');
+    if (m) items.push({ variantId: r.variantId, lot: Number(m[1]) % 6 === 0 });
+  }
+  console.log(`Reusing ${items.length} items`);
+}
+
+const pickItems = (n: number, lot?: boolean) =>
+  items
+    .filter((i) => lot === undefined || i.lot === lot)
+    .sort(() => Math.random() - 0.5)
+    .slice(0, n);
+
+// Concurrent callers (--contention) ---------------------------------------------------------------
+// The same variant with 200 lots reserved by --workers callers at once (plan risk R5), then
+// reservations, fulfillments, and receipts on different variants by --workers callers at once.
+if (args.contention) {
+  const W = Number(args.workers);
+  const results: Array<Record<string, unknown>> = [];
+  const summarize = (label: string, ts: Timing[]) => {
+    const row = {
+      label,
+      callers: W,
+      n: ts.length,
+      sql: pct(
+        ts.map((t) => t.sql),
+        50,
+      ),
+      appP50: r1(
+        pct(
+          ts.map((t) => t.appMs),
+          50,
+        ),
+      ),
+      appP95: r1(
+        pct(
+          ts.map((t) => t.appMs),
+          95,
+        ),
+      ),
+      dbP50: r1(
+        pct(
+          ts.map((t) => t.dbMs),
+          50,
+        ),
+      ),
+      dbP95: r1(
+        pct(
+          ts.map((t) => t.dbMs),
+          95,
+        ),
+      ),
+      queueP95: r1(
+        pct(
+          ts.map((t) => t.queueMs),
+          95,
+        ),
+      ),
+    };
+    results.push(row);
+    console.log(
+      `${label.padEnd(44)} x${W} n=${row.n} sql ${row.sql}  server p50 ${row.appP50} p95 ${row.appP95}  db p50 ${row.dbP50} p95 ${row.dbP95}  queue p95 ${row.queueP95} ms`,
+    );
+  };
+  const { json: lotItem } = await api<{ variantId: string }>('POST', '/items', {
+    name: `Bench I7 ${tag} two hundred lots`,
+    sku: `I7-${tag}-LOTS`,
+    acknowledgeSimilar: true,
   });
-  for (const r of json.rows) items.push({ variantId: r.variantId, lot: false });
+  await api('POST', `/variants/${lotItem.variantId}/stock-settings`, {
+    variantId: lotItem.variantId,
+    trackingMode: 'lot_expiry',
+  });
+  await pool(
+    Array.from({ length: 200 }, (_, i) => i),
+    6,
+    async (i) => {
+      await api('POST', '/receipts', {
+        variantId: lotItem.variantId,
+        locationId: i % 2 ? shelfA : shelfB,
+        quantity: '24',
+        unitCost: '2.10',
+        lotCode: `L200-${String(i).padStart(3, '0')}`,
+        expiresOn: day(40 + ((i * 37) % 400)),
+      });
+    },
+  );
+  for (const [label, qty, callers] of [
+    ['reserve, 200 lots, one caller', '1', 1],
+    ['reserve, 200 lots, same variant', '1', W],
+    ['reserve, 200 lots, same variant, 12 units', '12', W],
+  ] as const) {
+    const ts: Timing[] = [];
+    const ids: string[] = [];
+    await pool(Array.from({ length: callers === 1 ? N : W * 10 }), callers, async () => {
+      const { json, timing } = await api<{ reservationId: string }>('POST', '/reservations', {
+        variantId: lotItem.variantId,
+        quantity: qty,
+        purpose: 'external_order',
+        externalRef: `I7-R5-${randomUUID().slice(0, 8)}`,
+      });
+      ts.push(timing);
+      ids.push(json.reservationId);
+    });
+    summarize(label, ts);
+    await pool(ids, 6, async (id) => {
+      await api('POST', `/reservations/${id}/release`, { reservationId: id });
+    });
+  }
+  // Different variants, all callers at once.
+  const many = pickItems(W * 10);
+  const resT: Timing[] = [];
+  const resIds: string[] = [];
+  await pool(many, W, async (it) => {
+    const { json, timing } = await api<{ reservationId: string }>('POST', '/reservations', {
+      variantId: it.variantId,
+      quantity: '1',
+      purpose: 'external_order',
+      externalRef: `I7-${randomUUID().slice(0, 8)}`,
+    });
+    resT.push(timing);
+    resIds.push(json.reservationId);
+  });
+  summarize('reserve, different variants', resT);
+  const fulT: Timing[] = [];
+  await pool(resIds, W, async (id) => {
+    fulT.push((await api('POST', `/reservations/${id}/fulfill`, { reservationId: id })).timing);
+  });
+  summarize('fulfill, different variants', fulT);
+  const recT: Timing[] = [];
+  await pool(pickItems(W * 10), W, async (it) => {
+    recT.push(
+      (
+        await api('POST', '/receipts', {
+          variantId: it.variantId,
+          locationId: shelfA,
+          quantity: '6',
+          unitCost: '3.60',
+        })
+      ).timing,
+    );
+  });
+  summarize('receive, different variants', recT);
+  if (args.json)
+    await writeFile(
+      args.json,
+      JSON.stringify({ at: new Date().toISOString(), base: args.base, results }, null, 2),
+    );
+  process.exit(0);
 }
 
 // Timed commands, one at a time -------------------------------------------------------------------
@@ -229,122 +383,120 @@ function report(label: string, ts: Timing[]) {
     `${label.padEnd(30)} n=${row.n} sql ${row.sql} tx ${row.tx} sends ${row.sends}  server p50 ${row.appP50} p95 ${row.appP95}  db p50 ${row.dbP50} p95 ${row.dbP95}  queue p95 ${row.queueP95}  client p95 ${row.clientP95} ms`,
   );
 }
-const pickItems = (n: number, lot?: boolean) =>
-  items
-    .filter((i) => lot === undefined || i.lot === lot)
-    .sort(() => Math.random() - 0.5)
-    .slice(0, n);
+const sequential = !args['webhook-only'];
+if (sequential) {
+  // Receive (a third into lots).
+  const receipts: Timing[] = [];
+  for (const [k, it] of pickItems(N).entries()) {
+    const lotted = it.lot;
+    const { timing } = await api('POST', '/receipts', {
+      variantId: it.variantId,
+      locationId: shelfA,
+      quantity: '12',
+      unitCost: '3.60',
+      ...(lotted ? { lotCode: `I7-${k}-${randomUUID().slice(0, 6)}`, expiresOn: day(250) } : {}),
+    });
+    receipts.push(timing);
+  }
+  report('receive', receipts);
 
-// Receive (a third into lots).
-const receipts: Timing[] = [];
-for (const [k, it] of pickItems(N).entries()) {
-  const lotted = it.lot;
-  const { timing } = await api('POST', '/receipts', {
-    variantId: it.variantId,
-    locationId: shelfA,
-    quantity: '12',
-    unitCost: '3.60',
-    ...(lotted ? { lotCode: `I7-${k}-${randomUUID().slice(0, 6)}`, expiresOn: day(250) } : {}),
-  });
-  receipts.push(timing);
-}
-report('receive', receipts);
+  // Reserve, then fulfill.
+  const reservations: string[] = [];
+  const reserveT: Timing[] = [];
+  for (const it of pickItems(N)) {
+    const { json, timing } = await api<{ reservationId: string }>('POST', '/reservations', {
+      variantId: it.variantId,
+      quantity: '1',
+      purpose: 'external_order',
+      externalRef: `I7-${randomUUID().slice(0, 8)}`,
+    });
+    reservations.push(json.reservationId);
+    reserveT.push(timing);
+  }
+  report('reserve', reserveT);
+  const fulfillT: Timing[] = [];
+  for (const id of reservations)
+    fulfillT.push((await api('POST', `/reservations/${id}/fulfill`, { reservationId: id })).timing);
+  report('fulfill', fulfillT);
 
-// Reserve, then fulfill.
-const reservations: string[] = [];
-const reserveT: Timing[] = [];
-for (const it of pickItems(N)) {
-  const { json, timing } = await api<{ reservationId: string }>('POST', '/reservations', {
-    variantId: it.variantId,
-    quantity: '1',
-    purpose: 'external_order',
-    externalRef: `I7-${randomUUID().slice(0, 8)}`,
-  });
-  reservations.push(json.reservationId);
-  reserveT.push(timing);
-}
-report('reserve', reserveT);
-const fulfillT: Timing[] = [];
-for (const id of reservations)
-  fulfillT.push((await api('POST', `/reservations/${id}/fulfill`, { reservationId: id })).timing);
-report('fulfill', fulfillT);
-
-// Transfers: created ready (not timed), dispatched, received.
-const transfers: string[] = [];
-for (let i = 0; i < N; i++) {
-  const lines = pickItems(3, false).map((it) => ({ variantId: it.variantId, quantity: '2' }));
-  const { json } = await api<{ transfer: { transferId: string } }>('POST', '/transfers', {
-    fromLocationId: i % 2 ? shelfB : shelfA,
-    toLocationId: i % 2 ? shelfA : shelfB,
-    lines,
-    ready: true,
-  }).catch(async () =>
-    // Shelf B may not hold these yet: send from A.
-    api<{ transfer: { transferId: string } }>('POST', '/transfers', {
-      fromLocationId: shelfA,
-      toLocationId: shelfB,
+  // Transfers: created ready (not timed), dispatched, received.
+  const transfers: string[] = [];
+  for (let i = 0; i < N; i++) {
+    const lines = pickItems(3, false).map((it) => ({ variantId: it.variantId, quantity: '2' }));
+    const { json } = await api<{ transfer: { transferId: string } }>('POST', '/transfers', {
+      fromLocationId: i % 2 ? shelfB : shelfA,
+      toLocationId: i % 2 ? shelfA : shelfB,
       lines,
       ready: true,
-    }),
-  );
-  transfers.push(json.transfer.transferId);
-}
-const dispatchT: Timing[] = [];
-for (const id of transfers)
-  dispatchT.push((await api('POST', `/transfers/${id}/dispatch`, { transferId: id })).timing);
-report('transfer dispatch', dispatchT);
-const receiptT: Timing[] = [];
-for (const id of transfers)
-  receiptT.push((await api('POST', `/transfers/${id}/receive`, { transferId: id })).timing);
-report('transfer receipt', receiptT);
+    }).catch(async () =>
+      // Shelf B may not hold these yet: send from A.
+      api<{ transfer: { transferId: string } }>('POST', '/transfers', {
+        fromLocationId: shelfA,
+        toLocationId: shelfB,
+        lines,
+        ready: true,
+      }),
+    );
+    transfers.push(json.transfer.transferId);
+  }
+  const dispatchT: Timing[] = [];
+  for (const id of transfers)
+    dispatchT.push((await api('POST', `/transfers/${id}/dispatch`, { transferId: id })).timing);
+  report('transfer dispatch', dispatchT);
+  const receiptT: Timing[] = [];
+  for (const id of transfers)
+    receiptT.push((await api('POST', `/transfers/${id}/receive`, { transferId: id })).timing);
+  report('transfer receipt', receiptT);
 
-// Counts: started and recorded (not timed), then submitted.
-const submitT: Timing[] = [];
-for (let i = 0; i < N; i++) {
-  const its = pickItems(5, false);
-  const { json: session } = await api<{ sessionId: string }>('POST', '/counts', {
-    locationId: shelfA,
-    variantIds: its.map((it) => it.variantId),
-    name: 'I7 bench count',
-  });
-  const avail = await Promise.all(
-    its.map((it) =>
-      api<{ positions: Array<{ locationId: string; onHand: string; condition: string }> }>(
-        'GET',
-        `/availability?variantId=${it.variantId}&locationId=${shelfA}`,
+  // Counts: started and recorded (not timed), then submitted.
+  const submitT: Timing[] = [];
+  for (let i = 0; i < N; i++) {
+    const its = pickItems(5, false);
+    const { json: session } = await api<{ sessionId: string }>('POST', '/counts', {
+      locationId: shelfA,
+      variantIds: its.map((it) => it.variantId),
+      name: 'I7 bench count',
+    });
+    const avail = await Promise.all(
+      its.map((it) =>
+        api<{ positions: Array<{ locationId: string; onHand: string; condition: string }> }>(
+          'GET',
+          `/availability?variantId=${it.variantId}&locationId=${shelfA}`,
+        ),
       ),
-    ),
-  );
-  await api('POST', `/counts/${session.sessionId}/record`, {
-    sessionId: session.sessionId,
-    counts: its.map((it, k) => {
-      const onHand = Number(
-        avail[k]!.json.positions.find((p) => p.locationId === shelfA && p.condition === 'sellable')
-          ?.onHand ?? 0,
-      );
-      return {
-        variantId: it.variantId,
-        locationId: shelfA,
-        counted: String(k === 0 ? Math.max(0, onHand - 1) : onHand),
-      };
-    }),
-  });
-  submitT.push(
-    (await api('POST', `/counts/${session.sessionId}/submit`, { sessionId: session.sessionId }))
-      .timing,
-  );
-}
-report('count submit', submitT);
+    );
+    await api('POST', `/counts/${session.sessionId}/record`, {
+      sessionId: session.sessionId,
+      counts: its.map((it, k) => {
+        const onHand = Number(
+          avail[k]!.json.positions.find(
+            (p) => p.locationId === shelfA && p.condition === 'sellable',
+          )?.onHand ?? 0,
+        );
+        return {
+          variantId: it.variantId,
+          locationId: shelfA,
+          counted: String(k === 0 ? Math.max(0, onHand - 1) : onHand),
+        };
+      }),
+    });
+    submitT.push(
+      (await api('POST', `/counts/${session.sessionId}/submit`, { sessionId: session.sessionId }))
+        .timing,
+    );
+  }
+  report('count submit', submitT);
 
-// Reads.
-const availT: Timing[] = [];
-for (const it of pickItems(N))
-  availT.push((await api('GET', `/availability?variantId=${it.variantId}`)).timing);
-report('availability, one variant', availT);
-const listT: Timing[] = [];
-for (let i = 0; i < N; i++)
-  listT.push((await api('GET', '/reports/stock_on_hand?limit=50')).timing);
-report('inventory list, 50 rows', listT);
+  // Reads.
+  const availT: Timing[] = [];
+  for (const it of pickItems(N))
+    availT.push((await api('GET', `/availability?variantId=${it.variantId}`)).timing);
+  report('availability, one variant', availT);
+  const listT: Timing[] = [];
+  for (let i = 0; i < N; i++)
+    listT.push((await api('GET', '/reports/stock_on_hand?limit=50')).timing);
+  report('inventory list, 50 rows', listT);
+}
 
 // Webhook delivery, commit to receipt -------------------------------------------------------------
 
@@ -360,11 +512,11 @@ if (args['webhook-url']) {
     req.on('end', () => {
       try {
         const e = JSON.parse(body) as {
-          data?: { variants?: Array<{ variantId: string }> };
+          data?: { positions?: Array<{ variantId: string }> };
           created_at?: string;
         };
         const createdAt = Date.parse(e.created_at ?? '');
-        for (const v of e.data?.variants ?? []) arrivals.set(v.variantId, at);
+        for (const p of e.data?.positions ?? []) arrivals.set(p.variantId, at);
         arrivals.set(`created:${at}`, createdAt);
       } catch {}
       res.writeHead(200).end('ok');

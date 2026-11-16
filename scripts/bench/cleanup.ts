@@ -1,8 +1,8 @@
 /**
  * Removes benchmark shops and their users (plan Section 8: measure on staging, then leave it as
  * it was). Deletes every row of the named shops from each table with a `shop_id` column, retrying
- * in rounds so foreign keys resolve without a hand-kept table order, then the benchmark users who
- * no longer belong to any shop.
+ * in rounds so foreign keys resolve without a hand-kept table order (cycles, such as a count and
+ * its operation, are cut first), then the benchmark users who no longer belong to any shop.
  *
  *   DATABASE_OWNER_URL=… tsx scripts/bench/cleanup.ts --names 'Bench shop %' --names 'Import bench' [--yes]
  *
@@ -59,6 +59,13 @@ try {
   }
 
   await client.query('begin');
+  // Foreign keys that form a cycle are cut first: a submitted count names its operation, and the
+  // operation names its count (migration 0032).
+  if (tables.includes('count_sessions'))
+    await client.query(
+      'update count_sessions set operation_id = null where shop_id = any($1::uuid[]) and operation_id is not null',
+      [shopIds],
+    );
   let remaining = [...tables];
   for (let round = 1; remaining.length > 0; round++) {
     if (round > tables.length + 1)

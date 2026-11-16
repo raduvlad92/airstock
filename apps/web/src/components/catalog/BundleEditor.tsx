@@ -1,8 +1,9 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, command, type Out } from '../../api.ts';
 import { can, useShopContext } from '../../context.tsx';
+import { useLocations } from '../../pages/warehouses.tsx';
 import { Badge, ErrorNotice, Field, formatDecimal, Loading } from '../ui.tsx';
 import {
   ConflictNotice,
@@ -29,23 +30,91 @@ interface ComponentDraft {
 
 const BUNDLE_COMPONENTS = 50;
 
-function BundleAvailability({ shopId, variantId }: { shopId: string; variantId: string }) {
-  const availability = useQuery({
-    queryKey: ['shop', shopId, 'bundle-availability', variantId],
-    queryFn: () => api<Availability>(`/shops/${shopId}/variants/${variantId}/bundle-availability`),
-  });
-  if (availability.isPending) return <Loading />;
-  if (!availability.data) return <ErrorNotice error={availability.error} />;
-  const a = availability.data;
-  const limit = a.components.find((c) => c.variantId === a.limitedBy);
+type Locations = Out<typeof ops.listLocations>;
+
+/** The location's path below its warehouse, since the warehouse names the group. */
+function pathInWarehouse(path: string, warehouseName: string): string {
+  if (!path.startsWith(warehouseName)) return path;
+  return path.slice(warehouseName.length).replace(/^\s*\/\s*/, '') || path;
+}
+
+/** Whole shop, one warehouse, or one location and the locations under it. */
+function PlaceSelect({
+  shopId,
+  value,
+  onChange,
+}: {
+  shopId: string;
+  value: string;
+  onChange(value: string): void;
+}) {
+  const locations = useLocations(shopId);
+  const groups = new Map<string, { name: string; locations: Locations['locations'] }>();
+  for (const l of locations.data?.locations ?? []) {
+    if (l.status !== 'active') continue;
+    const group = groups.get(l.warehouseId) ?? { name: l.warehouseName, locations: [] };
+    group.locations.push(l);
+    groups.set(l.warehouseId, group);
+  }
   return (
-    <div className="bundle-availability">
-      <p>
-        <strong>{formatDecimal(a.available)}</strong> available
-        {limit ? <span className="muted"> · limited by {limit.sku}</span> : null}
-      </p>
-      {a.partial ? (
-        <p className="muted small-text">Counts only the locations you can access.</p>
+    <Field label="Count stock in">
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Whole shop</option>
+        {[...groups].map(([warehouseId, group]) => (
+          <optgroup key={warehouseId} label={group.name}>
+            <option value={`warehouse:${warehouseId}`}>All of {group.name}</option>
+            {group.locations.map((l) => (
+              <option key={l.locationId} value={`location:${l.locationId}`}>
+                {pathInWarehouse(l.path, group.name)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+function BundleAvailability({
+  shopId,
+  variantId,
+  pickPlace,
+}: {
+  shopId: string;
+  variantId: string;
+  /** Listing locations needs storage.read; without it the whole shop is counted. */
+  pickPlace: boolean;
+}) {
+  const [place, setPlace] = useState('');
+  const [kind, placeId] = place.split(':');
+  const availability = useQuery({
+    queryKey: ['shop', shopId, 'bundle-availability', variantId, place],
+    queryFn: () =>
+      api<Availability>(`/shops/${shopId}/variants/${variantId}/bundle-availability`, {
+        query: {
+          warehouseId: kind === 'warehouse' ? placeId : undefined,
+          locationId: kind === 'location' ? placeId : undefined,
+        },
+      }),
+    placeholderData: keepPreviousData,
+  });
+  const a = availability.data;
+  const limit = a?.components.find((c) => c.variantId === a.limitedBy);
+  return (
+    <div className="bundle-availability stack">
+      {pickPlace ? <PlaceSelect shopId={shopId} value={place} onChange={setPlace} /> : null}
+      {availability.isPending ? <Loading /> : null}
+      {availability.error ? <ErrorNotice error={availability.error} /> : null}
+      {a ? (
+        <>
+          <p>
+            <strong>{formatDecimal(a.available)}</strong> available
+            {limit ? <span className="muted"> · limited by {limit.sku}</span> : null}
+          </p>
+          {a.partial ? (
+            <p className="muted small-text">Counts only the locations you can access.</p>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -199,7 +268,11 @@ export function BundleEditor({ shopId, variantId, canWrite = true }: EditorProps
               </table>
             </div>
             {can(context.data, 'inventory.read') ? (
-              <BundleAvailability shopId={shopId} variantId={variantId} />
+              <BundleAvailability
+                shopId={shopId}
+                variantId={variantId}
+                pickPlace={can(context.data, 'storage.read')}
+              />
             ) : null}
           </>
         ) : (

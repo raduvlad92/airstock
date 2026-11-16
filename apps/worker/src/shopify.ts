@@ -8,6 +8,7 @@ import {
   NotConnectedError,
   normalizeShopDomain,
   ORDER_TOPICS,
+  PRODUCT_TOPICS,
   receiveWebhook,
   type ShopifyConfig,
   type SyncDeps,
@@ -46,7 +47,7 @@ const INSTALL_COOKIE = '__Host-airstock_shopify';
 const INSTALL_TTL_SECONDS = 10 * 60;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Topics Airstock subscribes to. Others are acknowledged and ignored. */
-const HANDLED_TOPICS = new Set([...ORDER_TOPICS, 'app/uninstalled']);
+const HANDLED_TOPICS = new Set([...ORDER_TOPICS, ...PRODUCT_TOPICS, 'app/uninstalled']);
 /**
  * Shopify's mandatory privacy webhooks. Airstock stores no customer data (order and line
  * references only), so a data request or customer redaction has nothing to return or erase;

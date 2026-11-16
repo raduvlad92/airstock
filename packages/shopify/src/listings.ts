@@ -26,6 +26,11 @@ export interface MediaReader {
 
 export const PRODUCT_JOB = 'shopify.product_sync';
 
+/** A decimal without trailing zeros, as Shopify shows prices ("49.90" → "49.9"). */
+function decimalText(value: string): string {
+  return value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value;
+}
+
 interface ListingRow {
   shopify_product_id: string | null;
   origin: 'airstock' | 'shopify';
@@ -226,7 +231,7 @@ export async function publishListing(
           variants: detail.variants.map((v) => ({
             sku: v.sku,
             barcode: v.barcode,
-            price: v.price,
+            price: v.price === null ? null : decimalText(v.price),
             optionValues:
               detail.options.length > 0
                 ? v.optionValues

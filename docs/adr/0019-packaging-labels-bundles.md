@@ -1,6 +1,6 @@
 # 0019. Packs, barcodes, labels, bundles, and suppliers
 
-**Status:** Accepted, 15 November 2026. Implements Phase 1 plan Sections 5.3–5.6, decision D9, and exit criteria F7 and F8 (milestone N5).
+**Status:** Accepted, 15 November 2026. Implements Phase 1 plan Sections 5.3–5.6, decision D9, and exit criteria F7 and F8 (milestone N5). Label fonts amended 16 November 2026.
 
 **Summary:** Packs resolve exactly to base units with versions; barcodes unique per shop on the normalized code; labels resolved on the server and drawn in the browser; bundle availability computed on read; supplier costs behind `costs.read`
 
@@ -42,7 +42,7 @@
   - location labels: path, code, warehouse, and a QR code of `LOC:` and the location's ID, which stays valid when the location is renamed or recoded.
 - The browser draws the PDF:
   - `bwip-js` encodes each symbol into a bitmap through a small drawing context, with no canvas, so the same code runs in Node tests.
-  - `pdf-lib` places the bitmaps and text on the page.
+  - `pdf-lib` places the bitmaps and text on the page, in embedded Noto fonts that `fontkit` shapes.
   - The server spends no CPU on rendering.
 - Layouts are shared constants (`@airstock/core/labels`): A4 sheets of 3 × 8 (70 × 37 mm) and 4 × 10 (52.5 × 29.7 mm), and thermal labels of 50 × 25 mm and 100 × 50 mm. Templates save a layout with chosen fields per shop.
 - Labels are an MCP exception, because the output is a PDF made in the browser. The data operations are still in the registry and on REST.
@@ -64,16 +64,44 @@
 - **Text.**
   - The title (a name or a path) gets up to two lines. A path is cut from its start, so the most specific part stays.
   - Long text shrinks down to 5 pt, is then cut with an ellipsis, and finally loses its last lines. Nothing leaves the label's padding.
-  - Text uses the standard Helvetica fonts, so no font is embedded. A character outside their WinAnsi set prints without its accent ("ș" as "s") or as "?".
+  - Lines break at spaces and slashes, and between words in Chinese, Japanese, and Thai (`Intl.Segmenter`). Text is cut between whole characters, never inside one.
+- **Fonts.** Text prints in self-hosted Noto fonts. The Worker serves them from `/assets/fonts/` with their license (`OFL.txt`), and each PDF embeds a subset holding only the glyphs it draws. `@pdf-lib/fontkit` 1.1.1 reads and shapes them. The files are unmodified: unhinted static TTFs from notofonts.github.io (commit `cfa91e3`), and the Google Fonts static instance of Noto Sans SC 2.004.
+
+  | Font | Covers | Size per file | Loaded |
+  | --- | --- | --- | --- |
+  | Noto Sans Regular, Bold | Latin, Greek, Cyrillic | 431 kB | always; Bold when a label has bold text |
+  | Noto Sans Arabic Regular, Bold | Arabic, Persian, Urdu | 142 kB | when a label has such characters |
+  | Noto Sans Hebrew Regular, Bold | Hebrew | 17 kB | as above |
+  | Noto Sans Thai Regular, Bold | Thai | 21 kB | as above |
+  | Noto Sans Devanagari Regular, Bold | Hindi, Marathi, Nepali | 184 kB | as above |
+  | Noto Sans SC Regular | Chinese, and Japanese kana and kanji | 10.5 MB | as above |
+
+  - Noto Sans covers the Latin letters of European languages and Vietnamese, including Romanian "ș" and "ț", Polish, Czech, Hungarian, and Turkish.
+  - A script font loads only when a label has a character that Noto Sans lacks and that belongs to the script. Each file is fetched at most once per page load.
+  - Noto Sans SC has no bold file. Bold text in it is drawn as the regular glyphs with an outline 0.03 of the font size wide.
+  - **CJK trade-off.** One CJK font, fetched only on demand. Noto Sans SC covers all CJK Unified Ideographs and kana, so Chinese and Japanese print; kanji take Chinese glyph forms. The download is 10.5 MB (4.8 MB if compressed with Brotli), under the Workers limit of 25 MiB per static file. It adds 6.7 MB to the repository's history, of 7.6 MB for all the label fonts. Korean Hangul is not covered: Noto Sans KR would add another 6.2 MB, so Hangul goes to the warning list. Adding a script is one font file and one entry in `SCRIPT_FAMILIES` (`apps/web/src/labels/fonts.ts`).
+- **Shaping and direction.**
+  - Text is composed (NFC), runs of spaces become one, and invisible format characters are dropped.
+  - Each line is split into runs by font: Noto Sans first, and spaces, digits, and punctuation stay in the font of the text around them.
+  - `bidi-js` 1.1.0 applies the Unicode bidirectional algorithm to each line, with the direction of its first strong character, and mirrors brackets in right-to-left text. fontkit shapes each run: Arabic joining, Devanagari reordering, Thai marks.
+  - pdf-lib places glyphs by their advance widths, so neither kerning nor GPOS mark positioning applies; marks sit where the font draws them by default. Text stays left-aligned in every script.
+  - The planner measures with the same shaped runs, and the on-screen preview draws the same glyph outlines on its canvas, so the preview matches the PDF.
+- **Characters no font has** (Hangul, emoji, rare scripts) print as "?". The labels page lists them under the preview before the download, and again in the download message.
+- **fontkit workarounds.**
+  - fontkit writes subset glyph offsets in the short `loca` format, which halves them. In fonts with odd-length glyph records, such as the unhinted Noto Sans and Noto Sans SC builds, every later glyph then shifts and the PDF shows wrong or missing letters. `evenGlyphs` pads the records when a font loads.
+  - Its Indic shaper calls a transpiled generator, so `regenerator-runtime` 0.14.1 is installed as a global.
+  - Subsets of CFF-based OTF fonts came out invalid, so every label font is TrueType.
+- **Size.** A one-page A4 sheet of 24 labels (8 Romanian names, Code 128) is 6.4 kB with Helvetica and 11.0 kB with the two embedded Noto Sans subsets. 2,000 labels (500 distinct) build in 0.8 s in Node.
 - **Density.** The page warns when a barcode would print with modules under 0.19 mm (linear) or 0.25 mm (QR), the point where scanning becomes unreliable. A4 layouts can start at a later position on a partly used sheet. Thermal layouts put one label on each page, sized to the label.
-- **Loading.** bwip-js and pdf-lib load only on the labels page, through a dynamic `import()`. That chunk is 624 kB (244 kB gzipped). The new pages and editors stay in the main bundle, which grows from 518 kB to 575 kB (157 kB to 171 kB gzipped). Loading them lazily made rolldown split shared modules out of the entry, which costs an extra round trip at startup.
-- **CSP.** Unchanged. The PDF is saved through a `blob:` URL on a download link, as CSV exports already are. The preview is drawn on a canvas, and the lazy chunk is `script-src 'self'`.
+- **Loading.** bwip-js, pdf-lib, fontkit, and bidi-js load only on the labels page, through a dynamic `import()`. That chunk is 1,361 kB (584 kB gzipped), up from 624 kB (244 kB gzipped) before the fonts; fontkit, with its Unicode and shaping tables, is most of the difference. Font files are fetched at run time, not bundled. The new pages and editors stay in the main bundle, which grows from 518 kB to 575 kB (157 kB to 171 kB gzipped). Loading them lazily made rolldown split shared modules out of the entry, which costs an extra round trip at startup.
+- **CSP.** Unchanged. The PDF is saved through a `blob:` URL on a download link, as CSV exports already are. Font files are fetched from the same origin (`connect-src 'self'`), and the preview draws glyph outlines on a canvas, so no `font-src` is needed. The lazy chunk is `script-src 'self'` and contains no `eval`.
 - **F8 decoding.** zxing-wasm 3.1.6 decodes in the test process, using the same vendored `zxing-reader.js` and `zxing_reader.wasm` that `/scan-test` serves; the wasm is read from disk instead of fetched. Decoding in the dashboard page would need `'wasm-unsafe-eval'` in its CSP for the sake of a test. The tests decode the images read back out of the PDF file, not the bitmaps before they are embedded, so they prove what the file holds.
   - A unit test builds PDFs in all four layouts with every symbology and then checks each image read back from the file:
     - its pixels match the rasterizer's bitmap;
     - it sits inside its label's padding, with modules of at least 0.19 mm;
     - it decodes to its code.
-  - The Chromium end-to-end test creates EAN-13 and UPC-A codes, generated Code 128 and QR codes, a generated code on a case, and a location. It prints them from rows selected in the grid and downloads the PDF. Every decoded code must resolve through `lookup_barcode` to the variant or pack it was printed for, the location QR must name the location, and the page must log no CSP violations.
+  - Text is read back from the PDF through each font's ToUnicode map. Romanian, Polish, Greek, and Cyrillic names print whole with nothing missing, and the embedded subsets hold the same outlines as the font files. Other tests check the warning list, that a script's font is fetched only when its characters appear, and the right-to-left order of Arabic and Hebrew lines.
+  - The Chromium end-to-end test creates EAN-13 and UPC-A codes, generated Code 128 and QR codes, a generated code on a case, and a location. It prints them from rows selected in the grid and downloads the PDF. Every decoded code must resolve through `lookup_barcode` to the variant or pack it was printed for, the location QR must name the location, a product named "Bol roșu" must print with its "ș", and the page must log no CSP violations.
   - Rasterizing the PDF pages (pdf.js) was not added. Reading the images and their placements back covers everything a page raster would, except a viewer's own scaling.
 
 ### Bundles
@@ -104,7 +132,7 @@
 ## Consequences
 
 - Phase 2 counts and receipts in packs can use `pack_versions` directly.
-- The label renderer is the only consumer of `bwip-js` and `pdf-lib`. Both load only on the labels page, so other screens don't pay for them.
+- The label renderer is the only consumer of `bwip-js`, `pdf-lib`, `@pdf-lib/fontkit`, `bidi-js`, and `regenerator-runtime`. They load only on the labels page, so other screens don't pay for them.
 - **Across milestones:**
   - `create_product` takes an optional `barcode`. Its symbology is inferred: a valid GTIN by its length, else Code 128 when it fits, else other.
   - The one duplicate check (plan 5.7) refuses a code another variant or pack holds, matched on the normalized form. `check_duplicates` names that owner.

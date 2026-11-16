@@ -1,4 +1,7 @@
 // @vitest-environment happy-dom
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { normalizeBarcode } from '@airstock/core/barcodes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
@@ -59,12 +62,20 @@ const BUILTIN = [
 
 type Handler = (body: unknown) => unknown;
 
+// A plain path: under happy-dom the global URL is the DOM's, which node:fs does not take.
+const FONT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../worker/public/assets/fonts');
+
+/** Answers API calls from `routes`, and label font requests from the files the Worker serves. */
 function mockApi(routes: Record<string, Handler | unknown>) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: URL | string, init: RequestInit = {}) => {
       const url = new URL(String(input), 'http://localhost');
+      if (url.pathname.startsWith('/assets/fonts/')) {
+        const file = url.pathname.slice('/assets/fonts/'.length);
+        return new Response(new Uint8Array(await readFile(join(FONT_DIR, file))));
+      }
       const method = init.method ?? 'GET';
       const path = url.pathname.replace('/api/v1', '');
       const body = init.body ? JSON.parse(String(init.body)) : undefined;
@@ -203,6 +214,22 @@ describe('labels page', () => {
     expect(pdf.images.some((i) => Buffer.from(i.pixels).equals(Buffer.from(ean.pixels)))).toBe(
       true,
     );
+  });
+
+  it('says before the download which characters no font has', async () => {
+    const data = itemLabels([1, 1]);
+    data.labels[0]!.name = 'Cană roșie 🎉';
+    mockApi({
+      [`GET /shops/${SHOP}`]: context(['catalog.read', 'catalog.write']),
+      'GET /shops': { shops: [] },
+      [`GET /shops/${SHOP}/labels/templates`]: { templates: BUILTIN },
+      [`POST /shops/${SHOP}/labels/items`]: data,
+    });
+    renderAt(`/app/shops/${SHOP}/labels?variants=${VARIANT},${VARIANT}:${CASE}`);
+    // "ș" prints; only the emoji is listed.
+    expect(
+      await screen.findByText('No label font has this character, so it prints as “?”: 🎉'),
+    ).toBeTruthy();
   });
 
   it('saves a custom choice of fields as a template', async () => {

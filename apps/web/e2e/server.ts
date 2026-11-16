@@ -148,6 +148,8 @@ const TYPES: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
   '.wasm': 'application/wasm',
   '.html': 'text/html',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 async function body(req: IncomingMessage): Promise<Buffer> {

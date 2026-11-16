@@ -59,13 +59,13 @@ test('every barcode on printed labels decodes back to its record', async ({ page
   const call = api(page, shopId);
 
   // Four variants: EAN-13 and UPC-A as entered, Code 128 and QR generated; and a case of mugs
-  // with its own generated code.
+  // with its own generated code. The bowl's name has a Romanian "ș".
   const variants: Record<string, string> = {};
-  for (const [name, sku] of [
-    ['Bowl', 'BOWL-1'],
-    ['Lamp', 'LAMP-1'],
-    ['Mug', 'MUG-1'],
-    ['Plate', 'PLATE-1'],
+  for (const [key, sku, name] of [
+    ['Bowl', 'BOWL-1', 'Bol roșu'],
+    ['Lamp', 'LAMP-1', 'Lamp'],
+    ['Mug', 'MUG-1', 'Mug'],
+    ['Plate', 'PLATE-1', 'Plate'],
   ] as const) {
     const created = await call<{ variantId: string }>('/items', {
       name,
@@ -73,7 +73,7 @@ test('every barcode on printed labels decodes back to its record', async ({ page
       price: '12.50',
       acknowledgeSimilar: true,
     });
-    variants[name] = created.variantId;
+    variants[key] = created.variantId;
   }
   const packaging = (variantId: string) => call<Packaging>(`/variants/${variantId}/packaging`);
   await call(`/variants/${variants.Mug}/barcodes`, {
@@ -136,6 +136,9 @@ test('every barcode on printed labels decodes back to its record', async ({ page
   const printed = await decodePdf((await items.path())!);
   expect(printed.pdf.placements).toHaveLength(7);
   expect(printed.texts).toHaveLength(5);
+  // The name prints as typed, in an embedded font, and the page warned about nothing.
+  expect(printed.pdf.texts.map((t) => t.text)).toContain('Bol roșu');
+  await expect(page.getByText(/No label font has/)).toHaveCount(0);
 
   // Each decoded code resolves, through lookup_barcode, to the variant or pack it was printed for.
   const resolved = new Set<string>();

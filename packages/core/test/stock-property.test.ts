@@ -205,7 +205,7 @@ describe('stock conservation with lots, serials, packs, bundles, and shortages (
               );
               reservations.push(r.reservationId);
             } else if (s.kind === 'sweep') {
-              await sweepExpiredReservations(db);
+              await sweepExpiredReservations(db, 50, [shop.shopId]);
               // Only this shop: a global sweep fills other files' shortages under them.
               await sweepShortages(db, 50, [shop.shopId]);
             } else if (reservations.length > 0) {

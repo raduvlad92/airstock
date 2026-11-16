@@ -243,7 +243,8 @@ describe('expiry', () => {
       `update reservations set expires_at = now() - interval '1 second' where id = $1`,
       [r.reservationId],
     );
-    expect(await sweepExpiredReservations(db)).toBeGreaterThanOrEqual(1);
+    // Only this shop: other files sweep their own, so this sweep is the one that releases it.
+    expect(await sweepExpiredReservations(db, 50, [shop.shopId])).toBeGreaterThanOrEqual(1);
     const [row] = await ownerQuery<{ status: string }>(
       'select status from reservations where id = $1',
       [r.reservationId],

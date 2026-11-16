@@ -293,7 +293,7 @@ describe('lots and expiry (A37, D4)', () => {
     });
     const again = await h.run(ops.reserveStock, { variantId, quantity: '5', lotCode: 'b1' });
     expect(again.allocations).toHaveLength(1);
-    await sweepExpiredReservations(db);
+    await sweepExpiredReservations(db, 50, [shop.shopId]);
     const [row] = await ownerQuery<{ status: string }>(
       'select status from reservations where id = $1',
       [r.reservationId],

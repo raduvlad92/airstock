@@ -114,9 +114,9 @@ test('the scan page looks codes up from a keyboard-wedge scanner and the scan fi
   await page.getByRole('button', { name: 'Create with this code' }).click();
   await expect(page.getByRole('heading', { name: 'Sleeves' })).toBeVisible();
 
-  // Flows not built yet say so.
-  await page.getByRole('button', { name: 'Count' }).click();
-  await expect(page.getByText(/coming soon/)).toBeVisible();
+  // Count opens on the current location.
+  await page.getByRole('button', { name: 'Count', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Count Main stock/A-01' })).toBeVisible();
 
   expect(violations).toEqual([]);
 });

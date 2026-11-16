@@ -16,6 +16,7 @@ type Created = Out<typeof ops.createItem>;
  * An unknown code (plan 5.12): attach it to an existing variant found by search, or create a new
  * item with it, after the same duplicate check as the dashboard (ADR 0019). Both are ordinary
  * catalog commands; afterwards the code is looked up again, so the flow continues with the item.
+ * A graded card's certificate can also go straight to Quick add, which creates and receives it.
  */
 export function UnknownCode({
   env,
@@ -50,6 +51,15 @@ export function UnknownCode({
               Create new item
             </button>
           </div>
+          {can(env.shop, 'inventory.receive') ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => env.startFlow('quick-add', { certificate: code })}
+            >
+              Quick add as a one-of-a-kind item
+            </button>
+          ) : null}
         </>
       ) : mode === 'attach' ? (
         <AttachCode env={env} code={code} onDone={finish} onBack={() => setMode('choose')} />

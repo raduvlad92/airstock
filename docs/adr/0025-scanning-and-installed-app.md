@@ -38,6 +38,40 @@
 - `'wasm-unsafe-eval'` is the narrowest source expression that lets zxing run: iOS Safari has no `BarcodeDetector`, and the pilot merchant scans with an iPhone.
 - A flow framework keeps each new flow (count, move, receive against a PO, quick add) a small component, while the camera, the wedge, and the feedback behave the same everywhere.
 
+## Update, 16 November 2026 (milestone I4b): count, move, receive against an order, quick add
+
+The remaining flows are plugged in as components, as planned above; none needed new server code.
+
+- **Scanning a quantity.** Count, Move, and receiving against an order share one tally: each scan adds one of what was scanned (a case adds a case), a case mixed with loose units switches the line to units, and the number can be typed. Every line reads like "2 × Case (6) = 12 units" in the list shown above the confirm button.
+- **Count.** It has two modes.
+  - **Quick count:** scan the shelf's label, then the items, and confirm. That posts one `inventory.counts.quick`. Items not scanned stay as they are.
+  - **Count session:** start one for the current shelf, or open an open one. Each item is recorded with **Record** (`inventory.counts.record`), and **None here** records 0 for a listed line at the shelf. Lines that moved after they were counted (ADR 0031) show their movements, and submit stays disabled until each has **Keep my count** or **Add the movements**.
+  - **Below reserved:** a `below_reserved` answer opens a chooser per claim: keep it, release it, or move it to other stock. Each quantity defaults to what is still needed, and nothing is sent until every position is covered.
+  - **Short pick:** Pick's **Count that shelf** opens a quick count pinned to that shelf, with the item listed at 0 and the missing quantity shown. The preset now also carries the SKU and lot, so Count can look the item up.
+- **Move.**
+  - It starts from the current location. Items are scanned as in Count. Serials are scanned one by one, and a serial recorded elsewhere is refused. When the shelf holds more than one lot, the person chooses the lot.
+  - The next location label is the destination. A label in another warehouse is refused, because that is a transfer.
+  - One `inventory.moves.create`.
+- **Receive against an order.** Receive gains a second source, **Purchase order**.
+  - **Choosing the order:** the open orders for the current location's warehouse (with the others one tap away). The number can be typed or scanned as `PO-0007`, `0007`, or `7`; order PDFs carry no barcode yet. Scanning an item instead finds the open orders with a line for it.
+  - **Matching a line:** by variant, then pack, then open quantity.
+  - **Confirming:** the same confirm step as the free receipt. The quantity is in the line's pack or in units, and any other pack counts as units. Lots, expiry, and serials work as in the free receipt. Ordered, received, and open are shown.
+  - **Over-receipt:** it needs a ticked box and is sent with `confirmOverReceipt`. The receipt goes through `purchasing.orders.receive`.
+- **Quick add.** It has two modes.
+  - **One of a kind:**
+    - Pictures from the camera or the library.
+    - The certificate number, scanned or typed. It becomes the barcode and the family's `certificate_number`.
+    - The family: Trading cards by default, then the last one used. Owners can add the starter families from the form.
+    - The family's fields of simple types, the name, the price, the cost (with `costs.read`), and the current location.
+    - One `inventory.quick_add`, then each picture goes through the media pipeline (`uploadToProduct`), shrunk to the shop's limit, with a retry for any that fail.
+  - **Unit of a shared item:** scan the serial-tracked item and the new serial, then `inventory.quick_add` with `variantId` and `serial`.
+  - **From an unknown code:** the unknown-code screen offers Quick add with the code as the certificate.
+  - **List on Shopify** is shown disabled, with a note, until the connector (I6).
+- **iOS.**
+  - Pictures come from `<input type="file" accept="image/*" capture="environment">`, which opens the rear camera in Safari and in the installed app on current iOS. A second input without `capture` (**From library**) is the fallback where standalone mode opens only the library. The owner's run checks this (Phase 2 status, 2.1, step 15).
+  - Taking a picture makes iOS end the scanner's camera track, so the scanner now reopens the camera when its track ends.
+  - Previews are `data:` URLs of the prepared 320 px thumbnail, because the CSP's `img-src` allows no `blob:`.
+
 ## Revisit when
 
 - iOS ships `BarcodeDetector` with the formats above: zxing then stays only as the fallback.

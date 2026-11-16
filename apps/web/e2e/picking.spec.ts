@@ -135,9 +135,14 @@ test('a pick list for 20 orders is printed, picked by scanning, and fulfilled at
   await expect(page.getByRole('status')).toHaveText(
     'Short: 1 × CARD-1 not found at Main stock/A-01. Flagged for a count.',
   );
-  // The short line hands over to Count (wired in I4b) with its shelf, and back.
+  // The short line hands over to Count with its shelf and the item listed, and back.
   await page.getByRole('button', { name: 'Count that shelf' }).click();
-  await expect(page.getByText('Requested: Main stock/A-01.')).toBeVisible();
+  await expect(
+    page.getByText(
+      'Short pick: 1 × CARD-1 missing at Main stock/A-01. Count what is on the shelf.',
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole('list', { name: 'To confirm' })).toHaveText('CARD-1: 0 units');
   await page.getByRole('button', { name: 'Pick', exact: true }).click();
 
   // Picking changed nothing in stock.

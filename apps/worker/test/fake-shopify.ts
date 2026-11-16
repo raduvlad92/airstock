@@ -31,6 +31,8 @@ export class FakeStore implements ShopifyAdmin {
   reads = 0;
   /** The next writes fail as throttled (Shopify's cost limit). */
   throttleNext = 0;
+  /** Inventory items whose product was deleted in Shopify. */
+  readonly deletedItems = new Set<string>();
   /** Orders per page of the search by updated time (Shopify's is 25); one page by default. */
   orderPageSize = Number.POSITIVE_INFINITY;
   /** Orders Shopify's search by updated time does not list yet (its index trails). */
@@ -463,6 +465,17 @@ export class FakeStore implements ShopifyAdmin {
       throw new ShopifyApiError('Throttled', 200, true, 'THROTTLED');
     }
     this.setCalls.push(input.quantities.length);
+    // An item deleted in Shopify: the whole call is refused with a user error (nothing applied),
+    // which the HTTP client raises as a non-retryable ShopifyApiError.
+    const gone = input.quantities.find((q) => this.deletedItems.has(q.inventoryItemId));
+    if (gone) {
+      throw new ShopifyApiError(
+        'The specified inventory item could not be found.',
+        200,
+        false,
+        'INVALID_INVENTORY_ITEM',
+      );
+    }
     const stale: number[] = [];
     input.quantities.forEach((q, i) => {
       const actual = this.levels.get(this.key(q.inventoryItemId, q.locationId)) ?? 0;

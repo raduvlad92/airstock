@@ -488,4 +488,26 @@ describe('Shopify connector review findings', () => {
     );
     expect(stock).toEqual({ on_hand: '7.000000', allocated: '0.000000' });
   });
+  // FINDING 12 (pushes stop for unrelated items; main). A batch writes up to 100 levels in one
+  // inventorySetQuantities call; any user error other than a stale quantity throws for the whole
+  // call, and pushLevels does not go on to the other levels or batches. One level Shopify refuses
+  // for good (its product deleted in Shopify, the item no longer stocked at that location, the
+  // location deactivated) makes every push that includes it fail: the queue retries the same
+  // batch until it gives up, and the reconciler's pending push throws on every run (before it
+  // records `reconciled_at`). Other items stop syncing until someone unmaps the bad one.
+  it.fails('F12: one level Shopify refuses does not stop the other levels', async () => {
+    const s = await setupItems('Deleted item', [5, 5]);
+    const [gone, kept] = s.items as [Many['items'][0], Many['items'][0]];
+    // The merchant deletes the first product in Shopify; it is still mapped here.
+    s.store.deletedItems.add(gone.shopify.inventoryItemId);
+    await h.receive(s.m, gone.variantId, 1);
+    await h.receive(s.m, kept.variantId, 1);
+    await h.flushTogether(s.m.shopId).catch(() => {});
+    // The queue retries, and the reconciler runs.
+    await h.flushTogether(s.m.shopId).catch(() => {});
+    await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true }).catch(
+      () => {},
+    );
+    expect(s.store.available(kept.shopify)).toBe(6);
+  });
 });

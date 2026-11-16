@@ -1469,6 +1469,8 @@ button.danger {
 .webhook-actions {
   margin-top: 0.75rem;
   align-items: flex-end;
+}
+
 /* Scanning app (/app/scan, plan D13) ------------------------------------------------------ */
 /* Phone first and one-handed: the flow tabs and the main actions sit at the bottom, every
    control is at least 48 px tall, and nothing depends on hover. */

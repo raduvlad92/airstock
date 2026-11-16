@@ -50,6 +50,28 @@ const GROUPS: Record<string, string[]> = {
     'reservations',
     'reservation_allocations',
     'idempotency_records',
+    // Phase 2 (I1–I3): lots, serials, costs, and the documents behind stock operations.
+    'lots',
+    'serial_units',
+    'variant_costs',
+    'variant_cost_history',
+    'allocation_rules',
+    'allocation_rule_locations',
+    'transfers',
+    'transfer_lines',
+    'returns',
+    'return_lines',
+    'return_units',
+    'return_inspections',
+    'count_sessions',
+    'count_lines',
+    'purchase_orders',
+    'purchase_order_lines',
+    'purchase_order_receipts',
+    'purchase_order_counters',
+    'reorder_rules',
+    'alerts',
+    'stock_reconciliations',
   ],
   storage: ['warehouses', 'locations', 'membership_location_scopes'],
   history: ['audit_events'],
@@ -138,6 +160,35 @@ const report = {
     ? Math.round(((byGroup.catalog ?? 0) + (byGroup.stock ?? 0)) / variants)
     : null,
   bytesPerVariantCatalogOnly: variants ? Math.round((byGroup.catalog ?? 0) / variants) : null,
+  // Per stock record (plan Section 8: bytes per entry, lot, and serial), heap and indexes.
+  bytesPerRecord: Object.fromEntries(
+    [
+      ['entry', 'inventory_entries'],
+      ['operation', 'inventory_operations'],
+      ['position', 'inventory_positions'],
+      ['lot', 'lots'],
+      ['serial', 'serial_units'],
+      ['reservation', 'reservations'],
+      ['allocation', 'reservation_allocations'],
+      ['costHistory', 'variant_cost_history'],
+      ['idempotencyRecord', 'idempotency_records'],
+    ].flatMap(([label, table]) => {
+      const t = tables.find((x) => x.table === table);
+      const n = Number(t?.rows ?? 0);
+      if (!t || n === 0) return [];
+      return [
+        [
+          label,
+          {
+            rows: n,
+            heap: Math.round(Number(t.heap) / n),
+            indexes: Math.round(Number(t.indexes) / n),
+            total: Math.round(Number(t.total) / n),
+          },
+        ],
+      ];
+    }),
+  ),
   bytesPerAuditEvent:
     events && audit
       ? {

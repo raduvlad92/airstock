@@ -310,6 +310,17 @@ export async function publishListing(
         ...(push.has('status') ? { status: SHOPIFY_STATUS[airstock.status] } : {}),
         media: staged.map((s) => ({ originalSource: s.source, alt: s.alt })),
       });
+      if (staged.length > 0) {
+        // Shopify has these pictures now: recorded at once, so a failure further on (the read
+        // back, a price) does not upload them again on the retry.
+        await deps.db.transaction({ shopId, userId: null }, (tx) =>
+          tx.query(
+            `update shopify_listings set pictures = pictures || $3::jsonb, updated_at = now()
+             where connection_id = $1 and product_id = $2`,
+            [connectionId, productId, JSON.stringify(pictures)],
+          ),
+        );
+      }
     }
     if (push.has('prices')) {
       const prices = Object.entries(airstock.prices).flatMap(([sku, price]) => {

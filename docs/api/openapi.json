@@ -3751,7 +3751,7 @@
                               "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                             },
                             "value": {
-                              "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                              "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                             }
                           },
                           "required": [
@@ -3782,7 +3782,7 @@
                                     "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                   },
                                   "value": {
-                                    "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                    "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                   }
                                 },
                                 "required": [
@@ -4375,7 +4375,7 @@
                                           "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                         },
                                         "value": {
-                                          "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                          "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                         }
                                       },
                                       "required": [
@@ -4407,7 +4407,7 @@
                                                 "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                               },
                                               "value": {
-                                                "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                                "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                               }
                                             },
                                             "required": [
@@ -4620,7 +4620,7 @@
                                   "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                 },
                                 "value": {
-                                  "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                  "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                 }
                               },
                               "required": [
@@ -4651,7 +4651,7 @@
                                         "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                       },
                                       "value": {
-                                        "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                        "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                       }
                                     },
                                     "required": [
@@ -4808,7 +4808,7 @@
                                         "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                       },
                                       "value": {
-                                        "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                        "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                       }
                                     },
                                     "required": [
@@ -4840,7 +4840,7 @@
                                               "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                             },
                                             "value": {
-                                              "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                              "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                             }
                                           },
                                           "required": [
@@ -8407,7 +8407,7 @@
                               "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                             },
                             "value": {
-                              "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                              "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                             }
                           },
                           "required": [
@@ -8438,7 +8438,7 @@
                                     "description": "Text: contains, equals, starts_with. Numbers, money, measurements: eq, neq, lt, lte, gt, gte, between. Dates: before, after, on, between, within_next_days, within_last_days. Single select: is_any_of, is_none_of. Multi select and tags: has_any, has_all, has_none. Boolean: is. Relationships: has_related. Any: is_empty, is_not_empty."
                                   },
                                   "value": {
-                                    "description": "Option labels or IDs for selects; \"2 kg\" for measurements; [from, to] for between."
+                                    "description": "Option labels or IDs for selects, and family names or IDs for family; \"2 kg\" for measurements; [from, to] for between."
                                   }
                                 },
                                 "required": [

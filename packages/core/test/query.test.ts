@@ -497,6 +497,49 @@ describe('catalog query behaviour', () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it('filters families by name as well as by ID, and refuses a name no family has (F13)', async () => {
+    const family = await h.run(ops.createFamily, { name: 'Garden furniture' });
+    const bench = await h.run(ops.createItem, {
+      name: 'Teak bench',
+      sku: 'FAM-BENCH-1',
+      family: 'Garden furniture',
+    });
+    const ids = async (filter: unknown[]) =>
+      (await h.run(ops.queryItems, { mode: 'products', filter, limit: 200 })).rows.map(
+        (r: { productId: string }) => r.productId,
+      );
+    const byName = await ids([{ field: 'family', op: 'is_any_of', value: ['garden FURNITURE'] }]);
+    expect(byName).toEqual([bench.productId]);
+    expect(await ids([{ field: 'family', op: 'is_any_of', value: [family.family.id] }])).toEqual(
+      byName,
+    );
+    expect(
+      await ids([{ any: [{ field: 'family', op: 'is_any_of', value: 'Garden furniture' }] }]),
+    ).toEqual(byName);
+    expect(
+      await ids([{ field: 'family', op: 'is_none_of', value: ['Garden furniture'] }]),
+    ).not.toContain(bench.productId);
+    // ChatGPT once passed a name that matched nothing and got an empty page with no error.
+    await expect(
+      h.run(ops.queryItems, {
+        filter: [
+          { field: 'price', op: 'gte', value: '0' },
+          { field: 'family', op: 'is_any_of', value: ['Furniture'] },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      extra: {
+        errors: [
+          {
+            path: 'filter.1.value',
+            message: expect.stringContaining('"Garden furniture"'),
+          },
+        ],
+      },
+    });
+  });
+
   it('returns selected values with their inheritance state and summarises variants in products mode', async () => {
     const res = await h.run(ops.queryItems, {
       mode: 'variants',

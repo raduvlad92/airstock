@@ -348,10 +348,12 @@ h3 {
   color: var(--muted);
 }
 
+/* Centred, so a badge beside buttons keeps its own height instead of stretching to theirs. */
 .chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
+  align-items: center;
 }
 
 .facts {
@@ -621,11 +623,12 @@ button.danger {
   color: var(--error);
 }
 
+/* Cells line up at the top, so a hint under one field never shifts its neighbours' inputs. */
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 0.75rem;
-  align-items: end;
+  align-items: start;
 }
 
 .form-actions {
@@ -643,6 +646,14 @@ button.danger {
 
 .inline-form .field {
   flex: 1 1 11rem;
+}
+
+/*
+ * The row lines up at the bottom, so a hint under one field would lift its input above the
+ * others. Inline forms put their hint in a fine note instead, on a line of its own.
+ */
+.inline-form > .fine {
+  flex-basis: 100%;
 }
 
 .stack {
@@ -682,6 +693,13 @@ button.danger {
   display: flex;
   gap: 0.45rem;
   align-items: center;
+}
+
+/* In a form grid, checkboxes, actions, and notices take a row of their own. */
+.form-grid > .check,
+.form-grid > .form-actions,
+.form-grid > .notice {
+  grid-column: 1 / -1;
 }
 
 .loading {

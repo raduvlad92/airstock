@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useState } from 'react';
 import { api, type Out } from '../api.ts';
+import { CurrencySelect, TimeZoneSelect } from '../components/pickers.tsx';
 import { Card, Empty, ErrorNotice, Field, Loading, Notice, PageHeader } from '../components/ui.tsx';
 import { useShops } from '../context.tsx';
 
@@ -65,7 +66,7 @@ function CreateShop() {
     mutationFn: () =>
       api<Out<typeof ops.createShop>>('/shops', {
         method: 'POST',
-        body: { name, currency: currency.trim().toUpperCase(), timezone },
+        body: { name, currency, timezone },
       }),
     onSuccess: async (shop) => {
       await queryClient.invalidateQueries({ queryKey: ['shops'] });
@@ -82,22 +83,11 @@ function CreateShop() {
         <Field label="Shop name">
           <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
         </Field>
-        <Field label="Currency" hint="ISO 4217, such as EUR or RON.">
-          <input
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            pattern="[A-Za-z]{3}"
-            maxLength={3}
-            required
-          />
+        <Field label="Currency">
+          <CurrencySelect value={currency} onChange={(e) => setCurrency(e.target.value)} required />
         </Field>
         <Field label="Time zone">
-          <input
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            required
-            maxLength={64}
-          />
+          <TimeZoneSelect value={timezone} onChange={(e) => setTimezone(e.target.value)} required />
         </Field>
         <div className="form-actions">
           <button type="submit" disabled={create.isPending}>

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { type FormEvent, useMemo, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
+import { countryForTimeZone, countryName } from '../components/countries.ts';
+import { CountrySelect, CurrencySelect, TimeZoneSelect } from '../components/pickers.tsx';
 import {
   Badge,
   Card,
@@ -13,13 +15,14 @@ import {
   PageHeader,
   titleCase,
 } from '../components/ui.tsx';
-import { can, useShopContext } from '../context.tsx';
+import { can, type ShopContext, useShopContext } from '../context.tsx';
 
 type Locations = Out<typeof ops.listLocations>;
 type Location = Locations['locations'][number];
 type Warehouses = Out<typeof ops.listWarehouses>;
 type Warehouse = Warehouses['warehouses'][number];
 type Contract = NonNullable<Warehouse['contract']>;
+type Shop = ShopContext['shop'];
 
 export function useLocations(shopId: string, enabled = true) {
   return useQuery({
@@ -99,6 +102,7 @@ export function WarehousesPage() {
         <WarehouseCard
           key={w.warehouseId}
           shopId={shopId}
+          shop={context.data?.shop}
           warehouse={w}
           locations={byWarehouse.get(w.warehouseId) ?? []}
           commercial={warehouses.data?.commercialVisible ?? false}
@@ -121,12 +125,14 @@ export function WarehousesPage() {
 
 function WarehouseCard({
   shopId,
+  shop,
   warehouse: w,
   locations,
   commercial,
   manage,
 }: {
   shopId: string;
+  shop: Shop | undefined;
   warehouse: Warehouse;
   locations: Location[];
   commercial: boolean;
@@ -169,15 +175,16 @@ function WarehouseCard({
   return (
     <Card title={w.name} actions={actions}>
       <ErrorNotice error={toggle.error} />
-      {editing ? (
+      {editing && shop ? (
         <WarehouseForm
           shopId={shopId}
+          shop={shop}
           warehouse={w}
           commercial={commercial}
           onDone={() => setEditing(false)}
         />
       ) : (
-        <WarehouseFacts warehouse={w} commercial={commercial} />
+        <WarehouseFacts warehouse={w} shop={shop} commercial={commercial} />
       )}
       <LocationTree shopId={shopId} locations={locations} manage={manage && !archived} />
     </Card>
@@ -186,15 +193,17 @@ function WarehouseCard({
 
 function WarehouseFacts({
   warehouse: w,
+  shop,
   commercial,
 }: {
   warehouse: Warehouse;
+  shop: Shop | undefined;
   commercial: boolean;
 }) {
   const address = w.address
     ? [w.address.line1, w.address.line2, w.address.postalCode, w.address.city, w.address.region]
         .filter(Boolean)
-        .concat(w.address.country ? [w.address.country] : [])
+        .concat(w.address.country ? [countryName(w.address.country)] : [])
         .join(', ')
     : '';
   const contact = w.contact
@@ -222,7 +231,7 @@ function WarehouseFacts({
           </>
         ) : null}
         <dt>Time zone</dt>
-        <dd>{w.timezone ?? 'Shop time zone'}</dd>
+        <dd>{w.timezone ?? shop?.timezone ?? 'Shop time zone'}</dd>
         {w.providerRefs.length > 0 ? (
           <>
             <dt>Provider IDs</dt>
@@ -292,12 +301,13 @@ interface RateDraft {
   unit: string;
 }
 
-function draftFrom(w: Warehouse) {
+/** Time zone, country, and currency start from the shop's when the warehouse has none. */
+function draftFrom(w: Warehouse, shop: Shop) {
   return {
     name: w.name,
     ownership: w.ownership as string,
     operatorName: w.operatorName ?? '',
-    timezone: w.timezone ?? '',
+    timezone: w.timezone ?? shop.timezone,
     operatingStatus: w.operatingStatus as string,
     fulfillmentEligible: w.fulfillmentEligible,
     line1: w.address?.line1 ?? '',
@@ -305,7 +315,7 @@ function draftFrom(w: Warehouse) {
     city: w.address?.city ?? '',
     region: w.address?.region ?? '',
     postalCode: w.address?.postalCode ?? '',
-    country: w.address?.country ?? '',
+    country: w.address?.country ?? countryForTimeZone(shop.timezone),
     contactName: w.contact?.name ?? '',
     email: w.contact?.email ?? '',
     phone: w.contact?.phone ?? '',
@@ -313,7 +323,7 @@ function draftFrom(w: Warehouse) {
     startDate: w.contract?.startDate ?? '',
     endDate: w.contract?.endDate ?? '',
     feeDescription: w.contract?.feeDescription ?? '',
-    currency: w.contract?.currency ?? '',
+    currency: w.contract?.currency ?? shop.currency,
     notes: w.contract?.notes ?? '',
     rates: (w.contract?.rates ?? []).map((r) => ({ ...r })) as RateDraft[],
   };
@@ -352,17 +362,19 @@ function contractFrom(d: Draft, existing: Contract | null | undefined) {
 
 function WarehouseForm({
   shopId,
+  shop,
   warehouse,
   commercial,
   onDone,
 }: {
   shopId: string;
+  shop: Shop;
   warehouse: Warehouse;
   commercial: boolean;
   onDone: () => void;
 }) {
   const refresh = useStorageRefresh(shopId);
-  const [d, setD] = useState<Draft>(() => draftFrom(warehouse));
+  const [d, setD] = useState<Draft>(() => draftFrom(warehouse, shop));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setD((p) => ({ ...p, [key]: value }));
   const text = (key: keyof Draft) => ({
@@ -376,7 +388,8 @@ function WarehouseForm({
         name: d.name,
         ownership: d.ownership,
         operatorName: d.operatorName || null,
-        timezone: d.timezone || null,
+        // The shop's own zone is stored as null, so the warehouse follows the shop if it changes.
+        timezone: d.timezone && d.timezone !== shop.timezone ? d.timezone : null,
         operatingStatus: d.operatingStatus,
         fulfillmentEligible: d.fulfillmentEligible,
         address: {
@@ -424,8 +437,8 @@ function WarehouseForm({
         <Field label="Operator" hint="Who runs the site.">
           <input {...text('operatorName')} maxLength={200} />
         </Field>
-        <Field label="Time zone" hint="Empty uses the shop time zone.">
-          <input {...text('timezone')} maxLength={64} placeholder="Europe/Berlin" />
+        <Field label="Time zone">
+          <TimeZoneSelect {...text('timezone')} required />
         </Field>
         <Field label="Operating status">
           <select
@@ -462,8 +475,8 @@ function WarehouseForm({
         <Field label="Region">
           <input {...text('region')} maxLength={100} />
         </Field>
-        <Field label="Country" hint="Two letters, such as DE.">
-          <input {...text('country')} maxLength={2} />
+        <Field label="Country">
+          <CountrySelect {...text('country')} />
         </Field>
       </div>
       <h3>Contact</h3>
@@ -478,11 +491,12 @@ function WarehouseForm({
           <input type="tel" {...text('phone')} maxLength={50} />
         </Field>
       </div>
-      <Field
-        label="Provider IDs"
-        hint="The site's IDs in other systems, one per line: provider: ID"
-      >
-        <textarea {...text('providerRefs')} rows={2} />
+      <Field label="Provider IDs">
+        <textarea
+          {...text('providerRefs')}
+          rows={2}
+          placeholder="The site's IDs in other systems, one per line: provider: ID"
+        />
       </Field>
       {commercial ? (
         <fieldset className="checks">
@@ -494,8 +508,8 @@ function WarehouseForm({
             <Field label="Ends">
               <input type="date" {...text('endDate')} />
             </Field>
-            <Field label="Currency" hint="Empty uses the shop currency.">
-              <input {...text('currency')} maxLength={3} />
+            <Field label="Currency">
+              <CurrencySelect {...text('currency')} required />
             </Field>
           </div>
           <Field label="Fees">
@@ -722,7 +736,12 @@ function EditLocation({
         <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
       </Field>
       <Field label="Code">
-        <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={50} />
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          maxLength={50}
+          placeholder="Optional, such as A-03"
+        />
       </Field>
       <label className="check">
         <input type="checkbox" checked={eligible} onChange={(e) => setEligible(e.target.checked)} />
@@ -772,7 +791,7 @@ function MoveLocation({
   };
   return (
     <form className="inline-form tree-form" onSubmit={submit}>
-      <Field label="Move inside" hint="Only while it and everything inside it hold no stock.">
+      <Field label="Move inside">
         <select value={parentId} onChange={(e) => setParentId(e.target.value)}>
           <option value="">Top level</option>
           {targets.map((l) => (
@@ -788,6 +807,9 @@ function MoveLocation({
       <button type="button" className="ghost" onClick={onDone}>
         Cancel
       </button>
+      <p className="fine">
+        A location can move only while it and everything inside it hold no stock.
+      </p>
       <ErrorNotice error={move.error} />
     </form>
   );
@@ -920,8 +942,13 @@ function CreateLocation({
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
         </Field>
-        <Field label="Code" hint="Optional, such as A-03.">
-          <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={50} />
+        <Field label="Code">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            maxLength={50}
+            placeholder="Optional, such as A-03"
+          />
         </Field>
         <button type="submit" disabled={create.isPending || !wh}>
           Add location

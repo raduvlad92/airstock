@@ -771,7 +771,7 @@ function GenerateVariants({
         ) : null}
       </div>
       <div className="inline-form">
-        <Field label="SKU pattern" hint="Option names in braces, such as TS-{colour}-{size}.">
+        <Field label="SKU pattern">
           <input value={pattern} onChange={(e) => setPattern(e.target.value)} />
         </Field>
         <Field label="Price for new variants">
@@ -785,6 +785,7 @@ function GenerateVariants({
         >
           Preview
         </button>
+        <p className="fine">{'Option names in braces, such as TS-{colour}-{size}.'}</p>
       </div>
       <ErrorNotice error={run.error} />
       {preview ? (

@@ -645,3 +645,121 @@ describe('F-REALLOCATE-IGNORES-LIMITS: reallocation leaves the reservation’s o
     expect(outcome).not.toBe('succeeded');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-PO-PACK-RESIZED (stock understated). A PO line stores pack_factor and pack_version so the
+// ordered quantity stays fixed (migration 0040), but receivePurchaseOrderLine passes the pack id to
+// receiveIntoStock, which converts with the pack's CURRENT size. Order 10 cases of 24, resize the
+// case to 12, receive the 10 cases that arrived: 120 units are recorded and 120 stay on order.
+// ---------------------------------------------------------------------------------------------
+describe('F-PO-PACK-RESIZED: a PO receipt in packs uses the pack’s current size', () => {
+  it.fails('records 240 units for 10 cases ordered at 24 per case', async () => {
+    const supplier = await h.run(ops.createSupplier, { name: `Sup ${uuidv7().slice(-6)}` });
+    const variantId = await createVariant(h);
+    const packs = await h.run(ops.setPacks, {
+      variantId,
+      packsVersion: 0,
+      packs: [{ name: 'Case', quantity: '24' }],
+    });
+    const caseId = packs.packaging.packs[0].id as string;
+    const po = await h.run(ops.draftPurchaseOrder, {
+      supplierId: supplier.supplier.id,
+      warehouseId: shop.warehouseId,
+      lines: [{ variantId, packId: caseId, quantity: '10', unitCost: '48' }],
+    });
+    expect(po.lines[0].ordered).toBe('240.000000');
+    await h.run(ops.sendPurchaseOrder, { purchaseOrderId: po.id, email: false });
+    await h.run(ops.setPacks, {
+      variantId,
+      packsVersion: packs.packaging.packsVersion,
+      packs: [{ id: caseId, name: 'Case', quantity: '12' }],
+    });
+    await h.run(ops.receivePurchaseOrderLine, {
+      purchaseOrderId: po.id,
+      lineId: po.lines[0].id,
+      quantity: '10',
+      locationId: shop.locationId,
+    });
+    const view = await h.run(ops.getAvailability, { variantId });
+    expect({ onHand: view.totals.onHand, onOrder: view.totals.onOrder }).toEqual({
+      onHand: '240.000000',
+      onOrder: '0',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-PICK-RESCAN-ELSEWHERE (wrong position decremented). recordPick forwards locationId to the
+// reallocation only when the caller gives one, and the phone flow sends only lotCode. The
+// reallocation then picks the lot wherever the allocation rule prefers (oldest stock first),
+// possibly another bin, so the new line and the later fulfillment take the units from a position
+// the picker never touched while the bin they picked from keeps its count.
+// ---------------------------------------------------------------------------------------------
+describe('F-PICK-RESCAN-ELSEWHERE: a rescanned lot is reallocated away from where the picker stands', () => {
+  it.fails('keeps the new allocation at the line’s location when only a lot is scanned', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
+    const binZ = await createLeafLocation(h, shop.warehouseId, `Bin Z ${uuidv7().slice(-4)}`);
+    // Oldest first: K at the main shelf, then L in bin Z, then L at the main shelf.
+    await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '1',
+      lotCode: 'K',
+    });
+    await h.run(ops.receiveStock, { variantId, locationId: binZ, quantity: '1', lotCode: 'L' });
+    await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '1',
+      lotCode: 'L',
+    });
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '1' });
+    const list = await h.run(ops.createPickList, { reservationIds: [r.reservationId] });
+    const line = list.pickLines[0];
+    expect({ location: line.locationId, lot: line.lotCode }).toEqual({
+      location: shop.locationId,
+      lot: 'K',
+    });
+    // The picker at the main shelf takes lot L from that shelf and scans it.
+    await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: line.lineId, lotCode: 'L' });
+    const held = await ownerQuery<{ location_id: string }>(
+      `select p.location_id from reservation_allocations a
+       join inventory_positions p on p.shop_id = a.shop_id and p.id = a.position_id
+       where a.shop_id = $1 and a.reservation_id = $2 and a.outstanding > 0`,
+      [shop.shopId, r.reservationId],
+    );
+    expect(held.map((x) => x.location_id)).toEqual([shop.locationId]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// F-PICK-COMPLETE-EXPIRED (completion blocked). completePickList skips reservations whose status is
+// no longer open, but a reservation past expires_at stays 'active' until a command or the 30-minute
+// sweep releases it. fulfillReservation then throws reservation_expired and the whole completion
+// (every other order on the list) rolls back. picking.ts says expiry is tolerated.
+// ---------------------------------------------------------------------------------------------
+describe('F-PICK-COMPLETE-EXPIRED: one expired reservation blocks completing the whole list', () => {
+  it.fails('completes the list and fulfills the other orders when one reservation expired', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '4' });
+    const keep = await h.run(ops.reserveStock, { variantId, quantity: '1' });
+    const lapse = await h.run(ops.reserveStock, {
+      variantId,
+      quantity: '1',
+      expiresInSeconds: 600,
+    });
+    const list = await h.run(ops.createPickList, {
+      reservationIds: [keep.reservationId, lapse.reservationId],
+    });
+    for (const line of list.pickLines) {
+      await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: line.lineId });
+    }
+    await ownerQuery(
+      `update reservations set expires_at = now() - interval '1 minute' where shop_id = $1 and id = $2`,
+      [shop.shopId, lapse.reservationId],
+    );
+    const outcome = await outcomeOf(h.run(ops.completePickList, { pickListId: list.pickListId }));
+    expect(outcome).toBe('succeeded');
+  });
+});

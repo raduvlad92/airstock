@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { Grid } from '../src/catalog/grid.tsx';
 import type { Column } from '../src/catalog/schema.ts';
 import { type Row, STOCK_AT } from '../src/catalog/values.ts';
+import { readFor } from '../src/pages/counts.tsx';
 
 // G5: a quantity typed in the grid's stock column is a one-line quick count of that shelf. It
 // sends the position version and on hand it read; when the shelf moved since, or the count would
@@ -260,5 +261,38 @@ describe('a count typed in the grid (G5)', () => {
     typeCount(second.grid, '1x');
     expect(await screen.findByText(/Type the units on the shelf/)).toBeTruthy();
     expect(sent).toEqual([]);
+  });
+});
+
+describe('what the stock panel’s Count form read', () => {
+  const base = {
+    condition: 'sellable',
+    lotId: null,
+    lotCode: null,
+    serial: null,
+    inTransit: false,
+  };
+  const positions = [
+    { ...base, locationId: SHELF, onHand: '4.000000', version: 3 },
+    { ...base, locationId: SHELF, condition: 'damaged', onHand: '1.000000', version: 9 },
+    {
+      ...base,
+      locationId: SHELF,
+      lotId: POS,
+      lotCode: 'Oat  0425',
+      onHand: '6.000000',
+      version: 2,
+    },
+  ];
+
+  it('is the shelf’s sellable position, the lot matched as the server matches codes', () => {
+    expect(readFor(positions, SHELF, false, '')).toEqual({ version: 3, onHand: '4.000000' });
+    expect(readFor(positions, SHELF, true, ' oat 0425 ')).toEqual({
+      version: 2,
+      onHand: '6.000000',
+    });
+    // Nothing there yet; and no read when the lot is not given.
+    expect(readFor(positions, PRODUCT, false, '')).toEqual({ version: null, onHand: '0' });
+    expect(readFor(positions, SHELF, true, '')).toBeNull();
   });
 });

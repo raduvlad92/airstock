@@ -72,14 +72,15 @@ export function readFor(
   lotCode: string,
 ): PositionRead | null {
   if (lots && !lotCode.trim()) return null;
-  const code = lotCode.trim().replace(/\s+/g, ' ').toLowerCase();
+  // Lot codes match as the server matches them: trimmed, spaces collapsed, any case.
+  const norm = (code: string) => code.trim().replace(/\s+/g, ' ').toUpperCase();
   const p = positions.find(
     (x) =>
       x.locationId === locationId &&
       x.condition === 'sellable' &&
       !x.inTransit &&
       x.serial === null &&
-      (lots ? (x.lotCode ?? '').toLowerCase() === code : x.lotId === null),
+      (lots ? norm(x.lotCode ?? '') === norm(lotCode) : x.lotId === null),
   );
   return p ? { version: p.version, onHand: p.onHand } : { version: null, onHand: '0' };
 }

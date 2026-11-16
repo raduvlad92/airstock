@@ -461,7 +461,7 @@ describe('Shopify connector review findings', () => {
   // orders again and never reaches the rest. New orders are rescued by the level comparison's
   // catch-up; fulfillments, which do not change Shopify's available, are not. Here maxOrders 2
   // and pages of 1 stand in for the budget.
-  it.fails('F11: the reconciler gets past more orders than one run reads', async () => {
+  it('F11: the reconciler gets past more orders than one run reads', async () => {
     const s = await setupItems('Busy hour', [10]);
     const [only] = s.items as [Many['items'][0]];
     const orders = [];

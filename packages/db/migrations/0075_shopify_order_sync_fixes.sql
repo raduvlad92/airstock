@@ -7,3 +7,11 @@ alter table shopify_order_lines drop constraint shopify_order_lines_outcome_chec
 alter table shopify_order_lines add constraint shopify_order_lines_outcome_check
   check (outcome in ('reserved', 'shortage', 'unmapped', 'unmapped_location', 'refused',
     'before_connection'));
+
+-- The reconciler's place in Shopify's list of updated orders when a run stopped early (its
+-- budget or 250 orders): the search's start and Shopify's page cursor. The next run continues
+-- the same search from the cursor instead of reading the same orders again; a run that reaches
+-- the last page clears both and moves `orders_synced_through`.
+alter table shopify_connections
+  add column orders_page_since timestamptz,
+  add column orders_page_after text check (length(orders_page_after) <= 1000);

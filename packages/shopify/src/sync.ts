@@ -600,7 +600,18 @@ export async function catchUpOrders(
     if (seen.has(order.orderId)) return;
     seen.add(order.orderId);
     if (Date.parse(order.createdAt) < store.createdAt.getTime()) return;
-    const result = await processOrder(deps, store.shopId, store.connectionId, order);
+    let result: Awaited<ReturnType<typeof processOrder>>;
+    try {
+      result = await processOrder(deps, store.shopId, store.connectionId, order);
+    } catch (error) {
+      // One order that cannot be applied does not stop the others (the reconciler retries it).
+      if (error instanceof NotConnectedError) throw error;
+      deps.logger?.error('shopify_catch_up_order_failed', {
+        orderId: order.orderId,
+        error: String(error),
+      });
+      return;
+    }
     out.orders += 1;
     out.applied += changesOf(result);
   };

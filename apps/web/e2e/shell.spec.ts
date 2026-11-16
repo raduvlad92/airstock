@@ -115,7 +115,7 @@ test('warehouse records, contract terms, and the location tree', async ({ page }
   await card.getByRole('button', { name: 'Edit' }).first().click();
   await card.getByLabel('Ownership').selectOption('rented');
   await card.getByLabel(/^Operator/).fill('Hall Logistics');
-  await card.getByLabel('City').fill('Leipzig');
+  await card.getByLabel('City', { exact: true }).fill('Leipzig');
   await card.getByRole('button', { name: 'Add a rate' }).click();
   await card.getByLabel('Rate for').fill('Storage per pallet');
   await card.getByLabel('Amount').fill('12.50');

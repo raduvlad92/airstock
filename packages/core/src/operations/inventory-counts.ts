@@ -436,11 +436,21 @@ const SESSION_SQL = `
   from count_sessions s
   left join locations l on l.shop_id = s.shop_id and l.id = s.location_id`;
 
+/**
+ * A count exists for a member limited to some locations only when its location and every line's
+ * shelf are in their scope (PRD 2.4). A count started from positions has no location of its
+ * own, so its lines decide. `scope` is the SQL parameter holding the scope ids.
+ */
+const inScope = (scope: string) => `(${scope}::uuid[] is null or not exists (
+    select 1 from locations sl
+    where sl.shop_id = s.shop_id
+      and (sl.id = s.location_id or sl.id in (select c.location_id from count_lines c
+        where c.shop_id = s.shop_id and c.session_id = s.id))
+      and not sl.path_ids && ${scope}::uuid[]))`;
+
 async function loadSession(tx: Tx, sessionId: string, scope: string[] | null): Promise<Session> {
   const [row] = await tx.query<Omit<Session, 'totals'>>(
-    `${SESSION_SQL} where s.id = $1 and ($2::uuid[] is null or s.location_id is null or exists (
-       select 1 from locations sl where sl.shop_id = s.shop_id and sl.id = s.location_id
-         and sl.path_ids && $2::uuid[]))`,
+    `${SESSION_SQL} where s.id = $1 and ${inScope('$2')}`,
     [sessionId, scope],
   );
   if (!row) throw errors.notFound('Count');
@@ -474,12 +484,18 @@ async function lockSession(ctx: HandlerContext, sessionId: string) {
   return s;
 }
 
+/**
+ * Every location a count touches, for the scope check (PRD 2.4): its own location and each
+ * line's shelf. A count started from positions has no location of its own, only lines.
+ */
 async function sessionLocation(tx: Tx, sessionId: string): Promise<string[]> {
-  const [row] = await tx.query<{ id: string | null }>(
-    'select location_id as id from count_sessions where id = $1',
+  const rows = await tx.query<{ id: string }>(
+    `select location_id as id from count_sessions where id = $1 and location_id is not null
+     union
+     select location_id from count_lines where session_id = $1`,
     [sessionId],
   );
-  return row?.id ? [row.id] : [];
+  return rows.map((r) => r.id);
 }
 
 const SessionRef = z.object({ sessionId: Id });
@@ -982,7 +998,7 @@ export const listCounts = defineOperation({
        from count_sessions s left join locations l on l.shop_id = s.shop_id and l.id = s.location_id
        where ($1 = 'all' or s.status = $1)
          and ($2::uuid is null or s.id < $2)
-         and ($3::uuid[] is null or s.location_id is null or l.path_ids && $3::uuid[])
+         and ${inScope('$3')}
        order by s.id desc limit $4`,
       [input.status, input.before ?? null, ctx.locationScope, input.limit],
     );

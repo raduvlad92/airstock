@@ -529,6 +529,49 @@ describe('permissions, location scope (A42), and isolation (A13)', () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
+  it('keeps a count started from positions within the scope of its shelves', async () => {
+    const variantId = await stocked('4');
+    const wh = await h.run(ops.createWarehouse, { name: `Positions ${uuidv7().slice(-4)}` });
+    const own = await createLeafLocation(h, wh.warehouseId, 'Own shelf');
+    await h.run(ops.receiveStock, { variantId, locationId: own, quantity: '2' });
+    const positions = await ownerQuery<{ id: string; location_id: string }>(
+      'select id, location_id from inventory_positions where shop_id = $1 and variant_id = $2',
+      [shop.shopId, variantId],
+    );
+    const scoped = await addMember(shop.shopId, 'inventory_operator', [wh.warehouseId]);
+    // Both shelves: hidden from the member, and they cannot work it.
+    const both = await h.run(ops.startCount, { positionIds: positions.map((p) => p.id) });
+    // Only their own shelf: theirs to work.
+    const mine = await h.run(ops.startCount, {
+      positionIds: positions.filter((p) => p.location_id === own).map((p) => p.id),
+    });
+    const listed = await h.run(ops.listCounts, { limit: 100 }, { caller: scoped.caller });
+    const ids = listed.counts.map((c: { sessionId: string }) => c.sessionId);
+    expect([ids.includes(both.sessionId), ids.includes(mine.sessionId)]).toEqual([false, true]);
+    await expect(
+      h.run(
+        ops.recordCount,
+        { sessionId: both.sessionId, counts: [{ variantId, locationId: own, counted: '2' }] },
+        { caller: scoped.caller },
+      ),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    await expect(
+      h.run(ops.cancelCount, { sessionId: both.sessionId }, { caller: scoped.caller }),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    await h.run(
+      ops.recordCount,
+      { sessionId: mine.sessionId, counts: [{ variantId, locationId: own, counted: '1' }] },
+      { caller: scoped.caller },
+    );
+    const done = await h.run(
+      ops.submitCount,
+      { sessionId: mine.sessionId },
+      { caller: scoped.caller },
+    );
+    expect(done.session.status).toBe('submitted');
+    await h.run(ops.cancelCount, { sessionId: both.sessionId });
+  });
+
   it('never reaches another shop’s count, position, or operation', async () => {
     const other = await seedShop(db, sink, 'Other counts shop');
     const ho = harness(db, sink, other);

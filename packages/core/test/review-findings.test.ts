@@ -548,7 +548,7 @@ async function outcomeOf(p: Promise<unknown>): Promise<string> {
 // posts stock changes at positions outside the member's scope.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-COUNT-POSITIONS: a positions-based count escapes location scope', () => {
-  it.fails('refuses an out-of-scope member reading and submitting a positions-based count', async () => {
+  it('refuses an out-of-scope member reading and submitting a positions-based count', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '6' });
     const [pos] = await ownerQuery<{ id: string }>(

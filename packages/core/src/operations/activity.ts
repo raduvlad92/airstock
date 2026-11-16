@@ -1,10 +1,25 @@
+import type { Tx } from '@airstock/db';
 import { z } from 'zod';
+import {
+  ActivityFilters,
+  type ActivityRow,
+  activityQuery,
+  ingestionQuery,
+  lifecycleQuery,
+  parseCursor,
+  type ResolvedScope,
+  requestInScopeQuery,
+  resolveActivityFilters,
+  resolveScope,
+} from '../activity/query.ts';
+import { redactEventChanges } from '../activity/redact.ts';
 import { callerKey, type Membership } from '../caller.ts';
 import { errors } from '../errors.ts';
 import { uuidv7Time } from '../ids.ts';
-import { effectivePermissions, type Permission } from '../permissions.ts';
+import { effectivePermissions } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
+import { ExportOut, exportOut, loadExport, storeCaller } from './imports.ts';
 
 const ActivityEvent = z.object({
   eventId: Id,
@@ -20,62 +35,158 @@ const ActivityEvent = z.object({
   targetId: z.string().nullable(),
   operationId: Id.nullable(),
   attemptId: Id.nullable(),
+  requestId: Id.nullable(),
+  locationIds: z
+    .array(Id)
+    .nullable()
+    .describe('Locations the event is about (only your own, if you are limited to some).'),
   externalRef: z.string().nullable(),
   reason: z.string().nullable(),
   changes: z.unknown(),
   error: z.unknown(),
 });
 
-/**
- * Values in event `changes` that only some members may read, such as warehouse contract terms
- * (PRD 2.3). The event keeps them; activity reads replace them with "hidden" for everyone else.
- */
-const RESTRICTED_CHANGES: Array<{ targetType: string; key: string; permission: Permission }> = [
-  { targetType: 'warehouse', key: 'contract', permission: 'storage.commercial.read' },
-];
+const Lifecycle = z
+  .object({
+    attemptId: Id,
+    action: z.string().nullable(),
+    status: z
+      .string()
+      .describe(
+        'The outcome of the request (succeeded, failed, denied, conflict, …), or pending while only its attempt is recorded.',
+      ),
+    startedAt: z.string().nullable().describe('When the attempt was recorded, before it ran.'),
+    finishedAt: z.string().nullable().describe('When its outcome was recorded.'),
+    durationMs: z.number().int().nullable(),
+    lastEventAt: z
+      .string()
+      .nullable()
+      .describe('The request’s latest event, such as the last row of an import.'),
+    events: z
+      .number()
+      .int()
+      .describe('Events of this request you can see, each record it changed included.'),
+    problems: z.number().int().describe('Of those, failed, denied, conflict, or unknown.'),
+  })
+  .describe('With attemptId, on the first page: the request from attempt to outcome.');
 
-function redactChanges(
-  targetType: string | null,
-  changes: unknown,
-  allowed: ReadonlySet<Permission>,
-): unknown {
-  if (!changes || typeof changes !== 'object') return changes;
-  let out = changes as Record<string, unknown>;
-  for (const rule of RESTRICTED_CHANGES) {
-    if (rule.targetType === targetType && rule.key in out && !allowed.has(rule.permission)) {
-      out = { ...out, [rule.key]: 'hidden' };
-    }
-  }
-  return out;
+const Ingestion = z
+  .object({
+    delayed: z.boolean().describe('True when recent events may not be listed yet.'),
+    pendingRequests: z
+      .number()
+      .int()
+      .describe('Recent commands of this shop whose queued records have not arrived yet.'),
+    oldestPendingSeconds: z.number().nullable(),
+    lastBatchAt: z.string().nullable().describe('When the queue last delivered events.'),
+    lastBatchLagSeconds: z
+      .number()
+      .nullable()
+      .describe('How long the last delivered events waited in the queue.'),
+    newestEventAt: z.string().nullable(),
+  })
+  .describe('Reads, attempts, and failures reach the history through a queue (first page only).');
+
+type ActivityEventOut = z.infer<typeof ActivityEvent>;
+
+function eventOut(r: ActivityRow, membership: Membership | null): ActivityEventOut {
+  return {
+    eventId: r.event_id,
+    occurredAt: iso(r.occurred_at) as string,
+    action: r.action,
+    phase: r.phase,
+    outcome: r.outcome,
+    source: r.source,
+    actorType: r.actor_type,
+    actorId: r.actor_id,
+    clientId: r.client_id,
+    targetType: r.target_type,
+    targetId: r.target_id,
+    operationId: r.operation_id,
+    attemptId: r.attempt_id,
+    requestId: r.request_id,
+    locationIds: r.location_ids,
+    externalRef: r.external_ref,
+    reason: r.reason,
+    changes: redactEventChanges(r.target_type, r.changes, membership),
+    error: r.error,
+  };
 }
 
-/**
- * Some changes carry values only members with a permission may read, such as supplier costs
- * (`changes.restricted`, ADR 0019). Others see that something restricted changed, not the values.
- */
-function redactRestricted(changes: unknown, membership: Membership | null): unknown {
-  if (!changes || typeof changes !== 'object' || !('restricted' in changes)) return changes;
-  const permission = (changes as { restricted?: { permission?: string } }).restricted?.permission;
-  if (!permission) return changes;
-  if (membership && effectivePermissions(membership).has(permission as Permission)) return changes;
-  return { ...changes, restricted: { permission, hidden: true } };
+/** Events still waiting in the queue: this shop's recent commands and the consumer's lag. */
+async function ingestion(tx: Tx): Promise<z.infer<typeof Ingestion>> {
+  const [row] = await tx.query<{
+    pending: number;
+    oldest: number | null;
+    last_batch_at: Date | null;
+    lag_ms: number | null;
+    newest: Date | null;
+  }>(ingestionQuery);
+  const lag = row?.lag_ms ?? null;
+  const recent =
+    row?.last_batch_at && Date.now() - new Date(row.last_batch_at).getTime() < 15 * 60_000;
+  return {
+    delayed: (row?.pending ?? 0) > 0 || (recent === true && lag !== null && lag > 10_000),
+    pendingRequests: row?.pending ?? 0,
+    oldestPendingSeconds:
+      row?.oldest === null || row?.oldest === undefined ? null : Math.round(row.oldest),
+    lastBatchAt: iso(row?.last_batch_at ?? null),
+    lastBatchLagSeconds: lag === null ? null : Math.round(lag / 100) / 10,
+    newestEventAt: iso(row?.newest ?? null),
+  };
+}
+
+/** One request from attempt to outcome, with the records it changed (PRD 7.4). */
+async function lifecycle(
+  tx: Tx,
+  attemptId: string,
+  scope: ResolvedScope | null,
+  includeUnknownLocations: boolean,
+): Promise<z.infer<typeof Lifecycle> | null> {
+  const { sql, params } = lifecycleQuery(attemptId, scope, includeUnknownLocations);
+  const [row] = await tx.query<{
+    action: string | null;
+    started_at: Date | null;
+    outcome: string | null;
+    finished_at: Date | null;
+    last_at: Date | null;
+    events: number;
+    problems: number;
+  }>(sql, params);
+  if (!row || row.events === 0) return null;
+  const started = row.started_at;
+  const finished = row.finished_at;
+  return {
+    attemptId,
+    action: row.action,
+    status: row.outcome ?? 'pending',
+    startedAt: iso(started),
+    finishedAt: iso(finished),
+    durationMs:
+      started && finished ? new Date(finished).getTime() - new Date(started).getTime() : null,
+    lastEventAt: iso(row.last_at),
+    events: row.events,
+    problems: row.problems,
+  };
 }
 
 export const listActivity = defineOperation({
   id: 'activity.list',
   summary: 'Search the activity history',
   description:
-    'Newest first. Filter by target to explain a record, or by attempt to follow one request. Recent events can take a few seconds to appear because reads and failures are ingested through a queue.',
+    'Use this when someone asks who changed something, what happened to a record, why a command failed or was refused, or what a person, API key, or AI connection did. Filter by record (targetType and targetId), who (actorId or actorType), integration, source, action (exact, or a group such as inventory.*), outcome, phase, date range (from, to), warehouse or location (locationId), stock operation (operationId), or one request (attemptId: its attempt, its outcome, and every record it changed, such as each row of an import, with a lifecycle summary). Newest first; page with `before`. Not for current stock or catalog values: use get_stock or search_catalog. Recent events can take a few seconds to appear; `ingestion` says when the history is behind.',
   kind: 'read',
   scope: 'shop',
-  input: z.object({
-    targetType: z.string().max(50).optional(),
-    targetId: z.string().max(100).optional(),
-    attemptId: Id.optional(),
+  input: ActivityFilters.extend({
     limit: z.coerce.number().int().min(1).max(100).default(50),
     before: z.string().max(100).optional().describe('Cursor from the previous page.'),
   }),
-  output: z.object({ events: z.array(ActivityEvent), nextCursor: z.string().nullable() }),
+  output: z.object({
+    events: z.array(ActivityEvent),
+    nextCursor: z.string().nullable(),
+    lifecycle: Lifecycle.nullable(),
+    ingestion: Ingestion.nullable(),
+  }),
   permission: 'activity.read',
   connectionScope: 'activity:read',
   audit: { action: 'activity.viewed' },
@@ -83,86 +194,84 @@ export const listActivity = defineOperation({
   http: { method: 'GET', path: '/shops/{shopId}/activity' },
   mcp: { tool: 'search_activity', readOnly: true, destructive: false },
   async handler(ctx, input) {
-    let cursor: [string, string] | null = null;
-    if (input.before) {
-      const [time, id] = input.before.split('|');
-      if (!time || !id || Number.isNaN(Date.parse(time))) {
-        throw errors.validation([{ path: 'before', message: 'Invalid cursor.' }]);
-      }
-      cursor = [time, id];
+    const { limit, before, ...filters } = input;
+    const cursor = parseCursor(before);
+    const scope = await resolveScope(ctx.tx, ctx.locationScope);
+    // One request's events whose locations were not known when written (its attempt, say) show
+    // when another event of that request is inside the reader's scope.
+    let unknownInScope = false;
+    if (filters.attemptId && scope !== null) {
+      const { sql, params } = requestInScopeQuery(filters.attemptId, scope);
+      const [row] = await ctx.tx.query<{ in_scope: boolean }>(sql, params);
+      unknownInScope = row?.in_scope === true;
     }
-    const rows = await ctx.tx.query<{
-      event_id: string;
-      occurred_at: Date;
-      action: string;
-      phase: 'attempt' | 'outcome';
-      outcome: string;
-      source: string;
-      actor_type: string;
-      actor_id: string | null;
-      client_id: string | null;
-      target_type: string | null;
-      target_id: string | null;
-      operation_id: string | null;
-      attempt_id: string | null;
-      external_ref: string | null;
-      reason: string | null;
-      changes: unknown;
-      error: unknown;
-    }>(
-      `select event_id, occurred_at, action, phase, outcome, source, actor_type, actor_id, client_id,
-         target_type, target_id, operation_id, attempt_id, external_ref, reason, changes, error
-       from audit_events e
-       where e.shop_id = app_shop_id()
-         and ($1::text is null or e.target_type = $1)
-         and ($2::text is null or e.target_id = $2)
-         and ($3::uuid is null or e.attempt_id = $3)
-         and ($4::timestamptz is null or (e.occurred_at, e.event_id) < ($4::timestamptz, $5::uuid))
-         and ($6::uuid[] is null or e.location_ids is null or exists (
-           select 1 from locations l where l.id = any(e.location_ids) and l.path_ids && $6::uuid[]))
-       order by e.occurred_at desc, e.event_id desc
-       limit $7`,
-      [
-        input.targetType ?? null,
-        input.targetId ?? null,
-        input.attemptId ?? null,
-        cursor?.[0] ?? null,
-        cursor?.[1] ?? null,
-        ctx.locationScope,
-        input.limit + 1,
-      ],
-    );
-    const page = rows.slice(0, input.limit);
+    const resolved = await resolveActivityFilters(ctx.tx, filters, scope);
+    let rows: ActivityRow[] = [];
+    if (resolved) {
+      const { sql, params } = activityQuery({
+        filters: resolved,
+        scope,
+        limit: limit + 1,
+        cursor,
+        includeUnknownLocations: unknownInScope,
+      });
+      rows = await ctx.tx.query<ActivityRow>(sql, params);
+    }
+    const page = rows.slice(0, limit);
     const last = page.at(-1);
-    const allowed = ctx.membership ? effectivePermissions(ctx.membership) : new Set<Permission>();
+    const result = {
+      events: page.map((r) => eventOut(r, ctx.membership)),
+      nextCursor: rows.length > limit && last ? `${iso(last.occurred_at)}|${last.event_id}` : null,
+      lifecycle:
+        filters.attemptId && !before
+          ? await lifecycle(ctx.tx, filters.attemptId, scope, unknownInScope)
+          : null,
+      ingestion: before ? null : await ingestion(ctx.tx),
+    };
     return {
-      result: {
-        events: page.map((r) => ({
-          eventId: r.event_id,
-          occurredAt: iso(r.occurred_at) as string,
-          action: r.action,
-          phase: r.phase,
-          outcome: r.outcome,
-          source: r.source,
-          actorType: r.actor_type,
-          actorId: r.actor_id,
-          clientId: r.client_id,
-          targetType: r.target_type,
-          targetId: r.target_id,
-          operationId: r.operation_id,
-          attemptId: r.attempt_id,
-          externalRef: r.external_ref,
-          reason: r.reason,
-          changes: redactRestricted(
-            redactChanges(r.target_type, r.changes, allowed),
-            ctx.membership,
-          ),
-          error: r.error,
-        })),
-        nextCursor:
-          rows.length > input.limit && last ? `${iso(last.occurred_at)}|${last.event_id}` : null,
+      result,
+      audit: {
+        targetType: input.targetType ?? 'activity',
+        targetId: input.targetId ?? 'list',
+        context: { filters, before: before ?? null, returned: page.length },
       },
-      audit: { targetType: input.targetType ?? 'activity', targetId: input.targetId ?? 'list' },
+    };
+  },
+});
+
+export const createActivityExport = defineOperation({
+  id: 'activity.exports.create',
+  summary: 'Export the activity history as CSV',
+  description:
+    'Writes the events matching the filters (the same as the activity list) as CSV, newest first, at most 50,000 per file, as a job. The file is ready for 24 hours and listed with the other exports; creating, finishing, and downloading it are all in the history.',
+  kind: 'command',
+  scope: 'shop',
+  input: ActivityFilters,
+  output: z.object({ export: ExportOut }),
+  // Downloading any export needs exports.run; reading the history needs activity.read too.
+  permission: 'exports.run',
+  connectionScope: 'activity:read',
+  audit: { action: 'activity.export.created' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/activity/exports', status: 201 },
+  mcp: {
+    exception:
+      'An activity export is a file, downloaded in the dashboard or through the API; MCP clients search the history with search_activity.',
+  },
+  async handler(ctx, input) {
+    if (!ctx.membership || !effectivePermissions(ctx.membership).has('activity.read')) {
+      throw errors.forbidden('Requires the activity.read permission.');
+    }
+    const exportId = ctx.newId();
+    const query = { mode: 'activity', filters: input };
+    await ctx.tx.query(
+      `insert into export_jobs (shop_id, id, caller, query) values (app_shop_id(), $1, $2, $3)`,
+      [exportId, JSON.stringify(storeCaller(ctx.caller)), JSON.stringify(query)],
+    );
+    return {
+      result: { export: exportOut(ctx.shopId, await loadExport(ctx.tx, exportId)) },
+      audit: { targetType: 'export', targetId: exportId, changes: { query } },
+      outbox: [{ topic: 'catalog.export.run', payload: { exportId } }],
     };
   },
 });
@@ -322,4 +431,9 @@ export const recordClientEvents = defineOperation({
 });
 
 /** This module's operations, in registry order: MCP lists a tool's actions in this order. */
-export const activityOperations = [listActivity, recordClientEvents, getOperationOutcome] as const;
+export const activityOperations = [
+  listActivity,
+  createActivityExport,
+  recordClientEvents,
+  getOperationOutcome,
+] as const;

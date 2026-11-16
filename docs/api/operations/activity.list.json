@@ -3,7 +3,7 @@
     "get": {
       "operationId": "activity.list",
       "summary": "Search the activity history",
-      "description": "Newest first. Filter by target to explain a record, or by attempt to follow one request. Recent events can take a few seconds to appear because reads and failures are ingested through a queue.",
+      "description": "Use this when someone asks who changed something, what happened to a record, why a command failed or was refused, or what a person, API key, or AI connection did. Filter by record (targetType and targetId), who (actorId or actorType), integration, source, action (exact, or a group such as inventory.*), outcome, phase, date range (from, to), warehouse or location (locationId), stock operation (operationId), or one request (attemptId: its attempt, its outcome, and every record it changed, such as each row of an import, with a lifecycle summary). Newest first; page with `before`. Not for current stock or catalog values: use get_stock or search_catalog. Recent events can take a few seconds to appear; `ingestion` says when the history is behind.",
       "x-permission": "activity.read",
       "x-connection-scope": "activity:read",
       "x-audit-action": "activity.viewed",
@@ -18,10 +18,79 @@
           }
         },
         {
+          "name": "actorType",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Who acted: a person, an API credential, an AI connection, a connector such as Shopify, or the system.",
+            "type": "string",
+            "enum": [
+              "user",
+              "api_credential",
+              "connection",
+              "connector",
+              "system"
+            ]
+          }
+        },
+        {
+          "name": "actorId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "A user, API credential, connection, or connector ID, or a system job name.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        {
+          "name": "source",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Where the request came from.",
+            "type": "string",
+            "enum": [
+              "dashboard",
+              "api",
+              "mcp",
+              "import",
+              "scheduled",
+              "admin",
+              "shopify",
+              "webhooks"
+            ]
+          }
+        },
+        {
+          "name": "from",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Events at or after this time (ISO 8601).",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        {
+          "name": "to",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Events before this time (ISO 8601).",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        {
           "name": "targetType",
           "in": "query",
           "required": false,
           "schema": {
+            "description": "The kind of record, such as product, variant, location, warehouse, or import.",
             "type": "string",
             "maxLength": 50
           }
@@ -31,7 +100,72 @@
           "in": "query",
           "required": false,
           "schema": {
+            "description": "The record’s ID.",
             "type": "string",
+            "maxLength": 100
+          }
+        },
+        {
+          "name": "action",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "An action such as inventory.receipt.created, or a prefix ending in * such as inventory.*. Several, comma-separated, match any.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        {
+          "name": "outcome",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "received",
+              "succeeded",
+              "failed",
+              "denied",
+              "cancelled",
+              "conflict",
+              "no_change",
+              "replayed",
+              "unknown"
+            ]
+          }
+        },
+        {
+          "name": "phase",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "attempt: commands as they arrived; outcome: what happened.",
+            "type": "string",
+            "enum": [
+              "attempt",
+              "outcome"
+            ]
+          }
+        },
+        {
+          "name": "locationId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "A warehouse or location: events about it or any location inside it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "integration",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "An API credential, AI connection, or connector ID, or a client ID such as shopify: what that integration did.",
+            "type": "string",
+            "minLength": 1,
             "maxLength": 100
           }
         },
@@ -40,6 +174,17 @@
           "in": "query",
           "required": false,
           "schema": {
+            "description": "One request (a batch): its attempt, its outcome, and every record it changed, such as each row of a bulk edit or an import.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "operationId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "An inventory operation, as returned by stock commands.",
             "type": "string",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
           }
@@ -151,6 +296,32 @@
                             }
                           ]
                         },
+                        "requestId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locationIds": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Locations the event is about (only your own, if you are limited to some)."
+                        },
                         "externalRef": {
                           "type": [
                             "string",
@@ -180,6 +351,8 @@
                         "targetId",
                         "operationId",
                         "attemptId",
+                        "requestId",
+                        "locationIds",
                         "externalRef",
                         "reason",
                         "changes",
@@ -193,11 +366,155 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "lifecycle": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "attemptId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "action": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The outcome of the request (succeeded, failed, denied, conflict, …), or pending while only its attempt is recorded."
+                          },
+                          "startedAt": {
+                            "description": "When the attempt was recorded, before it ran.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "finishedAt": {
+                            "description": "When its outcome was recorded.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "durationMs": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastEventAt": {
+                            "description": "The request’s latest event, such as the last row of an import.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "events": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Events of this request you can see, each record it changed included."
+                          },
+                          "problems": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Of those, failed, denied, conflict, or unknown."
+                          }
+                        },
+                        "required": [
+                          "attemptId",
+                          "action",
+                          "status",
+                          "startedAt",
+                          "finishedAt",
+                          "durationMs",
+                          "lastEventAt",
+                          "events",
+                          "problems"
+                        ],
+                        "additionalProperties": false,
+                        "description": "With attemptId, on the first page: the request from attempt to outcome."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ingestion": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "delayed": {
+                            "type": "boolean",
+                            "description": "True when recent events may not be listed yet."
+                          },
+                          "pendingRequests": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Recent commands of this shop whose queued records have not arrived yet."
+                          },
+                          "oldestPendingSeconds": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "lastBatchAt": {
+                            "description": "When the queue last delivered events.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastBatchLagSeconds": {
+                            "description": "How long the last delivered events waited in the queue.",
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "newestEventAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "delayed",
+                          "pendingRequests",
+                          "oldestPendingSeconds",
+                          "lastBatchAt",
+                          "lastBatchLagSeconds",
+                          "newestEventAt"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Reads, attempts, and failures reach the history through a queue (first page only)."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
                   "events",
-                  "nextCursor"
+                  "nextCursor",
+                  "lifecycle",
+                  "ingestion"
                 ],
                 "additionalProperties": false
               }

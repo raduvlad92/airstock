@@ -11,7 +11,8 @@
     "./media": "./src/media/files.ts",
     "./barcodes": "./src/catalog/barcodes.ts",
     "./labels": "./src/labels/layouts.ts",
-    "./packs": "./src/catalog/packs.ts"
+    "./packs": "./src/catalog/packs.ts",
+    "./activity": "./src/activity/vocabulary.ts"
   },
   "dependencies": {
     "@airstock/db": "workspace:*",

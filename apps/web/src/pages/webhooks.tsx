@@ -164,13 +164,14 @@ export function WebhooksPage() {
   );
 }
 
-interface Place {
+export interface Place {
   id: string;
   label: string;
 }
 
 /** Warehouses, then their locations, for the location filter. */
-function usePlaces(shopId: string, enabled: boolean): Place[] {
+/** Active warehouses, each followed by its locations, for place pickers. */
+export function usePlaces(shopId: string, enabled: boolean): Place[] {
   const warehouses = useQuery({
     queryKey: ['shop', shopId, 'warehouses'],
     queryFn: () => api<Warehouses>(`/shops/${shopId}/warehouses`),

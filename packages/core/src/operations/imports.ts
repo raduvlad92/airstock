@@ -1,5 +1,7 @@
 import type { Database, Tx } from '@airstock/db';
 import { z } from 'zod';
+import { runActivityExport } from '../activity/export.ts';
+import type { ActivityFiltersInput } from '../activity/query.ts';
 import { type AuditEvent, type AuditSink, auditEvent, INSERT_AUDIT_EVENTS_SQL } from '../audit.ts';
 import type { Caller, Membership } from '../caller.ts';
 import { normalize } from '../catalog/decimal.ts';
@@ -37,7 +39,7 @@ export const importFileKey = (shopId: string, importId: string) =>
 export const exportFileKey = (shopId: string, exportId: string) =>
   `shops/${shopId}/exports/${exportId}.csv`;
 
-interface StoredCaller {
+export interface StoredCaller {
   kind: Caller['kind'];
   id: string;
   userId: string | null;
@@ -47,7 +49,7 @@ interface StoredCaller {
   source: Caller['source'];
 }
 
-function storeCaller(caller: Caller): StoredCaller {
+export function storeCaller(caller: Caller): StoredCaller {
   return {
     kind: caller.kind,
     id: caller.id,
@@ -448,13 +450,14 @@ export const commitImport = defineOperation({
     }
     await ctx.tx.query(
       `update import_jobs set status = 'committing', committed_at = now(), updated_at = now(), version = version + 1,
-         caller = $2 where id = $1`,
-      [input.importId, JSON.stringify(storeCaller(ctx.caller))],
+         caller = $2, commit_attempt_id = $3 where id = $1`,
+      [input.importId, JSON.stringify(storeCaller(ctx.caller)), ctx.attemptId],
     );
     const updated = await loadImport(ctx.tx, input.importId);
     return {
       result: { import: importOut(updated) },
-      // The import's parent event: chunks and records link to it by importId.
+      // The import's parent event: each record's event carries this request's attempt ID, so the
+      // activity history lists the import with every record it changed (PRD 7.4, batch).
       audit: {
         targetType: 'import',
         targetId: input.importId,
@@ -655,10 +658,10 @@ export async function runImportJob(
   const job = await deps.db.transaction({ shopId, userId: null }, async (tx) => {
     const [row] = await tx.query<ImportRow>(
       `update import_jobs set updated_at = now() where id = $1 and status = 'committing'
-       returning id, file_name, status, header, mapping, row_count, counts, checkpoint, error, created_at, completed_at, caller, delimiter`,
+       returning id, file_name, status, header, mapping, row_count, counts, checkpoint, error, created_at, completed_at, caller, delimiter, commit_attempt_id`,
       [importId],
     );
-    return row ?? null;
+    return (row as (ImportRow & { commit_attempt_id: string | null }) | undefined) ?? null;
   });
   if (!job) return 'missing';
   let caller: Caller;
@@ -680,7 +683,13 @@ export async function runImportJob(
     return 'done';
   }
   const requestId = uuidv7();
-  const base = { shopId, caller, requestId, attemptId: null, idempotencyKey: null };
+  const base = {
+    shopId,
+    caller,
+    requestId,
+    attemptId: job.commit_attempt_id,
+    idempotencyKey: null,
+  };
   let chunk = 0;
   while (Date.now() - started < budgetMs) {
     const rows = await deps.db.transaction({ shopId, userId: caller.userId }, async (tx) => {
@@ -1672,8 +1681,11 @@ async function receiveOpeningStock(
 
 // Exports --------------------------------------------------------------------------------
 
-const ExportOut = z.object({
+export const ExportOut = z.object({
   exportId: Id,
+  kind: z
+    .enum(['catalog', 'activity'])
+    .describe('catalog: products or variants; activity: the activity history.'),
   status: z.string(),
   rowCount: z.number().nullable(),
   error: z.string().nullable(),
@@ -1688,7 +1700,7 @@ const ExportOut = z.object({
     ),
 });
 
-interface ExportRow {
+export interface ExportRow {
   id: string;
   status: string;
   row_count: number | null;
@@ -1701,7 +1713,7 @@ interface ExportRow {
   query: z.infer<typeof ExportQuery>;
 }
 
-function exportOut(shopId: string, r: ExportRow) {
+export function exportOut(shopId: string, r: ExportRow) {
   const downloadable =
     r.status === 'completed' &&
     !r.file_deleted_at &&
@@ -1709,6 +1721,7 @@ function exportOut(shopId: string, r: ExportRow) {
     new Date(r.download_until) > new Date();
   return {
     exportId: r.id,
+    kind: (r.query.mode as string) === 'activity' ? ('activity' as const) : ('catalog' as const),
     status: r.status,
     rowCount: r.row_count,
     error: r.error,
@@ -1729,7 +1742,7 @@ const ExportQuery = QueryInput.pick({
   sold: true,
 });
 
-async function loadExport(tx: Tx, exportId: string): Promise<ExportRow> {
+export async function loadExport(tx: Tx, exportId: string): Promise<ExportRow> {
   const [row] = await tx.query<ExportRow>(
     `select id, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query
      from export_jobs where id = $1`,
@@ -1874,6 +1887,18 @@ export async function runExportJob(
   if (!job) return 'missing';
   try {
     const caller = await jobCaller(deps.db, shopId, job.caller);
+    const activity = job.query as unknown as { mode: string; filters?: ActivityFiltersInput };
+    if (activity.mode === 'activity') {
+      await runActivityExport(
+        deps,
+        shopId,
+        exportId,
+        exportFileKey(shopId, exportId),
+        caller,
+        activity.filters ?? {},
+      );
+      return 'done';
+    }
     const membership = caller.membership!;
     const locationScope = membership.allLocations ? null : membership.locationScopeIds;
     const mode = job.query.mode ?? 'variants';
@@ -2121,6 +2146,37 @@ export async function runExportJob(
           uuidv7,
         );
       });
+      // The failure is in the history too, attributed to whoever started the export.
+      const stored = job.caller;
+      await deps.audit.send([
+        auditEvent(
+          {
+            shopId,
+            caller: {
+              kind: stored.kind,
+              id: stored.id,
+              userId: stored.userId,
+              boundShopId: shopId,
+              membership: null,
+              scopes: 'all',
+              ...(stored.clientId ? { clientId: stored.clientId } : {}),
+              ...(stored.grantId ? { grantId: stored.grantId } : {}),
+              source: 'import',
+            },
+            requestId: uuidv7(),
+            attemptId: null,
+            idempotencyKey: null,
+          },
+          {
+            action: `${(job.query.mode as string) === 'activity' ? 'activity' : 'catalog'}.export.failed`,
+            phase: 'outcome',
+            outcome: error.outcome,
+            target_type: 'export',
+            target_id: exportId,
+            error: { code: error.code, status: error.status },
+          },
+        ),
+      ]);
       return 'done';
     }
     throw error;

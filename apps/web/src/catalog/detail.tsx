@@ -1055,7 +1055,7 @@ function HistoryTab({ shopId, item }: { shopId: string; item: Item }) {
     type: 'product',
     id: item.product.id,
   });
-  const activity = useActivity(shopId, target);
+  const activity = useActivity(shopId, { targetType: target.type, targetId: target.id });
   const events = activity.data?.pages.flatMap((p) => p.events) ?? [];
   return (
     <div className="stack">
@@ -1081,7 +1081,7 @@ function HistoryTab({ shopId, item }: { shopId: string; item: Item }) {
       ) : events.length === 0 ? (
         <Notice>No history yet.</Notice>
       ) : (
-        <ActivityTable events={events} />
+        <ActivityTable shopId={shopId} events={events} />
       )}
       {activity.hasNextPage ? (
         <button type="button" className="ghost small" onClick={() => void activity.fetchNextPage()}>

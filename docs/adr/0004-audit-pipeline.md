@@ -23,3 +23,7 @@
 ## Revisit when
 
 Read latency from the awaited queue send is too high in M8. The first fallback is to send the access event concurrently with the query and await both.
+
+## Update, 16 November 2026 (ADR 0032)
+
+Ingestion deduplicates by `(shop_id, occurred_at, event_id)`, a `UNIQUE NULLS NOT DISTINCT` key that replaced the primary key, and there is no default partition any more: both so activity searches read one shop's months in order (ADR 0032). The daily job still keeps three months of partitions ahead; an event outside them now fails to insert.

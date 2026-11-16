@@ -141,12 +141,19 @@ export async function sweepExpiredReservations(db: Database, maxShops = 50): Pro
  * own transaction; this catches the one case they cannot see: an order reserved while a receipt
  * was creating a new position. It respects each shop's setting and allocation rules.
  */
-export async function sweepShortages(db: Database, maxShops = 50): Promise<number> {
-  const shops = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
-    tx.query<{ shop_id: string }>('select s as shop_id from shops_with_open_shortages($1) s', [
-      maxShops,
-    ]),
-  );
+export async function sweepShortages(
+  db: Database,
+  maxShops = 50,
+  /** Sweep only these shops (tests: other files' shortages are theirs to assert on). */
+  onlyShops?: readonly string[],
+): Promise<number> {
+  const shops = onlyShops
+    ? onlyShops.map((shop_id) => ({ shop_id }))
+    : await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
+        tx.query<{ shop_id: string }>('select s as shop_id from shops_with_open_shortages($1) s', [
+          maxShops,
+        ]),
+      );
   let filled = 0;
   for (const { shop_id: shopId } of shops) {
     const caller = systemCaller('shortage-fill', shopId);

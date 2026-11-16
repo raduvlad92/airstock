@@ -764,9 +764,9 @@ describe('shortages (D6)', () => {
       expect.objectContaining({ reservationId: order.reservationId, shortage: '2.000000' }),
     ]);
     // The sweep respects the setting too; once filling is on again it takes the free stock.
-    expect(await sweepShortages(db)).toBe(0);
+    expect(await sweepShortages(db, 50, [other.shopId])).toBe(0);
     await oh.run(ops.updateStockSettings, { fillShortagesOnReceipt: true });
-    expect(await sweepShortages(db)).toBeGreaterThanOrEqual(1);
+    expect(await sweepShortages(db, 50, [other.shopId])).toBeGreaterThanOrEqual(1);
     expect((await oh.run(ops.listShortages, {})).shortages).toEqual([]);
     expect((await oh.run(ops.getAvailability, { variantId })).totals).toMatchObject({
       reserved: '2.000000',

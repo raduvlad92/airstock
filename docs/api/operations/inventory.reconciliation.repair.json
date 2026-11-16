@@ -1,0 +1,236 @@
+{
+  "/api/v1/shops/{shopId}/stock-check/repairs": {
+    "post": {
+      "operationId": "inventory.reconciliation.repair",
+      "summary": "Repair a stock check problem",
+      "description": "Commits the compensating operation the preview showed for one problem, with a reason. Fails with problem_changed when the figures differ from the preview (preview again) and problem_resolved when the problem is gone. Never edits earlier history.",
+      "x-permission": "inventory.adjust",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.reconciliation.repaired",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "problem": {
+                  "type": "string",
+                  "enum": [
+                    "on_hand_mismatch",
+                    "allocated_mismatch",
+                    "over_allocated",
+                    "reservation_total_mismatch",
+                    "reservation_status_mismatch",
+                    "bundle_component_mismatch",
+                    "serial_mismatch",
+                    "cost_quantity_mismatch"
+                  ]
+                },
+                "targetId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "description": "The position or variant the problem names."
+                },
+                "expected": {
+                  "type": "string",
+                  "maxLength": 100,
+                  "description": "The expected figure from the preview."
+                },
+                "actual": {
+                  "type": "string",
+                  "maxLength": 100,
+                  "description": "The actual figure from the preview."
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "description": "Why the repair is right, such as what a count or the records showed."
+                },
+                "confirm": {
+                  "type": "boolean",
+                  "const": true,
+                  "description": "Must be true: the person reviewed the preview."
+                }
+              },
+              "required": [
+                "problem",
+                "targetId",
+                "expected",
+                "actual",
+                "reason",
+                "confirm"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "problem": {
+                    "type": "object",
+                    "properties": {
+                      "problem": {
+                        "type": "string",
+                        "enum": [
+                          "on_hand_mismatch",
+                          "allocated_mismatch",
+                          "over_allocated",
+                          "reservation_total_mismatch",
+                          "reservation_status_mismatch",
+                          "bundle_component_mismatch",
+                          "serial_mismatch",
+                          "cost_quantity_mismatch"
+                        ]
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "targetType": {
+                        "type": "string",
+                        "enum": [
+                          "position",
+                          "reservation",
+                          "serial_unit",
+                          "variant"
+                        ]
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "expected": {
+                        "type": "string",
+                        "description": "What the history (or the source records) says."
+                      },
+                      "actual": {
+                        "type": "string",
+                        "description": "What the stored figure says."
+                      },
+                      "variantId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "sku": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "locationPath": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "repairable": {
+                        "type": "boolean",
+                        "description": "Whether a reviewed repair is offered for this problem."
+                      }
+                    },
+                    "required": [
+                      "problem",
+                      "title",
+                      "targetType",
+                      "targetId",
+                      "expected",
+                      "actual",
+                      "variantId",
+                      "sku",
+                      "locationPath",
+                      "repairable"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "repair": {
+                    "type": "object",
+                    "properties": {
+                      "summary": {
+                        "type": "string",
+                        "description": "What the repair records, in a sentence."
+                      },
+                      "field": {
+                        "type": "string",
+                        "enum": [
+                          "history",
+                          "allocated",
+                          "owned_quantity"
+                        ],
+                        "description": "history: a ledger entry so history explains the balance; allocated: the reserved total set from the open allocations; owned_quantity: a cost-history entry so the quantity behind the average matches stock."
+                      },
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      },
+                      "delta": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "summary",
+                      "field",
+                      "from",
+                      "to",
+                      "delta"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "operationId",
+                  "problem",
+                  "repair"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,6 @@
 import {
+  ALERT_OPENED_TOPIC,
+  ALERT_RESOLVED_TOPIC,
   type AuditEvent,
   type AuditSink,
   announceStockChanged,
@@ -11,6 +13,7 @@ import {
   type JobDeps,
   type Logger,
   type OutboxMessage,
+  reconcileStock,
   recoverWebhookDeliveries,
   runExportJob,
   runImportJob,
@@ -224,6 +227,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/internal/smoke') return smoke(request, env);
     if (url.pathname === '/internal/jobs') return internalJobs(request, env);
+    if (url.pathname === '/internal/reconcile') return internalReconcile(request, env);
     app ??= createApp({
       database: (hooks) => database(env, hooks),
       audit: queueSink(env),
@@ -366,11 +370,65 @@ export default {
         // The webhook delivery log is kept 30 days (plan Section 5.13).
         await sweepWebhookHistory(db);
       }
+      // Stock reconciliation (D18): shops with stock activity every 30 minutes, every shop daily.
+      await runReconciliation(env, db, controller.cron === '0 3 * * *');
     } finally {
       await db.close();
     }
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * Runs the stock reconciliation next to the database: through this Worker's own fetch handler,
+ * as the jobs consumer does, or here when the self binding is not configured or the call fails.
+ */
+async function runReconciliation(env: Env, db: Database, daily: boolean): Promise<void> {
+  if (env.SELF && env.INTERNAL_SECRET) {
+    try {
+      const res = await env.SELF.fetch('https://airstock.internal/internal/reconcile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-internal-secret': env.INTERNAL_SECRET },
+        body: JSON.stringify({ daily }),
+      });
+      if (res.ok) return;
+      logger.error('internal_reconcile_failed', { status: res.status });
+    } catch (error) {
+      logger.error('internal_reconcile_failed', { error: String(error) });
+    }
+  }
+  try {
+    const result = await reconcileStock(db, { daily, logger });
+    logger.info?.('stock_reconciliation', { daily, ...result });
+    await deliverOutbox(env, db);
+  } catch (error) {
+    logger.error('stock_reconciliation_failed', { error: String(error) });
+  }
+}
+
+/** The reconciliation run the crons hand to the fetch handler; it announces alerts right away. */
+async function internalReconcile(request: Request, env: Env): Promise<Response> {
+  const secret = request.headers.get('x-internal-secret') ?? '';
+  if (
+    request.method !== 'POST' ||
+    !env.INTERNAL_SECRET ||
+    !timingSafeEqualText(secret, env.INTERNAL_SECRET)
+  ) {
+    return new Response('Not found', { status: 404 });
+  }
+  const body = (await request.json().catch(() => ({}))) as { daily?: unknown };
+  const daily = body.daily === true;
+  const db = database(env);
+  try {
+    const result = await reconcileStock(db, { daily, logger });
+    logger.info?.('stock_reconciliation', { daily, ...result });
+    await deliverOutbox(env, db).catch((error) =>
+      logger.error('outbox_dispatch_failed', { error: String(error) }),
+    );
+    return Response.json(result);
+  } finally {
+    await db.close();
+  }
+}
 
 async function requeueStaleJobs(db: Database): Promise<JobMessage[]> {
   const rows = await db.transaction({ shopId: null, userId: null, readOnly: true }, (tx) =>
@@ -515,6 +573,9 @@ async function runJobsMessage(
       return null;
     }
     if (await handleWebhookOutbox(await webhookDeps(env, db), body)) return null;
+    // Alert announcements: the in-app list reads the alerts table, webhooks get their own outbox
+    // rows, and milestone I3 adds email here.
+    if (body.topic === ALERT_OPENED_TOPIC || body.topic === ALERT_RESOLVED_TOPIC) return null;
     if (body.topic === 'email.webhook_disabled') {
       if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
         logger.error('email_not_configured', { topic: body.topic });

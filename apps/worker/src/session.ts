@@ -31,6 +31,8 @@ export interface FlowState {
   provider?: string;
   /** The email a Magic Auth code was sent to. */
   email?: string;
+  /** A provider sign-in WorkOS holds until the user types the code it emailed. */
+  verify?: { token: string; email: string };
   returnTo: string;
   exp: number;
 }

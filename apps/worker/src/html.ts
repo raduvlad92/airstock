@@ -123,20 +123,37 @@ export function signInPage(returnTo: string, notice?: string): Response {
   );
 }
 
-export function magicCodePage(email: string, error?: string): Response {
+function codePage(action: string, intro: SafeHtml, error?: string): Response {
   return page(
     'Enter your code',
     html`<section class="card narrow">
   <h1>Check your email</h1>
-  <p>We sent a six-digit code to <strong>${email}</strong>.</p>
+  ${intro}
   ${error ? html`<p class="error">${error}</p>` : ''}
-  <form method="post" action="/auth/magic/verify">
+  <form method="post" action="${action}">
     <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label>
     <button type="submit">Sign in</button>
   </form>
   <p class="fine"><a href="/auth/login">Use another email or method</a></p>
 </section>`,
     { status: error ? 400 : 200 },
+  );
+}
+
+export function magicCodePage(email: string, error?: string): Response {
+  return codePage(
+    '/auth/magic/verify',
+    html`<p>We sent a six-digit code to <strong>${email}</strong>.</p>`,
+    error,
+  );
+}
+
+/** A provider sign-in WorkOS holds until the user proves they own the email address. */
+export function emailVerificationPage(email: string, error?: string): Response {
+  return codePage(
+    '/auth/verify-email',
+    html`<p>One more step: confirm that <strong>${email}</strong> is yours. We sent a six-digit code to that address.</p>`,
+    error,
   );
 }
 

@@ -31,6 +31,8 @@ export const GRANT_CLAIM = 'urn:airstock:grant';
 /** Records what Airstock asked WorkOS for; codes map to users the test registered. */
 export class FakeWorkos implements WorkosClient {
   readonly users = new Map<string, WorkosUser>();
+  /** Provider codes WorkOS holds for email verification, and the users behind their tokens. */
+  readonly held = new Map<string, WorkosUser>();
   readonly sentCodes: string[] = [];
   readonly completed: Array<{
     externalAuthId: string;
@@ -43,12 +45,31 @@ export class FakeWorkos implements WorkosClient {
   addUser(code: string, user: WorkosUser): void {
     this.users.set(code, user);
   }
+  /**
+   * Registers a provider sign-in that WorkOS holds back with `email_verification_required`; the
+   * user finishes it with `654321`.
+   */
+  addUserNeedingVerification(code: string, user: WorkosUser): void {
+    this.held.set(code, user);
+  }
   authorizeUrl(provider: string, state: string): string {
     return `https://workos.test/authorize?provider=${provider}&state=${state}`;
   }
   async authenticateWithCode(code: string): Promise<WorkosUser> {
+    const held = this.held.get(code);
+    if (held) {
+      throw new WorkosError(403, 'email_verification_required', {
+        token: `pending-${code}`,
+        email: held.email,
+      });
+    }
     const user = this.users.get(code);
     if (!user) throw new WorkosError(400, 'invalid_grant');
+    return user;
+  }
+  async authenticateWithEmailVerification(pendingToken: string, code: string): Promise<WorkosUser> {
+    const user = this.held.get(pendingToken.replace(/^pending-/, ''));
+    if (!user || code !== '654321') throw new WorkosError(400, 'invalid_one_time_code');
     return user;
   }
   async sendMagicCode(email: string): Promise<void> {

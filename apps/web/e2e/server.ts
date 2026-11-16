@@ -78,6 +78,9 @@ const workos: WorkosClient = {
   authenticateWithMagicCode: async () => {
     throw new WorkosError(400, 'not_in_e2e');
   },
+  authenticateWithEmailVerification: async () => {
+    throw new WorkosError(400, 'not_in_e2e');
+  },
   completeConnect: async () => {
     throw new WorkosError(400, 'not_in_e2e');
   },

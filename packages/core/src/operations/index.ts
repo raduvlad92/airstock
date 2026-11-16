@@ -19,6 +19,10 @@ import { catalogSchemaOperations } from './catalog-schema.ts';
 import { catalogVariantsOperations } from './catalog-variants.ts';
 import { importsOperations } from './imports.ts';
 import { inventoryOperations } from './inventory.ts';
+import { inventoryLotsOperations } from './inventory-lots.ts';
+import { inventoryReservationsOperations } from './inventory-reservations.ts';
+import { inventorySettingsOperations } from './inventory-settings.ts';
+import { inventoryValuationOperations } from './inventory-valuation.ts';
 import { labelsOperations } from './labels.ts';
 import { mediaOperations } from './media.ts';
 import { membersOperations } from './members.ts';
@@ -41,6 +45,10 @@ export const operations: readonly AnyOperation[] = [
   ...catalogVariantsOperations,
   ...importsOperations,
   ...inventoryOperations,
+  ...inventoryLotsOperations,
+  ...inventoryReservationsOperations,
+  ...inventorySettingsOperations,
+  ...inventoryValuationOperations,
   ...labelsOperations,
   ...mediaOperations,
   ...membersOperations,
@@ -72,6 +80,10 @@ export * from './catalog-schema.ts';
 export * from './catalog-variants.ts';
 export * from './imports.ts';
 export * from './inventory.ts';
+export * from './inventory-lots.ts';
+export * from './inventory-reservations.ts';
+export * from './inventory-settings.ts';
+export * from './inventory-valuation.ts';
 export * from './labels.ts';
 export * from './media.ts';
 export * from './members.ts';

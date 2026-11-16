@@ -2,8 +2,8 @@ import type { Database } from '@airstock/db';
 import { systemCaller } from './accounts.ts';
 import { type AuditEvent, auditEvent, INSERT_AUDIT_EVENTS_SQL } from './audit.ts';
 import { uuidv7 } from './ids.ts';
-import { expireAllocationsAt } from './operations/inventory.ts';
 import type { HandlerContext } from './registry.ts';
+import { expireClaimsAt } from './stock/engine.ts';
 
 /** Writes one queue batch of audit events. Duplicates from redelivery are ignored (A27). */
 export async function ingestAuditEvents(db: Database, events: AuditEvent[]): Promise<number> {
@@ -116,7 +116,7 @@ export async function sweepExpiredReservations(db: Database, maxShops = 50): Pro
         newId: () => uuidv7(),
         event: (fields) => auditEvent(base, { phase: 'outcome', ...fields }),
       };
-      const events = (await expireAllocationsAt(ctx, ids)).map((e) => ({
+      const events = (await expireClaimsAt(ctx, ids)).map((e) => ({
         ...e,
         context: { trigger: 'sweeper' },
       }));

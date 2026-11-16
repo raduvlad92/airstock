@@ -75,10 +75,14 @@ describe('MCP request lifetime', () => {
       });
       return { res, text: await res.text() };
     };
-    const read = await call('get_availability', { variantId });
+    const read = await call('get_stock', { action: 'stock', variantId });
     expect(read.text).not.toContain('"isError":true');
     expect(read.res.headers.get('server-timing')).toContain('desc="sends 1, events 1"');
-    const reserve = await call('reserve_stock', { action: 'reserve', variantId, quantity: '1' });
+    const reserve = await call('manage_reservations', {
+      action: 'reserve',
+      variantId,
+      quantity: '1',
+    });
     expect(reserve.text).not.toContain('"isError":true');
     await new Promise((r) => setTimeout(r, 10));
     expect(published).toBe(before + 1);

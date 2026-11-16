@@ -38,7 +38,11 @@ describe('MCP endpoint (plan Section 7)', () => {
 
   it('refuses writes beyond the grant regardless of the prompt (A15)', async () => {
     const mcp = await mcpSession(t, shop, ['inventory:read']);
-    const res = await mcp.call('reserve_stock', { action: 'reserve', variantId, quantity: '1' });
+    const res = await mcp.call('manage_reservations', {
+      action: 'reserve',
+      variantId,
+      quantity: '1',
+    });
     expect(res.error).toBe(true);
     expect(res.body).toMatchObject({ code: 'forbidden' });
     await mcp.close();
@@ -46,7 +50,8 @@ describe('MCP endpoint (plan Section 7)', () => {
 
   it('stays bound to the granted shop, whatever the arguments name (A13)', async () => {
     const mcp = await mcpSession(t, shop, ['inventory:read']);
-    const res = await mcp.call('get_availability', {
+    const res = await mcp.call('get_stock', {
+      action: 'stock',
       variantId: otherVariantId,
       shopId: other.shopId,
     });
@@ -59,11 +64,11 @@ describe('MCP endpoint (plan Section 7)', () => {
     const grant = await connectionGrant(shop, ['inventory:read']);
     const token = await grantToken(t, grant);
     const mcp = await connectMcp(t, token);
-    expect((await mcp.call('get_availability', { variantId })).error).toBe(false);
+    expect((await mcp.call('get_stock', { action: 'stock', variantId })).error).toBe(false);
     await ownerQuery(`update connection_grants set status = 'revoked' where id = $1`, [
       grant.grantId,
     ]);
-    await expect(mcp.call('get_availability', { variantId })).rejects.toThrow();
+    await expect(mcp.call('get_stock', { action: 'stock', variantId })).rejects.toThrow();
     const raw = await t.app.request('/mcp', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}` },

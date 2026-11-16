@@ -18,7 +18,7 @@ describe('stock over MCP', () => {
     const mcp = await mcpSession(t, shop, ['shop:read', 'inventory:read', 'catalog:read']);
     const context = await mcp.call('get_shop_context');
     expect(context.body.shop.id).toBe(shop.shopId);
-    const stock = await mcp.call('get_availability', { variantId });
+    const stock = await mcp.call('get_stock', { action: 'stock', variantId });
     expect(stock.body.totals.available).toBe('10.000000');
     expect(t.sink.events.at(-1)!).toMatchObject({
       source: 'mcp',
@@ -32,8 +32,8 @@ describe('stock over MCP', () => {
   it('reserves within a write grant, idempotently when the client retries with a key', async () => {
     const mcp = await mcpSession(t, shop, ['inventory:read', 'inventory:write']);
     const args = { action: 'reserve', variantId, quantity: '2', idempotency_key: 'chat-turn-7' };
-    const first = await mcp.call('reserve_stock', args);
-    const again = await mcp.call('reserve_stock', args);
+    const first = await mcp.call('manage_reservations', args);
+    const again = await mcp.call('manage_reservations', args);
     expect(first.error).toBe(false);
     expect(again.body).toEqual({ ...first.body, replayed: true });
     await mcp.close();

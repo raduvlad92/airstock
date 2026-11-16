@@ -4,6 +4,7 @@ import { type AuditEvent, auditEvent, INSERT_AUDIT_EVENTS_SQL } from './audit.ts
 import { uuidv7 } from './ids.ts';
 import type { HandlerContext } from './registry.ts';
 import { expireClaimsAt, lockCandidates } from './stock/engine.ts';
+import { openShortageReservations } from './stock/moves.ts';
 import { fillShortages } from './stock/shortages.ts';
 
 /** Writes one queue batch of audit events. Duplicates from redelivery are ignored (A27). */
@@ -183,15 +184,25 @@ export async function sweepShortages(
         newId: () => uuidv7(),
         event: (fields) => auditEvent(base, { phase: 'outcome', ...fields }),
       };
-      const events: AuditEvent[] = [];
+      const variantIds = variants.map((v) => v.variant_id);
+      // ADR 0006: every candidate position of every variant in one ordered statement, then the
+      // shortage reservations (with their bundle headers and the expired claims there) in one,
+      // and only then the fills, which find everything they need locked already.
+      const positions = await lockCandidates(tx, { variantIds, ruleScopes: null, scope: null });
+      const events: AuditEvent[] = await expireClaimsAt(
+        ctx,
+        positions,
+        await openShortageReservations(tx, variantIds),
+      );
+      const byVariant = await tx.query<{ variant_id: string; ids: string[] }>(
+        `select variant_id, array_agg(id order by id) as ids from inventory_positions
+         where id = any($1::uuid[]) group by variant_id`,
+        [positions],
+      );
       const touched: string[] = [];
-      for (const { variant_id: variantId } of variants) {
-        const positions = await lockCandidates(tx, {
-          variantIds: [variantId],
-          ruleScopes: null,
-          scope: null,
-        });
-        const { fills, events: expired } = await fillShortages(ctx, variantId, positions);
+      for (const variantId of variantIds) {
+        const mine = byVariant.find((v) => v.variant_id === variantId)?.ids ?? [];
+        const { fills, events: expired } = await fillShortages(ctx, variantId, mine);
         events.push(...expired);
         for (const f of fills) {
           touched.push(...f.allocations.map((a) => a.positionId));
@@ -203,6 +214,7 @@ export async function sweepShortages(
               actor_id: 'shortage-fill',
               target_type: 'reservation',
               target_id: f.reservationId,
+              location_ids: f.locationIds,
               changes: { quantity: f.quantity, allocations: f.allocations },
               context: { trigger: 'sweeper', parentReservationId: f.parentReservationId },
             }),

@@ -15,6 +15,8 @@ export interface ShortageFill {
   parentReservationId: string | null;
   quantity: string;
   allocations: Array<{ allocationId: string; positionId: string; quantity: string }>;
+  /** The locations of the new allocations. */
+  locationIds: string[];
 }
 
 /**
@@ -96,6 +98,7 @@ export async function fillShortages(
         positionId: m.positionId,
         quantity: m.quantity,
       })),
+      locationIds: [...new Set(made.map((m) => m.locationId))],
     });
   }
   return { fills, events };

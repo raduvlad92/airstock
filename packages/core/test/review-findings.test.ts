@@ -118,7 +118,7 @@ async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
 // bundle reservation, a count of both) deadlocks with the sweep; PostgreSQL aborts one side.
 // ---------------------------------------------------------------------------------------------
 describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id order', () => {
-  it.fails('does not deadlock with a command that locks the same positions in id order', async () => {
+  it('does not deadlock with a command that locks the same positions in id order', async () => {
     // Variant A sorts first by variant id; its position is created after B's, so pA > pB.
     const variantA = await createVariant(h);
     const variantB = await createVariant(h);
@@ -312,7 +312,7 @@ describe('F-SCOPE-ALLOCATION-RULE: a scoped member can widen or rewrite a channe
 // scopeWhere), so a member limited to one warehouse sees out-of-scope position ids and quantities.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-ENGINE-EVENTS: expiry events carry no locations and reach every scoped reader', () => {
-  it.fails('hides an out-of-scope reservation expiry from a member limited to another warehouse', async () => {
+  it('hides an out-of-scope reservation expiry from a member limited to another warehouse', async () => {
     const own = await seedShop(db, sink, 'Review expiry scope');
     const oh = harness(db, sink, own);
     const wh = await oh.run(ops.createWarehouse, { name: 'Other' });

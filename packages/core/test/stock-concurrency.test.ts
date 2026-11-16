@@ -16,7 +16,7 @@ import {
 // Concurrency for the I1 commands (ADR 0006 lock order): fulfillment against expiry (A08), last
 // units across lots and bundles (A04, A36), and receipts filling shortages while orders arrive.
 
-const db = appDatabase();
+const db = appDatabase({}, 16);
 const sink = new MemoryAuditSink();
 let shop: SeededShop;
 let h: Harness;

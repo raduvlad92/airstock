@@ -19,7 +19,7 @@ import {
 // reallocations, expiry, and the sweepers keep the ledger, balances, allocations, reservations,
 // serials, and owned quantities reconciled, and availability never below zero.
 
-const db = appDatabase();
+const db = appDatabase({}, 6);
 const sink = new MemoryAuditSink();
 let shop: SeededShop;
 let h: Harness;

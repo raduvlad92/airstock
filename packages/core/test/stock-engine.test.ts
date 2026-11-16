@@ -17,7 +17,7 @@ import {
 // Milestone I1 engine scenarios: A28 (receipt half), A36 (engine half), A37, A38 (receive and
 // fulfill), A39, shortages (D6), reallocation, and allocation rules (D3).
 
-const db = appDatabase();
+const db = appDatabase({}, 8);
 const sink = new MemoryAuditSink();
 let shop: SeededShop;
 let h: Harness;

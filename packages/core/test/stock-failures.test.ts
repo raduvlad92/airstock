@@ -17,7 +17,7 @@ import {
 // effect (A11), a failed audit write never returns success (A12), a lost acknowledgement leaves a
 // durable attempt and no duplicate (A26), and 50 replays have one effect (A05).
 
-const db = appDatabase();
+const db = appDatabase({}, 8);
 const sink = new MemoryAuditSink();
 let shop: SeededShop;
 let h: Harness;
@@ -213,9 +213,9 @@ describe.each(cases)('$label', ({ setup }) => {
     const req = { caller: shop.caller, shopId: shop.shopId, input, idempotencyKey: key };
     const first = await execute({ db, audit: sink }, op, req);
     const after = await fingerprint();
-    const replays = await Promise.all(
-      Array.from({ length: 49 }, () => execute({ db, audit: sink }, op, req)),
-    );
+    // Sequential: concurrent duplicates are covered in concurrency.test.ts.
+    const replays = [];
+    for (let i = 0; i < 49; i++) replays.push(await execute({ db, audit: sink }, op, req));
     for (const r of replays) {
       expect(r.replayed).toBe(true);
       expect(r.result).toEqual(first.result);

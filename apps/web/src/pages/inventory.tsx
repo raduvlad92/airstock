@@ -17,6 +17,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { QuickCountForm } from './counts.tsx';
 import { useLocations } from './warehouses.tsx';
 
 type Availability = Out<typeof ops.getAvailability>;
@@ -182,6 +183,9 @@ export function StockPanel({
           ) : null}
           {can(context.data, 'inventory.reserve') ? (
             <ReserveForm shopId={shopId} variantId={variantId} lots={lots} />
+          ) : null}
+          {can(context.data, 'inventory.count') && !serials ? (
+            <QuickCountForm shopId={shopId} variantId={variantId} lots={lots} />
           ) : null}
         </div>
       ) : null}

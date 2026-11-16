@@ -1,5 +1,5 @@
 import {
-  dispatchOutbox,
+  drainOutbox,
   execute,
   handleWebhookOutbox,
   type OutboxMessage,
@@ -23,9 +23,10 @@ beforeAll(async () => {
   );
   t = await testApp({
     webhookSecrets: cipher,
-    // The real dispatch path: committed outbox rows go to the webhook dispatcher.
+    // The real dispatch path: committed outbox rows go to the webhook dispatcher. Other test
+    // files leave rows in the shared outbox, so drain it rather than take one batch.
     dispatch: (db) =>
-      dispatchOutbox(db, async (messages) => {
+      drainOutbox(db, async (messages) => {
         outbox.push(...messages);
         for (const m of messages) {
           await handleWebhookOutbox(
@@ -78,9 +79,12 @@ describe('webhooks over REST (D14)', () => {
     );
     expect(test.status).toBe(200);
     const sent = await json(test);
-    await new Promise((r) => setTimeout(r, 50));
+    await expect
+      .poll(() => received.find((r) => JSON.parse(r.body).id === sent.eventId)?.url, {
+        timeout: 10_000,
+      })
+      .toBe('https://n8n.example.com/webhook/abc');
     const hit = received.find((r) => JSON.parse(r.body).id === sent.eventId);
-    expect(hit?.url).toBe('https://n8n.example.com/webhook/abc');
     expect(
       await verifyWebhookSignature(hit!.headers['airstock-signature'], hit!.body, [created.secret]),
     ).toMatchObject({ ok: true });
@@ -110,7 +114,12 @@ describe('webhooks over REST (D14)', () => {
     const session = await connectMcp(t, await grantToken(t, grant));
     const { tools } = await session.client.listTools();
     await session.close();
-    expect(JSON.stringify(tools)).not.toMatch(/webhook/i);
+    // No tool or action manages webhooks (the activity filter may name the `webhooks` source).
+    expect(tools.map((tool) => tool.name).join(' ')).not.toMatch(/webhook/i);
+    for (const tool of tools) {
+      const action = (tool.inputSchema.properties as Record<string, { enum?: string[] }>)?.action;
+      expect((action?.enum ?? []).join(' '), tool.name).not.toMatch(/webhook/i);
+    }
     await expect(
       execute({ db: t.db, audit: t.sink }, ops.createConnection, {
         caller: shop.caller,

@@ -24,6 +24,7 @@ import { inventoryQuickAddOperations } from './inventory-quick-add.ts';
 import { inventoryReconciliationOperations } from './inventory-reconciliation.ts';
 import { inventoryReservationsOperations } from './inventory-reservations.ts';
 import { inventorySettingsOperations } from './inventory-settings.ts';
+import { inventoryTransfersOperations } from './inventory-transfers.ts';
 import { inventoryValuationOperations } from './inventory-valuation.ts';
 import { labelsOperations } from './labels.ts';
 import { mediaOperations } from './media.ts';
@@ -56,6 +57,7 @@ export const operations: readonly AnyOperation[] = [
   ...inventoryReconciliationOperations,
   ...inventoryReservationsOperations,
   ...inventorySettingsOperations,
+  ...inventoryTransfersOperations,
   ...inventoryValuationOperations,
   ...labelsOperations,
   ...mediaOperations,
@@ -97,6 +99,7 @@ export * from './inventory-quick-add.ts';
 export * from './inventory-reconciliation.ts';
 export * from './inventory-reservations.ts';
 export * from './inventory-settings.ts';
+export * from './inventory-transfers.ts';
 export * from './inventory-valuation.ts';
 export * from './labels.ts';
 export * from './media.ts';

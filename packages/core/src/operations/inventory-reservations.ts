@@ -432,6 +432,7 @@ interface ReservationRow {
   per: string | null;
   external_ref: string | null;
   channel: string;
+  purpose: string;
 }
 
 /**
@@ -473,7 +474,7 @@ async function lockTree(
        coalesce((select sum(a.outstanding) from reservation_allocations a
          where a.shop_id = r.shop_id and a.reservation_id = r.id), 0)::text as allocated,
        r.status, (r.expires_at is not null and r.expires_at <= now()) as expired,
-       r.component_base_quantity::text as per, r.external_ref, r.channel
+       r.component_base_quantity::text as per, r.external_ref, r.channel, r.purpose
      from reservations r where r.id = any($1::uuid[]) order by r.id for update`,
     [ids],
   );
@@ -500,6 +501,13 @@ function assertOpen(root: ReservationRow): void {
       'reservation_is_component',
       'This reservation is part of a bundle reservation; act on the bundle.',
       { parentReservationId: root.parent_id },
+    );
+  }
+  // A transfer hold changes only through its transfer, so its line quantities stay exact (D8).
+  if (root.purpose === 'transfer') {
+    throw errors.unprocessable(
+      'reservation_is_transfer',
+      'This reservation is a transfer hold; dispatch or cancel it on the transfer (transfer_stock).',
     );
   }
   if (!(OPEN_STATUSES as readonly string[]).includes(root.status)) {

@@ -391,4 +391,38 @@ describe('Shopify connector review findings', () => {
     );
     expect(await h.available(m, mapped!.variant_id)).toBe('7.000000');
   });
+  // FINDING 9 (phantom returned stock; main, minor). For a refund restocked at a Shopify location
+  // that is not mapped, startReturn falls back to the scope of the line's location
+  // (`scopeOf(rl.locationId) ?? scopeOf(line.shopify_location_id)`) and receives the unit into
+  // quarantine at that mapped location. The unit went back to the other location (a returns
+  // center, a 3PL), so Airstock now counts a quarantined unit that is not there. ADR 0035: units
+  // at an unmapped location wait for a person to receive them.
+  it.fails('F9: a refund restocked at an unmapped Shopify location is not received here', async () => {
+    const s = await setup('Return elsewhere', 5);
+    const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }]);
+    await event(s, 'orders/create', s.store.webhookBody(order));
+    const f = s.store.fulfill(order);
+    await event(
+      s,
+      'fulfillments/create',
+      s.store.topicBody('fulfillments/create', order, f.fulfillmentId),
+    );
+    // The customer returns one unit to Shopify's "Warehouse" (1002), not mapped here.
+    s.store.levels.set(s.store.key(s.item.inventoryItemId, '1002'), 0);
+    const refund = s.store.refund(order, [
+      { lineId: order.lines[0]!.lineId, quantity: 1, restockType: 'return', location: '1002' },
+    ]);
+    await event(s, 'refunds/create', s.store.topicBody('refunds/create', order, refund.refundId));
+    const [quarantine] = await ownerQuery<{ on_hand: string | null }>(
+      `select sum(on_hand)::text as on_hand from inventory_positions
+       where shop_id = $1 and variant_id = $2 and condition = 'quarantine'`,
+      [s.m.shopId, s.variantId],
+    );
+    expect(quarantine?.on_hand ?? '0').toBe('0');
+    const [ret] = await ownerQuery<{ status: string }>(
+      'select status from returns where shop_id = $1',
+      [s.m.shopId],
+    );
+    expect(ret?.status).toBe('authorized');
+  });
 });

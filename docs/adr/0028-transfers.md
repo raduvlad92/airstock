@@ -29,6 +29,15 @@ A transfer command locks its transfer row first. Only transfer commands lock tra
 - In-transit positions per transfer keep conservation a ledger fact: the units leave the source and enter transit in one operation, and the transfer's in-transit total always equals its lines' (checked by `transfer_reconciliation_problems()`).
 - Locking the document first serializes commands on one transfer without reordering the stock locks every other command already takes.
 
+## Update, 16 November 2026: review fixes (PR #73 findings)
+
+- **Locations are share-locked.** A receipt and a move share-lock the destination they load (`destinationLeaf`), and creating a transfer or a move share-locks both locations, as every command that brings stock in does. An archive, which locks the location and then checks it, waits for them instead of passing its check while units land.
+- **No archive with units on the way.** Archiving a location or warehouse is refused with `transfers_inbound` while an open transfer to it has units not yet received or resolved; they would otherwise stay in transit to an archived location.
+- **A scanned lot without a quantity** takes that lot's remainder on the line (held at the source for a dispatch, in transit for a receipt or a resolution), not the line's remainder across lots.
+- **Receipts do not make units sellable.** Receiving units sent in another condition (quarantine, damaged) as sellable is refused with `condition_change_required`: that is a condition change, with its permission and reason. Receiving them in a worse condition (arrived damaged) is unchanged.
+- **Exceptions and location scope.** Report and resolve check that either location is in scope in the handler. Their `locations` hook returns no locations, so the attempt and a failure stay hidden from members limited to other locations; the outcome names both.
+- **Dispatch keeps returns' units.** A dispatch that would take a return's uninspected units out of quarantine is refused (ADR 0029).
+
 ## Revisit when
 
 Transfers need partial lines per lot (one line per variant today), carrier integrations, or a recovery flow that returns in-transit units to the source without an adjustment.

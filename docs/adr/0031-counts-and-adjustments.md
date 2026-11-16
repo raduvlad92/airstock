@@ -28,6 +28,15 @@ A session command locks its session row first (only count commands lock it). The
 - Asking per claim instead of shrinking reservations keeps an order from losing its units without someone deciding it.
 - Making the quick count the same engine as sessions means the grid, the scanner, and an assistant all post the same history.
 
+## Update, 16 November 2026: review fixes (PR #73 findings)
+
+- **One of a kind.** Every adjustment, count, and reversal that adds units checks a one-of-a-kind variant's owned quantity under its cost-row lock (`one_of_a_kind`), as receipts do (ADR 0024). A count that moves the item to another shelf passes; one that finds a second unit does not. An item found again after it was sold is active again.
+- **Costs.** Units in are costed before units out (ADR 0022 update), so a count or adjustment that moves units keeps the average.
+- **Serials.** Adds, removals, and reversals lock and recheck their serial units (ADR 0020 update): reversing a removal fails with `serial_in_stock` once the serial is back in stock elsewhere.
+- **A count racing a receipt.** A counted position that did not exist when the count read it may be created by a receipt that commits meanwhile; the count then fails with `retry_conflict` instead of adding the count to the units received. The retry sets the shelf to the number counted.
+- **Repairs are not reversed.** A stock check repair (reason `reconciliation`) is refused by `reverse` (`not_reversible`).
+- **Returns.** Counts, adjustments, and condition changes do not take a return's uninspected units out of quarantine (ADR 0029 update).
+
 ## Revisit when
 
 Counts need cycle-count scheduling, recount thresholds, or counting offline (PRD Phase 4).

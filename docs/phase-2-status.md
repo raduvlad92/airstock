@@ -247,7 +247,12 @@ AIRSTOCK_TOKEN=<credential> pnpm chatgpt-run --shop <shop ID> --from <ISO time b
 
 Both runs are made without staging and without ChatGPT: a plain MCP client makes each prompt's expected calls.
 - `apps/worker/test/chatgpt-run.test.ts` runs the whole chain in the Worker tests on every CI run: the seed script through the REST API, the calls through MCP, and the harness through the activity API. It checks the API mode lists the same calls as the database mode, and that the expected file marks 13 of 13 prompts right, with 13 and 14 skipped.
-- A local run on 16 November used `wrangler dev`, the seed script's two steps, and real pauses between prompts. DRY_RUN_RESULT
+- A local run on 16 November went through `wrangler dev` over HTTP, the same way as on staging:
+  - the seed script's two steps, two minutes apart, with an API credential of the shop;
+  - the prompts' calls from an MCP client signed in as two consented connections, 12 seconds apart;
+  - the harness in API mode with the same credential, splitting prompts by the pauses alone.
+
+  The later step printed €7,415.20 at the moment and €7,634.17 after it. The harness listed 38 calls on two connections and marked **13 of 13 prompts right**, with 13 and 14 skipped. Every answer matched the Expected column above.
 
 ### 6.6 Result
 

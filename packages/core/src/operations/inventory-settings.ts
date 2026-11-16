@@ -1,7 +1,8 @@
+import type { Tx } from '@airstock/db';
 import { z } from 'zod';
 import { compare } from '../catalog/decimal.ts';
 import { NonNegativeDecimal } from '../decimal.ts';
-import { errors } from '../errors.ts';
+import { AppError, errors } from '../errors.ts';
 import { defineOperation } from '../registry.ts';
 import { Id } from '../schemas.ts';
 import { canSeeCosts, requireCosts } from '../stock/engine.ts';
@@ -15,6 +16,34 @@ const Channel = z
   .min(1)
   .max(100)
   .describe('"default", or a sales channel such as "shopify:<connection>".');
+
+/** The storage locations a rule's list covers: a warehouse counts as every location in it. */
+async function ruleLocations(tx: Tx, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  return (
+    await tx.query<{ id: string }>(
+      `select id from locations where id = any($1::uuid[]) and kind = 'storage'
+       union select id from locations where warehouse_id = any($1::uuid[])`,
+      [ids],
+    )
+  ).map((r) => r.id);
+}
+
+/** The channel's current list, or null when it has no rule (every location takes part). */
+async function currentRule(tx: Tx, channel: string): Promise<string[] | null> {
+  const rows = await tx.query<{ scope_id: string | null }>(
+    `select l.scope_id from allocation_rules r
+     left join allocation_rule_locations l on l.shop_id = r.shop_id and l.rule_id = r.id
+     where r.channel = $1 order by l.position`,
+    [channel],
+  );
+  if (rows.length === 0) return null;
+  return rows.map((r) => r.scope_id).filter((id): id is string => id !== null);
+}
+
+function outOfScope(message: string): AppError {
+  return new AppError(403, 'location_out_of_scope', message, 'denied');
+}
 
 export const setAllocationRule = defineOperation({
   id: 'inventory.allocation_rules.set',
@@ -47,18 +76,36 @@ export const setAllocationRule = defineOperation({
     destructive: false,
   },
   // A warehouse in the list counts as every location in it, so a member limited to some
-  // locations cannot route stock from the rest.
-  locations: async (input, tx) =>
-    (
-      await tx.query<{ id: string }>(
-        `select id from locations where id = any($1::uuid[]) and kind = 'storage'
-         union select id from locations where warehouse_id = any($1::uuid[])`,
-        [input.locationIds],
-      )
-    ).map((r) => r.id),
+  // locations cannot route stock from the rest. The rule being replaced counts too: replacing
+  // it re-routes the stock it named (ADR 0020, update).
+  locations: async (input, tx) => [
+    ...(await ruleLocations(tx, input.locationIds)),
+    ...(await ruleLocations(tx, (await currentRule(tx, input.channel)) ?? [])),
+  ],
   async handler(ctx, input) {
     if (new Set(input.locationIds).size !== input.locationIds.length) {
       throw errors.validation([{ path: 'locationIds', message: 'Each ID can appear once.' }]);
+    }
+    if (ctx.locationScope !== null) {
+      // Under the rule's lock, so the list checked is the list replaced.
+      await ctx.tx.query('select 1 from allocation_rules where channel = $1 for update', [
+        input.channel,
+      ]);
+      const before = await currentRule(ctx.tx, input.channel);
+      // An empty list, or no rule, means every fulfillment-eligible location.
+      if (input.locationIds.length === 0 || before === null || before.length === 0) {
+        throw outOfScope(
+          'A rule that covers every location can be set or replaced only by a member with access to every location.',
+        );
+      }
+      const [row] = await ctx.tx.query<{ ok: boolean }>(
+        `select coalesce(bool_and(path_ids && $2::uuid[]), true) as ok
+         from locations where id = any($1::uuid[])`,
+        [await ruleLocations(ctx.tx, before), ctx.locationScope],
+      );
+      if (!row?.ok) {
+        throw outOfScope('The current rule names locations outside your access.');
+      }
     }
     const known = await ctx.tx.query<{ id: string }>(
       `select id from warehouses where id = any($1::uuid[])

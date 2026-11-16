@@ -290,7 +290,7 @@ describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore locati
 // stock they may not touch. The hook's own comment says this must not be possible.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-ALLOCATION-RULE: a scoped member can widen or rewrite a channel rule', () => {
-  it.fails('refuses to replace a rule naming an out-of-scope warehouse with "every location"', async () => {
+  it('refuses to replace a rule naming an out-of-scope warehouse with "every location"', async () => {
     const channel = `shopify:${uuidv7().slice(-8)}`;
     await h.run(ops.setAllocationRule, { channel, locationIds: [shop.warehouseId] });
     const scoped = await addMember(shop.shopId, 'manager', [store]);

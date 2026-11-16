@@ -64,6 +64,10 @@ ADR 0006's order holds for every command: positions by ID, then reservations by 
 - The repair locks in the engine's order: the position (or every position of the variant, shared) and then the variant's cost row. Over MCP the preview and the repair are a documented exception: a person reviews them in the dashboard (Settings, Stock check) or over REST. Milestone I2's `adjust_stock` can take the ledger repair over.
 - A repair does not resolve the alert; the next scheduled check does, so the record of a mismatch always comes from the same check that found it.
 
+## Update, 16 November 2026: allocation rules and location scope
+
+- **Changing a channel's allocation rule touches the old list and the new one.** `inventory.allocation_rules.set` checks the locations of the rule it replaces as well as the new list against the caller's scope (a warehouse counts as every location in it). An empty list, or a channel without a rule, means every fulfillment-eligible location, so a member limited to some locations can neither set an empty list nor replace a rule that covers every location (`location_out_of_scope`). Before, only the new list was checked, so a scoped manager could re-route a channel's reservations away from, or onto, warehouses outside their scope.
+
 ## Revisit when
 
 - Allocation over a variant with hundreds of lots misses the 500 ms target (plan risk R5): lock the candidates in one statement with a cap, then consider an advisory lock per variant and location.

@@ -549,6 +549,31 @@ describe('allocation rules per channel (D3)', () => {
       },
     ]);
   });
+
+  it('lets a scoped manager change only a rule that stays within their locations', async () => {
+    const own = await h.run(ops.createWarehouse, { name: 'Rule own' });
+    const ownLoc = await createLeafLocation(h, own.warehouseId, 'Shelf');
+    const scoped = await addMember(shop.shopId, 'manager', [own.warehouseId]);
+    const as = { caller: scoped.caller };
+    const channel = `scoped:${uuidv7().slice(-8)}`;
+    // No rule yet means every location: not theirs to replace.
+    await expect(
+      h.run(ops.setAllocationRule, { channel, locationIds: [ownLoc] }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    await h.run(ops.setAllocationRule, { channel, locationIds: [own.warehouseId] });
+    // Within their warehouse: allowed, both ways.
+    await h.run(ops.setAllocationRule, { channel, locationIds: [ownLoc] }, as);
+    await h.run(ops.setAllocationRule, { channel, locationIds: [own.warehouseId] }, as);
+    // Widening to every location is not.
+    await expect(
+      h.run(ops.setAllocationRule, { channel, locationIds: [] }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    // Nor replacing a rule that names a warehouse outside their scope.
+    await h.run(ops.setAllocationRule, { channel, locationIds: [shop.warehouseId] });
+    await expect(
+      h.run(ops.setAllocationRule, { channel, locationIds: [own.warehouseId] }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+  });
 });
 
 describe('bundles (A36, engine half; G7)', () => {

@@ -1,0 +1,299 @@
+{
+  "/api/v1/shops/{shopId}/warehouses/{warehouseId}": {
+    "get": {
+      "operationId": "storage.warehouses.get",
+      "summary": "Get one warehouse with its record",
+      "description": "Contract terms appear only with the storage.commercial.read permission.",
+      "x-permission": "storage.read",
+      "x-connection-scope": "storage:read",
+      "x-audit-action": "storage.warehouse.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "commercialVisible": {
+                    "type": "boolean"
+                  },
+                  "warehouse": {
+                    "type": "object",
+                    "properties": {
+                      "warehouseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "ownership": {
+                        "type": "string",
+                        "enum": [
+                          "owned",
+                          "rented",
+                          "third_party"
+                        ]
+                      },
+                      "operatorName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "timezone": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "address": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "line1": {
+                                "type": "string"
+                              },
+                              "line2": {
+                                "type": "string"
+                              },
+                              "city": {
+                                "type": "string"
+                              },
+                              "region": {
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "country": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "contact": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "email": {
+                                "type": "string"
+                              },
+                              "phone": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "providerRefs": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string"
+                            },
+                            "externalId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "externalId"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "operatingStatus": {
+                        "type": "string",
+                        "enum": [
+                          "operating",
+                          "paused"
+                        ]
+                      },
+                      "fulfillmentEligible": {
+                        "type": "boolean"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "archived"
+                        ]
+                      },
+                      "activeLocations": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      },
+                      "archivedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "contract": {
+                        "description": "Present only for members with the storage.commercial.read permission.",
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "startDate": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "endDate": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "feeDescription": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "currency": {
+                                "type": "string"
+                              },
+                              "rates": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "description": {
+                                      "type": "string"
+                                    },
+                                    "amount": {
+                                      "type": "string"
+                                    },
+                                    "unit": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "description",
+                                    "amount",
+                                    "unit"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "notes": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "attachmentMediaIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "startDate",
+                              "endDate",
+                              "feeDescription",
+                              "currency",
+                              "rates",
+                              "notes",
+                              "attachmentMediaIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "warehouseId",
+                      "name",
+                      "ownership",
+                      "operatorName",
+                      "timezone",
+                      "address",
+                      "contact",
+                      "providerRefs",
+                      "operatingStatus",
+                      "fulfillmentEligible",
+                      "status",
+                      "activeLocations",
+                      "version",
+                      "createdAt",
+                      "updatedAt",
+                      "archivedAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "commercialVisible",
+                  "warehouse"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

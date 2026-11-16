@@ -1,0 +1,182 @@
+{
+  "/api/v1/shops/{shopId}/locations/{locationId}/move": {
+    "post": {
+      "operationId": "storage.locations.move",
+      "summary": "Move a location to a new parent in the same warehouse",
+      "description": "Allowed only while the location and everything inside it hold no stock. parentId null moves it to the top level. Paths follow the move; a location cannot move inside itself.",
+      "x-permission": "storage.manage",
+      "x-connection-scope": "storage:write",
+      "x-audit-action": "storage.location.moved",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "locationId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "expectedVersion": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "description": "The version you read. Fails with a conflict if the record changed since."
+                },
+                "parentId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The location to put it inside; null for the top level."
+                }
+              },
+              "required": [
+                "expectedVersion",
+                "parentId"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "object",
+                    "properties": {
+                      "locationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "warehouseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "warehouseName": {
+                        "type": "string"
+                      },
+                      "ownership": {
+                        "type": "string"
+                      },
+                      "parentId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "path": {
+                        "type": "string",
+                        "description": "Warehouse, then the locations above, then this one, joined by /."
+                      },
+                      "holdsStockAllowed": {
+                        "type": "boolean",
+                        "description": "True for locations without children."
+                      },
+                      "fulfillmentEligible": {
+                        "type": "boolean",
+                        "description": "This location’s own setting."
+                      },
+                      "effectiveFulfillmentEligible": {
+                        "type": "boolean",
+                        "description": "False when this location, one above it, or its warehouse is not eligible."
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "locationId",
+                      "warehouseId",
+                      "warehouseName",
+                      "ownership",
+                      "parentId",
+                      "name",
+                      "code",
+                      "path",
+                      "holdsStockAllowed",
+                      "fulfillmentEligible",
+                      "effectiveFulfillmentEligible",
+                      "status",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "locationsMoved": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "location",
+                  "locationsMoved"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

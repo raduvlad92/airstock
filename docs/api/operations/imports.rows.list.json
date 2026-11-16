@@ -1,0 +1,161 @@
+{
+  "/api/v1/shops/{shopId}/imports/{importId}/rows": {
+    "get": {
+      "operationId": "imports.rows.list",
+      "summary": "List the per-row results of an import",
+      "description": "Each row’s action (create, update, error), status after commit, errors, warnings, and the records it wrote.",
+      "x-permission": "catalog.read",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.import_rows.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "importId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "only",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": "all",
+            "type": "string",
+            "enum": [
+              "all",
+              "problems",
+              "failed"
+            ]
+          }
+        },
+        {
+          "name": "afterRow",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "rowNumber": {
+                          "type": "number"
+                        },
+                        "action": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "productId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "variantId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "stocked": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "rowNumber",
+                        "action",
+                        "status",
+                        "errors",
+                        "warnings",
+                        "productId",
+                        "variantId",
+                        "stocked"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "nextAfterRow": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "rows",
+                  "nextAfterRow"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

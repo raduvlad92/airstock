@@ -1,0 +1,174 @@
+{
+  "/api/v1/shops/{shopId}/media/uploads": {
+    "post": {
+      "operationId": "catalog.media.uploads.create",
+      "summary": "Start uploading a picture or attachment",
+      "description": "Declare the file name, type, size in bytes, and SHA-256 (hex). The answer has upload URLs valid for 15 minutes: PUT the original to the first; for images also PUT a thumbnail (WebP or JPEG, longest side up to 320 px) and a display image (up to 1,600 px). Then finalize. A wrong checksum, a file that is not what it says, or an oversize file is refused and the upload fails.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "catalog.media.upload_started",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "fileName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "contentType": {
+                  "type": "string",
+                  "enum": [
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp",
+                    "image/avif",
+                    "image/gif",
+                    "application/pdf"
+                  ]
+                },
+                "size": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Bytes."
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                },
+                "productId": {
+                  "description": "Checked against the per-product limit before uploading.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "fileName",
+                "contentType",
+                "size",
+                "sha256"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "intentId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "mediaId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "image",
+                      "document"
+                    ]
+                  },
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "uploads": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "part": {
+                          "type": "string",
+                          "enum": [
+                            "original",
+                            "thumbnail",
+                            "display"
+                          ]
+                        },
+                        "url": {
+                          "type": "string",
+                          "description": "PUT the file body here, with the same authentication."
+                        },
+                        "method": {
+                          "type": "string",
+                          "const": "PUT"
+                        },
+                        "contentTypes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "maxBytes": {
+                          "type": "number"
+                        },
+                        "maxSide": {
+                          "description": "Longest side in pixels, for derivatives.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "part",
+                        "url",
+                        "method",
+                        "contentTypes",
+                        "maxBytes",
+                        "maxSide"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "intentId",
+                  "mediaId",
+                  "kind",
+                  "expiresAt",
+                  "uploads"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "/api/v1/shops/{shopId}/activity": {
+    "get": {
+      "operationId": "activity.list",
+      "summary": "Search the activity history",
+      "description": "Newest first. Filter by target to explain a record, or by attempt to follow one request. Recent events can take a few seconds to appear because reads and failures are ingested through a queue.",
+      "x-permission": "activity.read",
+      "x-connection-scope": "activity:read",
+      "x-audit-action": "activity.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "targetType",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 50
+          }
+        },
+        {
+          "name": "targetId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        {
+          "name": "attemptId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        {
+          "name": "before",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Cursor from the previous page.",
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "eventId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "action": {
+                          "type": "string"
+                        },
+                        "phase": {
+                          "type": "string",
+                          "enum": [
+                            "attempt",
+                            "outcome"
+                          ]
+                        },
+                        "outcome": {
+                          "type": "string"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "actorType": {
+                          "type": "string"
+                        },
+                        "actorId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "clientId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "targetType": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "targetId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "operationId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "attemptId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "externalRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "changes": {},
+                        "error": {}
+                      },
+                      "required": [
+                        "eventId",
+                        "occurredAt",
+                        "action",
+                        "phase",
+                        "outcome",
+                        "source",
+                        "actorType",
+                        "actorId",
+                        "clientId",
+                        "targetType",
+                        "targetId",
+                        "operationId",
+                        "attemptId",
+                        "externalRef",
+                        "reason",
+                        "changes",
+                        "error"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "nextCursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "events",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

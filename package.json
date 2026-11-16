@@ -17,6 +17,7 @@
     "parity": "tsx scripts/parity-check.ts",
     "openapi": "tsx scripts/generate-openapi.ts",
     "openapi:check": "tsx scripts/generate-openapi.ts --check",
+    "openapi:bundle": "node scripts/openapi-bundle.mjs",
     "build": "pnpm --filter @airstock/web build && pnpm --filter @airstock/worker build",
     "verify": "pnpm check && pnpm typecheck && pnpm parity && pnpm openapi:check && pnpm test && pnpm build",
     "dev:setup": "tsx scripts/dev-setup.ts",

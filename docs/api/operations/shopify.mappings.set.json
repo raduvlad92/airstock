@@ -1,0 +1,133 @@
+{
+  "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/mappings": {
+    "post": {
+      "operationId": "shopify.mappings.set",
+      "summary": "Map a Shopify store to a location and variants",
+      "description": "Replaces the mappings of one connected Shopify store: one Shopify location to one location, and the listed Shopify variants to variants. Airstock then sets Shopify’s available quantity at that location to Airstock’s availability, and keeps it in step.",
+      "x-permission": "connections.manage",
+      "x-connection-scope": "session",
+      "x-audit-action": "shopify.mappings.set",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "connectionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "locationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "shopifyLocationId": {
+                  "type": "string",
+                  "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                },
+                "variants": {
+                  "maxItems": 1000,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "shopifyVariantId": {
+                        "type": "string",
+                        "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                      },
+                      "shopifyInventoryItemId": {
+                        "type": "string",
+                        "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                      }
+                    },
+                    "required": [
+                      "variantId",
+                      "shopifyVariantId",
+                      "shopifyInventoryItemId"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "locationId",
+                "shopifyLocationId",
+                "variants"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "locationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "shopifyLocationId": {
+                    "type": "string"
+                  },
+                  "variantsMapped": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "connectionId",
+                  "locationId",
+                  "shopifyLocationId",
+                  "variantsMapped"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

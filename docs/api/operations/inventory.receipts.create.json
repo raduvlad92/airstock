@@ -1,0 +1,154 @@
+{
+  "/api/v1/shops/{shopId}/receipts": {
+    "post": {
+      "operationId": "inventory.receipts.create",
+      "summary": "Receive stock into a location",
+      "description": "Adds units of a variant to a leaf location in a condition. Also used for opening stock. The quantity is in the variant base unit.",
+      "x-permission": "inventory.receive",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.receipt.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "variantId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "locationId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "quantity": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                  "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                },
+                "condition": {
+                  "default": "sellable",
+                  "type": "string",
+                  "enum": [
+                    "sellable",
+                    "quarantine",
+                    "damaged"
+                  ]
+                },
+                "unitCost": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
+                  "description": "Decimal string, zero or more, at most 14 integer digits and 6 decimal places."
+                },
+                "reference": {
+                  "description": "Supplier or inbound reference.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "variantId",
+                "locationId",
+                "quantity"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operationId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "positionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "locationId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "condition": {
+                        "type": "string",
+                        "enum": [
+                          "sellable",
+                          "quarantine",
+                          "damaged"
+                        ]
+                      },
+                      "onHand": {
+                        "type": "string"
+                      },
+                      "allocated": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "positionId",
+                      "variantId",
+                      "locationId",
+                      "condition",
+                      "onHand",
+                      "allocated"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "operationId",
+                  "position"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

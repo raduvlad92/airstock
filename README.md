@@ -7,7 +7,7 @@ A visual product database and inventory system for ecommerce merchants, with an 
 - **What and why:** [PRD and architecture](docs/ecommerce-platform-prd-and-architecture.md)
 - **Current build:** [Phase 1 plan](docs/phase-1-build-plan.md) and [Phase 1 status](docs/phase-1-status.md); Phase 0 in its [report](docs/phase-0-report.md)
 - **Decisions:** [architecture decision records](docs/adr/README.md)
-- **API contract:** [OpenAPI 3.1](docs/api/openapi.json), generated from the operation registry
+- **API contract:** [OpenAPI 3.1](docs/api/README.md), generated from the operation registry, one file per operation; the Worker serves the joined document at `/openapi.json`
 
 ## Layout
 
@@ -16,7 +16,7 @@ apps/worker      Cloudflare Worker: REST API, MCP endpoint, queue consumers, cro
 apps/web         Dashboard: React, Vite, and TanStack, served by the Worker at /app
 packages/core    Operation registry, command pipeline, inventory and catalog operations
 packages/db      PostgreSQL migrations, roles and row-level security, transaction layer
-scripts          Parity check, OpenAPI generation, local dev setup
+scripts          Parity check, OpenAPI generation and bundling, local dev setup
 test             Shared test setup: a fresh PostgreSQL database per run
 ```
 

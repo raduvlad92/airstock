@@ -1,0 +1,146 @@
+{
+  "/api/v1/shops/{shopId}/variants/{variantId}/bundle-availability": {
+    "get": {
+      "operationId": "catalog.bundles.availability",
+      "summary": "Get how many of a bundle can be sold",
+      "description": "The smallest floor(component available ÷ quantity per bundle) over the bundle’s components, for the whole shop, a warehouse, or a location and its sub-locations. Only stock you can access counts; `partial` says when that is a subset. An archived component makes the bundle unavailable.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "catalog.bundle_availability.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "locationId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "A location; its sub-locations count too.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "sku": {
+                    "type": "string"
+                  },
+                  "bundleVersion": {
+                    "type": "number"
+                  },
+                  "partial": {
+                    "type": "boolean"
+                  },
+                  "available": {
+                    "type": "string",
+                    "description": "Whole bundles available."
+                  },
+                  "limitedBy": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The component that sets the limit."
+                  },
+                  "components": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "perBundle": {
+                          "type": "string",
+                          "description": "Base units of the component in one bundle."
+                        },
+                        "available": {
+                          "type": "string",
+                          "description": "Sellable units available in the scope."
+                        },
+                        "bundles": {
+                          "type": "string",
+                          "description": "Whole bundles this component allows."
+                        }
+                      },
+                      "required": [
+                        "variantId",
+                        "sku",
+                        "status",
+                        "perBundle",
+                        "available",
+                        "bundles"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "variantId",
+                  "sku",
+                  "bundleVersion",
+                  "partial",
+                  "available",
+                  "limitedBy",
+                  "components"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

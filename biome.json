@@ -10,7 +10,7 @@
       "**",
       "!**/*.md",
       "!assets",
-      "!docs/api/openapi.json",
+      "!docs/api",
       "!**/dist",
       "!**/vendor",
       "!**/*.svg"

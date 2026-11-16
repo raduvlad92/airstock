@@ -1,0 +1,159 @@
+{
+  "/api/v1/shops/{shopId}/availability": {
+    "get": {
+      "operationId": "inventory.availability.get",
+      "summary": "Get stock and availability for a variant",
+      "description": "Shows on-hand, reserved, and available quantities per location and condition, with totals. Totals cover only the locations you can access; `partial` says when that is a subset.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.availability.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "locationId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "sku": {
+                    "type": "string"
+                  },
+                  "partial": {
+                    "type": "boolean"
+                  },
+                  "totals": {
+                    "type": "object",
+                    "properties": {
+                      "onHand": {
+                        "type": "string"
+                      },
+                      "sellableOnHand": {
+                        "type": "string"
+                      },
+                      "reserved": {
+                        "type": "string"
+                      },
+                      "available": {
+                        "type": "string"
+                      },
+                      "quarantined": {
+                        "type": "string"
+                      },
+                      "damaged": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "onHand",
+                      "sellableOnHand",
+                      "reserved",
+                      "available",
+                      "quarantined",
+                      "damaged"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "positions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "positionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationPath": {
+                          "type": "string"
+                        },
+                        "warehouseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "condition": {
+                          "type": "string",
+                          "enum": [
+                            "sellable",
+                            "quarantine",
+                            "damaged"
+                          ]
+                        },
+                        "onHand": {
+                          "type": "string"
+                        },
+                        "reserved": {
+                          "type": "string"
+                        },
+                        "available": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "positionId",
+                        "locationId",
+                        "locationPath",
+                        "warehouseId",
+                        "condition",
+                        "onHand",
+                        "reserved",
+                        "available"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "variantId",
+                  "sku",
+                  "partial",
+                  "totals",
+                  "positions"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

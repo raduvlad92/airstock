@@ -1,0 +1,62 @@
+{
+  "/api/v1/shops/{shopId}/connections/{grantId}/revoke": {
+    "post": {
+      "operationId": "connections.revoke",
+      "summary": "Revoke an AI or OAuth connection",
+      "description": "Stops the connection on its next request, even if its access token has not expired (PRD 9.4).",
+      "x-permission": "shop.read",
+      "x-connection-scope": "session",
+      "x-audit-action": "connection.revoked",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "grantId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "const": "revoked"
+                  }
+                },
+                "required": [
+                  "grantId",
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

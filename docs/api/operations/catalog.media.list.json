@@ -1,0 +1,435 @@
+{
+  "/api/v1/shops/{shopId}/products/{productId}/media": {
+    "get": {
+      "operationId": "catalog.media.list",
+      "summary": "List the pictures and attachments of a product and its variants",
+      "description": "Gives each link’s role, order, primary flag, and alt text, and each file once with signed thumbnail and display links valid for at least 15 minutes. A variant shows its own pictures first, then the product’s; without its own primary picture it shows the product’s.",
+      "x-permission": "catalog.read",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.media.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "productId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "product": {
+                    "type": "object",
+                    "properties": {
+                      "primaryMediaId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "links": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "linkId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "mediaId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "productId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "variantId": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Null for the product itself."
+                            },
+                            "role": {
+                              "type": "string"
+                            },
+                            "roleLabel": {
+                              "type": "string"
+                            },
+                            "position": {
+                              "type": "number"
+                            },
+                            "primary": {
+                              "type": "boolean"
+                            },
+                            "altText": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "linkId",
+                            "mediaId",
+                            "productId",
+                            "variantId",
+                            "role",
+                            "roleLabel",
+                            "position",
+                            "primary",
+                            "altText"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "In display order. Every variant inherits these."
+                      }
+                    },
+                    "required": [
+                      "primaryMediaId",
+                      "links"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "variants": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "primaryMediaId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The variant’s own primary picture, else the product’s."
+                        },
+                        "primaryInherited": {
+                          "type": "boolean"
+                        },
+                        "links": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "linkId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "mediaId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "productId": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "variantId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "Null for the product itself."
+                              },
+                              "role": {
+                                "type": "string"
+                              },
+                              "roleLabel": {
+                                "type": "string"
+                              },
+                              "position": {
+                                "type": "number"
+                              },
+                              "primary": {
+                                "type": "boolean"
+                              },
+                              "altText": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "linkId",
+                              "mediaId",
+                              "productId",
+                              "variantId",
+                              "role",
+                              "roleLabel",
+                              "position",
+                              "primary",
+                              "altText"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Links to this variant only, in order. Shown before the product’s pictures."
+                        }
+                      },
+                      "required": [
+                        "variantId",
+                        "sku",
+                        "title",
+                        "primaryMediaId",
+                        "primaryInherited",
+                        "links"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "media": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "mediaId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "document"
+                          ]
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "number",
+                          "description": "Bytes of the original file."
+                        },
+                        "sha256": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "description": "Pixels, for images whose header could be read.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "height": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "thumbnail": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "type": "number",
+                                  "description": "Bytes."
+                                },
+                                "width": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "height": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "contentType",
+                                "size",
+                                "width",
+                                "height"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Up to 320 px. Images only."
+                        },
+                        "display": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "description": "Signed link, valid at least 15 minutes. Null when media delivery is not set up.",
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "type": "number",
+                                  "description": "Bytes."
+                                },
+                                "width": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "height": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "contentType",
+                                "size",
+                                "width",
+                                "height"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Up to 1,600 px. Images only."
+                        }
+                      },
+                      "required": [
+                        "mediaId",
+                        "kind",
+                        "fileName",
+                        "contentType",
+                        "size",
+                        "sha256",
+                        "width",
+                        "height",
+                        "createdAt",
+                        "thumbnail",
+                        "display"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Each linked file once."
+                  },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Starter roles and the roles in use in this shop."
+                  },
+                  "limits": {
+                    "type": "object",
+                    "properties": {
+                      "mediaPerProduct": {
+                        "type": "number"
+                      },
+                      "imageBytes": {
+                        "type": "number"
+                      },
+                      "documentBytes": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "mediaPerProduct",
+                      "imageBytes",
+                      "documentBytes"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "productId",
+                  "product",
+                  "variants",
+                  "media",
+                  "roles",
+                  "limits"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

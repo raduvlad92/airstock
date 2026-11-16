@@ -1,0 +1,256 @@
+{
+  "/api/v1/shops/{shopId}/labels/items": {
+    "post": {
+      "operationId": "labels.items.render",
+      "summary": "Resolve item and pack labels for printing",
+      "description": "Returns what goes on each label: name, SKU, option values, price, pack, and the first barcode of the variant or pack. A pack label carries the pack’s own barcode and price (or the variant’s price per base unit times the pack). The dashboard draws the PDF.",
+      "x-permission": "catalog.read",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "labels.items.rendered",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "packId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "copies": {
+                        "default": 1,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [
+                      "variantId"
+                    ]
+                  }
+                },
+                "templateId": {
+                  "description": "A saved template.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "template": {
+                  "description": "A built-in template key.",
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "layout": {
+                  "description": "Without a template: the sheet or label size.",
+                  "type": "string",
+                  "enum": [
+                    "a4_3x8",
+                    "a4_4x10",
+                    "thermal_50x25",
+                    "thermal_100x50"
+                  ]
+                },
+                "fields": {
+                  "description": "Without a template: what to print.",
+                  "maxItems": 10,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                }
+              },
+              "required": [
+                "items"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "template": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "layout": {
+                        "type": "string",
+                        "enum": [
+                          "a4_3x8",
+                          "a4_4x10",
+                          "thermal_50x25",
+                          "thermal_100x50"
+                        ]
+                      },
+                      "fields": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "layout",
+                      "fields"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "total": {
+                    "type": "number"
+                  },
+                  "missingBarcodes": {
+                    "type": "number"
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "variant",
+                            "pack"
+                          ]
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "packId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "copies": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "options": {
+                          "type": "string"
+                        },
+                        "price": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "pack": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "barcode": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "symbology": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ean13",
+                                    "ean8",
+                                    "upca",
+                                    "code128",
+                                    "qr",
+                                    "other"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "symbology",
+                                "code"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Null when the record has no barcode."
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "variantId",
+                        "packId",
+                        "copies",
+                        "name",
+                        "sku",
+                        "options",
+                        "price",
+                        "pack",
+                        "barcode"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "template",
+                  "currency",
+                  "total",
+                  "missingBarcodes",
+                  "labels"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

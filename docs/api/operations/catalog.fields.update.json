@@ -1,0 +1,302 @@
+{
+  "/api/v1/shops/{shopId}/catalog/fields/{fieldId}": {
+    "post": {
+      "operationId": "catalog.fields.update",
+      "summary": "Change a field: label, rules, default, visibility, or archive and restore",
+      "description": "The key, type, and level never change (see convert_field for safe type changes). An archived field keeps its values but takes no new ones.",
+      "x-permission": "catalog.schema.manage",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "catalog.field.updated",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "fieldId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "expectedVersion": {
+                  "description": "Fails with a conflict if the field changed since.",
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "config": {
+                  "type": "object",
+                  "properties": {
+                    "maxLength": {
+                      "description": "text and rich_text: most characters.",
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "min": {
+                      "description": "integer, decimal, money, measurement: smallest value.",
+                      "type": "string",
+                      "pattern": "^-?\\d+(\\.\\d+)?$"
+                    },
+                    "max": {
+                      "description": "integer, decimal, money, measurement: largest value.",
+                      "type": "string",
+                      "pattern": "^-?\\d+(\\.\\d+)?$"
+                    },
+                    "scale": {
+                      "description": "decimal and money: decimal places, 0 to 6.",
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "unitKind": {
+                      "description": "measurement: weight, length, volume, or temperature.",
+                      "type": "string",
+                      "enum": [
+                        "weight",
+                        "length",
+                        "volume",
+                        "temperature"
+                      ]
+                    },
+                    "defaultUnit": {
+                      "description": "measurement: unit offered first, such as kg.",
+                      "type": "string",
+                      "maxLength": 10
+                    },
+                    "maxItems": {
+                      "description": "multi_select, file, relationship: most items.",
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "targetType": {
+                      "description": "relationship: what it links to.",
+                      "type": "string",
+                      "enum": [
+                        "product",
+                        "variant"
+                      ]
+                    },
+                    "relationKind": {
+                      "description": "relationship: what the link means, such as compatible_with or replaces.",
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    "accept": {
+                      "description": "file: accepted media.",
+                      "type": "string",
+                      "enum": [
+                        "images",
+                        "documents",
+                        "any"
+                      ]
+                    }
+                  },
+                  "description": "Validation rules for the field type."
+                },
+                "defaultValue": {},
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "everyone",
+                    "restricted"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "archived"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "key": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text",
+                          "rich_text",
+                          "integer",
+                          "decimal",
+                          "boolean",
+                          "date",
+                          "timestamp",
+                          "single_select",
+                          "multi_select",
+                          "money",
+                          "measurement",
+                          "file",
+                          "relationship"
+                        ]
+                      },
+                      "level": {
+                        "type": "string",
+                        "enum": [
+                          "product",
+                          "variant",
+                          "both"
+                        ]
+                      },
+                      "config": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      },
+                      "defaultValue": {},
+                      "visibility": {
+                        "type": "string",
+                        "enum": [
+                          "everyone",
+                          "restricted"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "archived"
+                        ]
+                      },
+                      "isSystem": {
+                        "type": "boolean"
+                      },
+                      "version": {
+                        "type": "number"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "position": {
+                              "type": "number"
+                            },
+                            "archived": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "position",
+                            "archived"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "key",
+                      "label",
+                      "description",
+                      "type",
+                      "level",
+                      "config",
+                      "defaultValue",
+                      "visibility",
+                      "status",
+                      "isSystem",
+                      "version",
+                      "options"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "field"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

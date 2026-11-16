@@ -1,0 +1,60 @@
+{
+  "/api/v1/shops/{shopId}/exports/{exportId}/download": {
+    "post": {
+      "operationId": "exports.download",
+      "summary": "Record an export download and return its file",
+      "description": "Used by the download route; each download is its own event (plan 5.12).",
+      "x-permission": "exports.run",
+      "x-connection-scope": "catalog:read",
+      "x-audit-action": "catalog.export.downloaded",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "exportId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fileKey": {
+                    "type": "string"
+                  },
+                  "fileName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fileKey",
+                  "fileName"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

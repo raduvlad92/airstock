@@ -26,6 +26,8 @@
 - **Sold one-of-a-kind items.** Availability drops to zero through the push as for any item. With the store's `archive_sold_listings` setting, the next sync also archives the listing.
 - **Quick add.** "List on Shopify" is enabled when one store is connected. It lists the new item as a draft or active product after its pictures are uploaded, and remembers the last choice per shop on the device.
 
+- **API versions.** Barcodes are written as `barcodes` and read from the `barcodes` connection: `barcode` is deprecated in 2026-10, with its removal date not yet announced. The 2027-01 release candidate keeps `inventorySetQuantities` with `changeFromQuantity`, and the product, order, refund, fulfillment, and return reads used here, unchanged; its breaking changes are in discounts, collections, markets, and tax. The onboarding read (ADR 0033) still asks for `barcode`, which keeps working until Shopify sets a removal date.
+
 ## Why
 
 - One owner per field gives every storefront value a single source, so the two systems cannot overwrite each other silently, and a person sees and decides every disagreement.

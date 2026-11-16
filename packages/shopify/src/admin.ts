@@ -288,7 +288,7 @@ const QUERIES = {
       id title descriptionHtml status updatedAt
       mediaCount { count }
       variants(first: 100) {
-        nodes { id title sku barcode price inventoryItem { id tracked } }
+        nodes { id title sku price barcodes(first: 1) { nodes { value } } inventoryItem { id tracked } }
       }
     }
   }`,
@@ -887,7 +887,7 @@ export function httpShopifyAdmin(
               id: string;
               title: string;
               sku: string | null;
-              barcode: string | null;
+              barcodes: { nodes: Array<{ value: string }> } | null;
               price: string | null;
               inventoryItem: { id: string; tracked: boolean } | null;
             }>;
@@ -907,7 +907,7 @@ export function httpShopifyAdmin(
           variantId: numeric(v.id),
           inventoryItemId: v.inventoryItem ? numeric(v.inventoryItem.id) : null,
           sku: v.sku,
-          barcode: v.barcode,
+          barcode: v.barcodes?.nodes[0]?.value ?? null,
           price: v.price,
           title: v.title,
           tracked: v.inventoryItem?.tracked ?? false,
@@ -967,8 +967,10 @@ export function httpShopifyAdmin(
           variants: input.variants.map((v) => ({
             optionValues: v.optionValues,
             ...(v.price ? { price: v.price } : {}),
-            ...(v.barcode ? { barcode: v.barcode } : {}),
-            inventoryItem: { sku: v.sku, tracked: true },
+            // 2026-10: `barcode` is deprecated in favour of `barcodes`.
+            ...(v.barcode ? { barcodes: [{ value: v.barcode }] } : {}),
+            sku: v.sku,
+            inventoryItem: { tracked: true },
             inventoryQuantities: v.locationIds.map((l) => ({
               locationId: gid('Location', l),
               name: 'available',

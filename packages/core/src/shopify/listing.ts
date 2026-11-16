@@ -58,13 +58,13 @@ export const skuKey = (sku: string) => sku.trim().toUpperCase();
 
 /** Markdown text as simple HTML: escaped, paragraphs and line breaks kept. */
 export function textToHtml(text: string): string {
-  const escape = (s: string) =>
+  const escapeHtml = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   return text
     .trim()
     .split(/\n{2,}/)
     .filter((p) => p.trim())
-    .map((p) => `<p>${escape(p.trim()).replace(/\n/g, '<br>')}</p>`)
+    .map((p) => `<p>${escapeHtml(p.trim()).replace(/\n/g, '<br>')}</p>`)
     .join('');
 }
 

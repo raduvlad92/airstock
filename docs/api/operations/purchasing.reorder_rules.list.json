@@ -1,0 +1,210 @@
+{
+  "/api/v1/shops/{shopId}/reorder-rules": {
+    "get": {
+      "operationId": "purchasing.reorder_rules.list",
+      "summary": "List reorder rules",
+      "description": "Use this to see reorder rules and which variants are low: each rule with its reorder point, reorder quantity or maximum level, preferred supplier, and what is available and on order now. lowOnly lists only rules at or below their point. Not for changing a rule (use set_rule).",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "purchasing.reorder_rules.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only this variant’s rules.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only rules for this warehouse.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "lowOnly",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only rules whose stock is at or below the reorder point.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "productName": {
+                          "type": "string"
+                        },
+                        "warehouseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "warehouseName": {
+                          "type": "string"
+                        },
+                        "locationId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locationPath": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reorderPoint": {
+                          "type": "string"
+                        },
+                        "reorderQuantity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "maximumLevel": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "preferredSupplierId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "preferredSupplierName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "available": {
+                          "type": "string",
+                          "description": "Sellable and unreserved in the rule’s warehouse or location."
+                        },
+                        "onOrder": {
+                          "type": "string",
+                          "description": "Still expected on sent purchase orders there."
+                        },
+                        "low": {
+                          "type": "boolean",
+                          "description": "Available plus on order is at or below the reorder point."
+                        },
+                        "alertId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The open low-stock alert, if any."
+                        },
+                        "version": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "variantId",
+                        "sku",
+                        "productName",
+                        "warehouseId",
+                        "warehouseName",
+                        "locationId",
+                        "locationPath",
+                        "reorderPoint",
+                        "reorderQuantity",
+                        "maximumLevel",
+                        "preferredSupplierId",
+                        "preferredSupplierName",
+                        "available",
+                        "onOrder",
+                        "low",
+                        "alertId",
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "rules"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

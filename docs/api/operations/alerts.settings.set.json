@@ -1,0 +1,77 @@
+{
+  "/api/v1/shops/{shopId}/alert-settings": {
+    "post": {
+      "operationId": "alerts.settings.set",
+      "summary": "Set the shop’s alert settings",
+      "description": "How many days before a lot expires the daily check opens an alert for it (0 to 3650; 30 by default).",
+      "x-permission": "alerts.manage",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "alerts.settings.set",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "lotExpiryAlertDays": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 3650
+                }
+              },
+              "required": [
+                "lotExpiryAlertDays"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lotExpiryAlertDays": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "lotExpiryAlertDays"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

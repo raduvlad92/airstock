@@ -35,6 +35,7 @@ describe('MCP tools', () => {
       'receive_stock',
       'search_activity',
       'search_catalog',
+      'stock_alerts',
       'transfer_stock',
       'warehouse_work',
     ]);

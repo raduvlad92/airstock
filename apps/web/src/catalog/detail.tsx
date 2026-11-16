@@ -2,6 +2,7 @@ import type { ops } from '@airstock/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
+import { ReorderRulesPanel } from '../components/reorder-rules.tsx';
 import {
   Badge,
   Empty,
@@ -1036,6 +1037,7 @@ function StockTab({ shopId, item }: { shopId: string; item: Item }) {
         </Field>
       ) : null}
       <StockPanel shopId={shopId} variantId={variantId} title="Stock by location" />
+      <ReorderRulesPanel shopId={shopId} variantId={variantId} />
       {active.find((v) => v.id === variantId) ? (
         <StockSettingsForm
           key={variantId}

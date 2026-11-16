@@ -1,6 +1,7 @@
 import { Link, Outlet, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { can, useAppInfo, useShopContext, useShops } from '../context.tsx';
+import { AlertCount } from '../pages/alerts.tsx';
 import { telemetry } from '../telemetry.ts';
 import { ErrorNotice, Loading } from './ui.tsx';
 
@@ -64,6 +65,7 @@ const NAV = [
   { to: '/shops/$shopId/warehouses', label: 'Warehouses', permission: 'storage.read' },
   { to: '/shops/$shopId/suppliers', label: 'Suppliers', permission: 'catalog.read' },
   { to: '/shops/$shopId/purchasing', label: 'Purchasing', permission: 'inventory.read' },
+  { to: '/shops/$shopId/alerts', label: 'Alerts', permission: 'inventory.read' },
   { to: '/shops/$shopId/labels', label: 'Labels', permission: 'catalog.read' },
   { to: '/shops/$shopId/picking', label: 'Picking', permission: 'inventory.read' },
   { to: '/shops/$shopId/activity', label: 'Activity', permission: 'activity.read' },
@@ -106,6 +108,7 @@ export function ShopLayout() {
             activeProps={{ className: 'nav-link active' }}
           >
             {item.label}
+            {item.label === 'Alerts' ? <AlertCount shopId={shopId} /> : null}
           </Link>
         ))}
         {can(context.data, 'inventory.read') ? (

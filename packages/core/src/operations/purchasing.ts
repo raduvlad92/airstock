@@ -845,6 +845,10 @@ export const sendPurchaseOrder = defineOperation({
       outbox: input.email
         ? [{ topic: 'email.purchase_order', payload: { sendId, purchaseOrderId: order.id } }]
         : [],
+      // Sending starts on order: low-stock alerts for these variants may resolve (PRD 6.9).
+      ...(to !== from
+        ? { alertCheck: { variantIds: [...new Set(result.lines.map((l) => l.variantId))] } }
+        : {}),
       webhooks:
         to !== from
           ? [await statusChangedWebhook(ctx.tx, { ...orderRef(order), version }, from, to)]
@@ -1146,6 +1150,7 @@ export const closePurchaseOrder = defineOperation({
         reason: input.reason ?? null,
         changes: { status: { from: order.status, to: 'closed' }, cancelled: remainder },
       },
+      alertCheck: { variantIds: [...new Set(cancelled.map((c) => c.variant_id))] },
       webhooks: [
         await statusChangedWebhook(
           ctx.tx,
@@ -1208,6 +1213,9 @@ export const cancelPurchaseOrder = defineOperation({
         reason: input.reason ?? null,
         changes: { status: { from: order.status, to: 'cancelled' } },
       },
+      ...(order.status === 'sent'
+        ? { alertCheck: { variantIds: [...new Set(result.lines.map((l) => l.variantId))] } }
+        : {}),
       webhooks: [
         await statusChangedWebhook(
           ctx.tx,

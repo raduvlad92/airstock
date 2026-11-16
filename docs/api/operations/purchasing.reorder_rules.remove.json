@@ -1,0 +1,89 @@
+{
+  "/api/v1/shops/{shopId}/reorder-rules/{ruleId}/remove": {
+    "post": {
+      "operationId": "purchasing.reorder_rules.remove",
+      "summary": "Remove a reorder rule",
+      "description": "Use this when a variant should no longer be reordered at a warehouse or location. Its open low-stock alert resolves. History keeps the rule.",
+      "x-permission": "purchasing.manage",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "purchasing.reorder_rule.removed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "ruleId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "expectedVersion": {
+                  "description": "The rule version you read.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ruleId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "removed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ruleId",
+                  "removed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

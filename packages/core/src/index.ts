@@ -6,6 +6,15 @@ export {
   type VerifiedIdentity,
 } from './accounts.ts';
 export {
+  ALERT_KINDS,
+  ALERT_OPENED,
+  ALERT_RESOLVED,
+  type AlertKind,
+  checkReorderRules,
+} from './alerts/check.ts';
+export { checkShop as checkShopAlerts, runDailyAlertChecks } from './alerts/daily.ts';
+export { notifyAlertOpened } from './alerts/notify.ts';
+export {
   type AuditEvent,
   type AuditOutcome,
   type AuditSink,

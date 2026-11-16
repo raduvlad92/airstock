@@ -12,9 +12,11 @@ import {
   ingestAuditEvents,
   type JobDeps,
   type Logger,
+  notifyAlertOpened,
   type OutboxMessage,
   reconcileStock,
   recoverWebhookDeliveries,
+  runDailyAlertChecks,
   runExportJob,
   runImportJob,
   sendInvitationEmail,
@@ -376,6 +378,9 @@ export default {
         );
       }
       if (controller.cron === '0 3 * * *') {
+        // Lots nearing expiry, and every reorder rule and shortage checked again (D12).
+        await runDailyAlertChecks(db);
+        await publishOutbox(env, db);
         await ensureAuditPartitions(db);
         await sweepExportFiles(db, jobDeps(env, db).files);
         // The webhook delivery log is kept 30 days (plan Section 5.13).
@@ -603,6 +608,25 @@ async function runJobsMessage(
       );
       return null;
     }
+    if (body.topic === 'alert.opened') {
+      // Email to members who follow the alert's kind (D12); the app reads alerts directly.
+      if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
+        logger.error('email_not_configured', { topic: body.topic });
+        return 600;
+      }
+      await notifyAlertOpened(
+        {
+          db,
+          email: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
+          publicUrl: env.PUBLIC_URL,
+        },
+        body.shopId,
+        (body.payload as { alertId: string }).alertId,
+      );
+      return null;
+    }
+    // Nothing to send when an alert resolves; webhooks carry it (alert.resolved).
+    if (body.topic === 'alert.resolved') return null;
     if (body.topic === 'email.purchase_order') {
       if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.ASSETS) {
         logger.error('email_not_configured', { topic: body.topic });

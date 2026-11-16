@@ -22,8 +22,8 @@
       "text": "What's running low? Draft purchase orders for it.",
       "ordered": true,
       "expect": [
-        { "tool": "stock_alerts" },
-        { "tool": "manage_purchasing", "action": "draft_from_low_stock" }
+        { "tool": "stock_alerts", "action": "list" },
+        { "tool": "manage_purchasing", "action": "suggest_from_low_stock" }
       ]
     },
     {

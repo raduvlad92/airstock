@@ -1,4 +1,5 @@
 import { CommitOutcomeUnknownError, type Database, type Tx } from '@airstock/db';
+import { applyStockAlerts } from './alerts/check.ts';
 import { type AuditEvent, type AuditSink, auditEvent, INSERT_AUDIT_EVENTS_SQL } from './audit.ts';
 import { type Caller, callerKey, type Membership } from './caller.ts';
 import { AppError, errors } from './errors.ts';
@@ -194,6 +195,8 @@ export async function execute(
         const handled = await op.handler(ctx, input);
         let webhookRows = 0;
         if (op.kind === 'command') {
+          // Low stock and shortages, checked after the command's locks, committed with it (D12).
+          await applyStockAlerts(ctx, handled);
           webhookRows = await finalizeCommand(tx, op, caller, idempotencyKey, handled, base());
         }
         return { kind: 'done', handled, webhookRows } as const;

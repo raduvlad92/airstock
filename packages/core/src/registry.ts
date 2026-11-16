@@ -73,6 +73,11 @@ export interface HandlerResult<O> {
    */
   webhooks?: WebhookEmit[];
   /**
+   * Variants whose on order changed (a purchase order sent, closed, or cancelled): the pipeline
+   * checks their reorder rules in this transaction, as it does for stock changes (D12).
+   */
+  alertCheck?: { variantIds: string[] };
+  /**
    * Extra events. Commands write them in the transaction with the success event; reads send
    * them with the access event, in the same queue message.
    */

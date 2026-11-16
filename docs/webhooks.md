@@ -333,6 +333,73 @@ Sent by "Send test" in the dashboard or the API, to check the endpoint.
 }
 ```
 
+### `alert.opened`
+
+An alert opened: low stock (available plus on order at or below a reorder point), a lot nearing expiry, a new shortage, or a stock check problem. One event per opening, not per order; filter by alert kind and location.
+
+- **Needs:** `inventory.read` (held by whoever subscribes)
+- **Filters:** warehouses and locations, alert kinds
+
+```json
+{
+  "id": "0193a1b2-0000-7000-8000-0000000000ff",
+  "type": "alert.opened",
+  "created_at": "2026-11-16T09:00:00.000Z",
+  "shop_id": "0193a1b2-0000-7000-8000-000000000001",
+  "api_version": "v1",
+  "data": {
+    "alert": {
+      "id": "0193a1b2-0000-7000-8000-000000000060",
+      "kind": "low_stock",
+      "status": "open",
+      "variantId": "0193a1b2-0000-7000-8000-000000000011",
+      "warehouseId": "0193a1b2-0000-7000-8000-000000000020",
+      "ruleId": "0193a1b2-0000-7000-8000-0000000000c0",
+      "sku": "ETB-PRE-01",
+      "productName": "Prismatic Evolutions Elite Trainer Box",
+      "warehouseName": "Main warehouse",
+      "locationPath": null,
+      "available": "2",
+      "onOrder": "0",
+      "reorderPoint": "5",
+      "reorderQuantity": "24",
+      "maximumLevel": null,
+      "openedAt": "2026-11-16T09:00:00.000Z"
+    }
+  }
+}
+```
+
+### `alert.resolved`
+
+An alert resolved because its condition cleared: stock recovered above the reorder point, the lot sold out, the shortage was filled, the stock check came back clean, or the rule was removed.
+
+- **Needs:** `inventory.read` (held by whoever subscribes)
+- **Filters:** warehouses and locations, alert kinds
+
+```json
+{
+  "id": "0193a1b2-0000-7000-8000-0000000000ff",
+  "type": "alert.resolved",
+  "created_at": "2026-11-16T09:00:00.000Z",
+  "shop_id": "0193a1b2-0000-7000-8000-000000000001",
+  "api_version": "v1",
+  "data": {
+    "alert": {
+      "id": "0193a1b2-0000-7000-8000-000000000060",
+      "kind": "low_stock",
+      "resolution": "recovered",
+      "recovered": {
+        "available": "26",
+        "onOrder": "0"
+      },
+      "openedAt": "2026-11-16T09:00:00.000Z",
+      "resolvedAt": "2026-11-17T09:00:00.000Z"
+    }
+  }
+}
+```
+
 ### `transfer.status_changed`
 
 A transfer or a move changed state, such as ready, dispatched, partially received, received, cancelled, or exception: the transfer with its per-line quantities and the change.
@@ -488,8 +555,6 @@ Registered, listed by the API with `"status": "coming"`, hidden in the dashboard
 
 | Type | Description | Filters |
 | --- | --- | --- |
-| `alert.opened` | An alert opened, such as low stock or a lot nearing expiry (I3). | warehouses and locations, alert kinds |
-| `alert.resolved` | An alert resolved because stock recovered, or was acknowledged (I3). | warehouses and locations, alert kinds |
 | `reservation.shortage` | A connector order was reserved with a shortage it could not cover (I1). | warehouses and locations |
 | `shopify.sync_conflict` | Shopify and Airstock disagree on a quantity or field that no order explains (I6). | warehouses and locations |
 

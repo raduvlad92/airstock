@@ -292,3 +292,33 @@ export async function ensureAuditPartitions(db: Database, monthsAhead = 3): Prom
   );
   return row?.created ?? 0;
 }
+
+/** How long a command's idempotency record is kept (ADR 0006, update for I7). */
+export const IDEMPOTENCY_RETENTION_DAYS = 7;
+
+/**
+ * Deletes idempotency records older than the retention window, in batches of `batchSize`, each in
+ * its own short transaction, and stops after `maxBatches` (the next daily run continues). A replay
+ * after the window finds no record and runs as a new request. Returns the records deleted.
+ */
+export async function sweepIdempotencyRecords(
+  db: Database,
+  options: { days?: number; batchSize?: number; maxBatches?: number } = {},
+): Promise<number> {
+  const days = options.days ?? IDEMPOTENCY_RETENTION_DAYS;
+  const batchSize = options.batchSize ?? 5_000;
+  const maxBatches = options.maxBatches ?? 40;
+  let deleted = 0;
+  for (let batch = 0; batch < maxBatches; batch++) {
+    const [row] = await db.transaction({ shopId: null, userId: null }, (tx) =>
+      tx.query<{ deleted: number }>('select delete_old_idempotency_records($1, $2) as deleted', [
+        days,
+        batchSize,
+      ]),
+    );
+    const count = row?.deleted ?? 0;
+    deleted += count;
+    if (count < batchSize) break;
+  }
+  return deleted;
+}

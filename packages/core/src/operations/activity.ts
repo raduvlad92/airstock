@@ -280,7 +280,7 @@ export const getOperationOutcome = defineOperation({
   id: 'operations.outcome.get',
   summary: 'Look up the result of a command by its idempotency key',
   description:
-    'Use after a lost response or an outcome_unknown error. `completed` returns the original result; `not_found` means the command made no change and is safe to retry with the same key.',
+    'Use after a lost response or an outcome_unknown error. `completed` returns the original result; `not_found` means the command made no change and is safe to retry with the same key. Results are kept for 7 days: after that every key answers `not_found`.',
   kind: 'read',
   scope: 'shop',
   input: z.object({

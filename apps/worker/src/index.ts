@@ -30,6 +30,7 @@ import {
   sendWebhookDisabledEmail,
   sweepExpiredReservations,
   sweepExportFiles,
+  sweepIdempotencyRecords,
   sweepMediaUploads,
   sweepShortages,
   sweepUnboundConnectionGrants,
@@ -433,6 +434,8 @@ export default {
         await sweepExportFiles(db, jobDeps(env, db).files);
         // The webhook delivery log is kept 30 days (plan Section 5.13).
         await sweepWebhookHistory(db);
+        // Idempotency records are kept 7 days, deleted in short batches (ADR 0006, update for I7).
+        await sweepIdempotencyRecords(db);
       }
       // Stock reconciliation (D18): shops with stock activity every 30 minutes, every shop daily.
       await runReconciliation(env, db, controller.cron === '0 3 * * *');

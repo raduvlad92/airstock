@@ -1,4 +1,4 @@
-import { execute, ops, uuidv7 } from '@airstock/core';
+import { execute, ops, sweepIdempotencyRecords, uuidv7 } from '@airstock/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   appDatabase,
@@ -6,6 +6,7 @@ import {
   type Harness,
   harness,
   MemoryAuditSink,
+  ownerQuery,
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
@@ -114,5 +115,65 @@ describe('idempotent commands (A05)', () => {
       idempotencyKey: 'never-used',
     });
     expect(missing).toMatchObject({ status: 'not_found', result: null });
+  });
+});
+
+describe('idempotency retention (ADR 0006, update for I7)', () => {
+  // Other files share the database: count only this shop's records.
+  const records = async (shopId: string, old: boolean) => {
+    const [row] = await ownerQuery<{ n: number }>(
+      `select count(*)::int as n from idempotency_records
+       where shop_id = $1 and (created_at < now() - interval '7 days') = $2`,
+      [shopId, old],
+    );
+    return row!.n;
+  };
+
+  it('deletes records older than 7 days in batches, keeps recent ones, and replays within the window', async () => {
+    const own = await seedShop(db, sink, 'Retention');
+    const oh = harness(db, sink, own);
+    const variantId = await createVariant(oh);
+    const run = (quantity: string, key: string) =>
+      execute({ db, audit: sink }, ops.receiveStock, {
+        caller: own.caller,
+        shopId: own.shopId,
+        input: { variantId, locationId: own.locationId, quantity },
+        idempotencyKey: key,
+      });
+    const oldKeys = Array.from({ length: 5 }, () => uuidv7());
+    for (const key of oldKeys) await run('1', key);
+    const recentKey = uuidv7();
+    const recent = await run('2', recentKey);
+    // Age the first five past the window.
+    await ownerQuery(
+      `update idempotency_records set created_at = now() - interval '8 days'
+       where shop_id = $1 and key = any($2::text[])`,
+      [own.shopId, oldKeys],
+    );
+    const before = await records(own.shopId, false);
+    expect(await records(own.shopId, true)).toBe(5);
+
+    // One bounded batch removes at most its size.
+    await sweepIdempotencyRecords(db, { batchSize: 2, maxBatches: 1 });
+    expect(await records(own.shopId, true)).toBeGreaterThanOrEqual(3);
+    // The full run removes the rest, batch by batch.
+    expect(await sweepIdempotencyRecords(db, { batchSize: 2 })).toBeGreaterThanOrEqual(3);
+    expect(await records(own.shopId, true)).toBe(0);
+    expect(await records(own.shopId, false)).toBe(before);
+
+    // Within the window the original result is replayed, without a second effect.
+    const again = await run('2', recentKey);
+    expect(again.replayed).toBe(true);
+    expect(again.result).toEqual(recent.result);
+    // After the window the key is forgotten: the same request runs as a new one.
+    const late = await run('1', oldKeys[0]!);
+    expect(late.replayed).toBe(false);
+    const view = await oh.run(ops.getAvailability, { variantId });
+    expect(view.totals).toMatchObject({ onHand: '8.000000' });
+    const outcome = await oh.run(ops.getOperationOutcome, {
+      operation: 'inventory.receipts.create',
+      idempotencyKey: oldKeys[1]!,
+    });
+    expect(outcome).toMatchObject({ status: 'not_found' });
   });
 });

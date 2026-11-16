@@ -2,7 +2,7 @@ import type { Tx } from '@airstock/db';
 import { z } from 'zod';
 import type { AuditEvent } from '../audit.ts';
 import { compare, normalize } from '../catalog/decimal.ts';
-import { errors } from '../errors.ts';
+import { AppError, errors } from '../errors.ts';
 import type { AnyOperation, HandlerContext, HandlerResult } from '../registry.ts';
 import { defineOperation } from '../registry.ts';
 import { Id } from '../schemas.ts';
@@ -13,7 +13,7 @@ import {
   shopifyChannel,
 } from '../shopify/targets.ts';
 import { applyChanges } from '../stock/adjust.ts';
-import { exactProduct } from '../stock/engine.ts';
+import { exactProduct, OPEN_STATUSES } from '../stock/engine.ts';
 import type { WebhookEmit } from '../webhooks/events.ts';
 import {
   fulfillReservation,
@@ -126,6 +126,8 @@ const SyncResult = z.object({
   fulfilled: z.number().int(),
   fulfillmentsReversed: z.number().int(),
   returns: z.array(Id),
+  /** Lines Airstock refused to hold (an archived variant, say), with the refusal's code. */
+  refused: z.array(z.object({ lineId: z.string(), code: z.string() })),
   skipped: z.enum(['before_connection']).nullable(),
 });
 
@@ -241,14 +243,49 @@ async function applyTook(tx: Tx, acc: Acc, connectionId: string): Promise<void> 
   }
 }
 
-/** The line's reservations with something open: oldest first. */
-async function lineReservations(tx: Tx, connectionId: string, lineId: string) {
-  return tx.query<{ reservation_id: string; open_items: number }>(
-    `select reservation_id, open_items from shopify_line_reservations
-     where connection_id = $1 and shopify_line_id = $2 and open_items > 0
-     order by created_at, reservation_id`,
-    [connectionId, lineId],
+/**
+ * The line's reservations with something open, oldest first. A reservation a person released or
+ * fulfilled by hand holds less than the line recorded: only what it still holds is counted, so
+ * a later cancellation or fulfillment never fails on it (those units are the person's call).
+ */
+async function lineReservations(
+  tx: Tx,
+  connectionId: string,
+  line: Pick<LineRow, 'shopify_line_id' | 'bundle' | 'per_item'>,
+) {
+  const rows = await tx.query<{
+    reservation_id: string;
+    open_items: number;
+    status: string;
+    open_units: string;
+  }>(
+    `select x.reservation_id, x.open_items, r.status,
+       (r.shortage_quantity + coalesce((select sum(a.outstanding) from reservation_allocations a
+          where a.shop_id = r.shop_id and a.reservation_id = r.id), 0))::text as open_units
+     from shopify_line_reservations x
+     join reservations r on r.shop_id = x.shop_id and r.id = x.reservation_id
+     where x.connection_id = $1 and x.shopify_line_id = $2 and x.open_items > 0
+     order by x.created_at, x.reservation_id`,
+    [connectionId, line.shopify_line_id],
   );
+  return rows.flatMap((r) => {
+    let open = (OPEN_STATUSES as readonly string[]).includes(r.status) ? r.open_items : 0;
+    if (open > 0 && !line.bundle) {
+      open = Math.min(open, Math.floor(Number(r.open_units) / Number(line.per_item) + 1e-9));
+    }
+    return open > 0 ? [{ reservation_id: r.reservation_id, open_items: open }] : [];
+  });
+}
+
+/**
+ * A refusal that belongs to the line, not to the order (an archived variant or bundle component,
+ * say): recorded on the line, so the order's other lines still apply (A30). Anything else (a
+ * conflict to retry, a server error) fails the order as before.
+ */
+function lineRefusal(error: unknown): string | null {
+  if (!(error instanceof AppError)) return null;
+  if (error.code === 'retry_conflict' || error.status >= 500) return null;
+  return [404, 409, 422].includes(error.status) ? error.code : null;
 }
 
 async function setReservationOpen(tx: Tx, reservationId: string, openItems: number) {
@@ -269,7 +306,7 @@ async function releaseItems(
   oldestFirst = false,
 ): Promise<number> {
   let left = items;
-  const reservations = await lineReservations(ctx.tx, connectionId, line.shopify_line_id);
+  const reservations = await lineReservations(ctx.tx, connectionId, line);
   if (!oldestFirst) reservations.reverse();
   for (const r of reservations) {
     if (left === 0) break;
@@ -285,7 +322,11 @@ async function releaseItems(
   return items - left;
 }
 
-/** Reserves more Shopify items for a line, as a new reservation of the connection's channel. */
+/**
+ * Reserves more Shopify items for a line, as a new reservation of the connection's channel. A
+ * refusal of the line itself (its variant archived here while Shopify still sells it) is
+ * returned instead of thrown, with nothing written, so the rest of the order still applies.
+ */
 async function reserveItems(
   ctx: HandlerContext,
   acc: Acc,
@@ -293,15 +334,25 @@ async function reserveItems(
   orderId: string,
   line: LineRow,
   items: number,
-): Promise<{ reservationId: string; short: boolean }> {
-  const made = await inner(ctx, acc, reserveStock, {
-    variantId: line.variant_id,
-    quantity: units(line, items),
-    purpose: 'external_order',
-    externalRef: lineRef(orderId, line.shopify_line_id),
-    channel: shopifyChannel(connectionId),
-    allowShortage: true,
-  });
+): Promise<{ reservationId: string; short: boolean } | { refused: string }> {
+  let made: z.infer<typeof reserveStock.output>;
+  await ctx.tx.query('savepoint shopify_line');
+  try {
+    made = await inner(ctx, acc, reserveStock, {
+      variantId: line.variant_id,
+      quantity: units(line, items),
+      purpose: 'external_order',
+      externalRef: lineRef(orderId, line.shopify_line_id),
+      channel: shopifyChannel(connectionId),
+      allowShortage: true,
+    });
+  } catch (error) {
+    const refused = lineRefusal(error);
+    if (!refused) throw error;
+    await ctx.tx.query('rollback to savepoint shopify_line');
+    return { refused };
+  }
+  await ctx.tx.query('release savepoint shopify_line');
   await ctx.tx.query(
     `insert into shopify_line_reservations (shop_id, connection_id, shopify_line_id, reservation_id,
        open_items) values (app_shop_id(), $1, $2, $3, $4)`,
@@ -391,7 +442,7 @@ async function fulfillItems(
   let left = items;
   let released = 0;
   const operationIds: string[] = [];
-  for (const r of await lineReservations(ctx.tx, connectionId, line.shopify_line_id)) {
+  for (const r of await lineReservations(ctx.tx, connectionId, line)) {
     if (left === 0) break;
     const take = Math.min(left, r.open_items);
     let doable = 0;
@@ -608,6 +659,7 @@ export const syncShopifyOrder = defineOperation({
       fulfilled: 0,
       fulfillmentsReversed: 0,
       returns: [],
+      refused: [],
       skipped: null,
     };
     const acc: Acc = {
@@ -758,7 +810,14 @@ export const syncShopifyOrder = defineOperation({
       lines.push(row);
     }
     const byLine = new Map(lines.map((l) => [l.shopify_line_id, l]));
-    const live = (l: LineRow) => l.outcome !== 'unmapped' && l.variant_id !== null;
+    const live = (l: LineRow) =>
+      l.outcome !== 'unmapped' && l.outcome !== 'refused' && l.variant_id !== null;
+    // A line Airstock refuses to hold (its variant archived here while Shopify still sells it):
+    // recorded as such, never retried by later syncs, and the rest of the order applies.
+    const refuse = (line: LineRow, code: string) => {
+      line.outcome = 'refused';
+      result.refused.push({ lineId: line.shopify_line_id, code });
+    };
 
     // 2. Fulfillments: new ones fulfill, cancelled ones are reversed.
     if (order.fulfillments) {
@@ -797,6 +856,28 @@ export const syncShopifyOrder = defineOperation({
           for (const fl of f.lines) {
             const line = byLine.get(fl.lineId);
             if (!line || !live(line) || fl.quantity === 0) continue;
+            // Shopify shipped more than the line holds: its first sync already carries the
+            // fulfillment (fulfillments/create came first, or the reconciler found the order).
+            // The difference is reserved first, so the shipped units leave stock here.
+            if (fl.quantity > line.open_items) {
+              const made = await reserveItems(
+                ctx,
+                acc,
+                connectionId,
+                order.orderId,
+                line,
+                fl.quantity - line.open_items,
+              );
+              if ('refused' in made) {
+                refuse(line, made.refused);
+                continue;
+              }
+              if (made.short) {
+                line.outcome = 'shortage';
+                result.shortage++;
+              } else result.reserved++;
+              line.open_items = fl.quantity;
+            }
             const outcome = await fulfillItems(
               ctx,
               acc,
@@ -893,6 +974,10 @@ export const syncShopifyOrder = defineOperation({
           line,
           target - line.open_items,
         );
+        if ('refused' in made) {
+          refuse(line, made.refused);
+          continue;
+        }
         if (made.short) {
           line.outcome = 'shortage';
           result.shortage++;
@@ -1068,7 +1153,7 @@ export const syncShopifyOrder = defineOperation({
     }
 
     // 6. The lines as applied.
-    for (const line of lines.filter(live)) {
+    for (const line of lines.filter((l) => live(l) || l.outcome === 'refused')) {
       await ctx.tx.query(
         `update shopify_order_lines set open_items = $3, fulfilled_items = $4, effect_items = $5,
            outcome = $6, reservation_id = coalesce(reservation_id,

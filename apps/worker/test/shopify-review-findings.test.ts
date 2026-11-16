@@ -155,7 +155,7 @@ describe('Shopify connector review findings', () => {
   // webhooks were missed, as with a POS sale) has no reservation to fulfill: fulfillItems counts
   // every unit as "released", step 3's target is then 0, and no stock ever leaves. Airstock keeps
   // the shipped units as available and pushes them back to Shopify.
-  it.fails('F1: an order first seen with its fulfillment takes the shipped units out of stock', async () => {
+  it('F1: an order first seen with its fulfillment takes the shipped units out of stock', async () => {
     const s = await setup('Late create mug', 5);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }]);
     const f = s.store.fulfill(order);
@@ -180,7 +180,7 @@ describe('Shopify connector review findings', () => {
   // stops at the same order. No later missed order, level comparison, or pending push is ever
   // reconciled for the store. A Shopify reservation released by hand in Airstock poisons an order
   // the same way (its cancel or fulfillment gets reservation_not_open).
-  it.fails('F2: an order line for an archived variant does not lose the order or stop the reconciler', async () => {
+  it('F2: an order line for an archived variant does not lose the order or stop the reconciler', async () => {
     const s = await setupItems('Archived line', [5, 5]);
     const [gone, kept] = s.items as [Many['items'][0], Many['items'][0]];
     // The first item is archived in Airstock (the state archive_variant leaves); still mapped.

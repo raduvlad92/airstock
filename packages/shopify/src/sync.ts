@@ -19,6 +19,7 @@ import {
   type WebhookStatus,
 } from './admin.ts';
 import { type TokenCipher, tokenContext } from './crypto.ts';
+import { PRODUCT_JOB, syncProductFromShopify } from './listings.ts';
 import { SHOPIFY_SCOPES, type ShopifyAuth } from './oauth.ts';
 
 // The Shopify slice end to end (plan Section 8.2): install, webhook intake, order lines to
@@ -35,6 +36,8 @@ export interface ShopifyConfig {
 
 export interface SyncDeps extends PipelineDeps {
   shopify: ShopifyConfig;
+  /** Media originals in R2, for pictures listed to Shopify (D21). */
+  originals?: { get(key: string): Promise<{ bytes: Uint8Array; contentType: string } | null> };
   /** Publishes committed outbox rows now; the cron sweeper covers anything missed. */
   dispatch?: () => Promise<unknown>;
 }
@@ -50,6 +53,8 @@ export const ORDER_TOPICS = [
   'refunds/create',
   'reverse_fulfillment_orders/dispose',
 ];
+/** Product topics bring a job that applies the product's state (D21). */
+export const PRODUCT_TOPICS = ['products/create', 'products/update'];
 export const WEBHOOK_TOPICS = [
   'ORDERS_CREATE',
   'ORDERS_EDITED',
@@ -58,6 +63,8 @@ export const WEBHOOK_TOPICS = [
   'FULFILLMENTS_UPDATE',
   'REFUNDS_CREATE',
   'REVERSE_FULFILLMENT_ORDERS_DISPOSE',
+  'PRODUCTS_CREATE',
+  'PRODUCTS_UPDATE',
   'APP_UNINSTALLED',
 ];
 /** Refresh the one-hour access token when less than this is left. */
@@ -292,6 +299,17 @@ export function orderIdOf(topic: string, body: string): string | null {
   return null;
 }
 
+/** The product a products/* webhook is about. */
+export function productIdOf(body: string): string | null {
+  const raw = JSON.parse(body) as { id?: unknown; admin_graphql_api_id?: unknown };
+  const value = raw.admin_graphql_api_id ?? raw.id;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
+  if (typeof value === 'string' && /^(gid:\/\/shopify\/Product\/)?\d+$/.test(value)) {
+    return value.slice(value.lastIndexOf('/') + 1);
+  }
+  return null;
+}
+
 export type WebhookOutcome =
   | { status: 'unknown_store' }
   | { status: 'recorded'; shopId: string; jobId: string | null; duplicate: boolean };
@@ -337,6 +355,11 @@ export async function receiveWebhook(
     const reverseFulfillmentOrderId = orderIdOf(input.topic, input.body);
     if (reverseFulfillmentOrderId) {
       job = { kind: ORDER_JOB, payload: { connectionId, reverseFulfillmentOrderId } };
+    }
+  } else if (PRODUCT_TOPICS.includes(input.topic)) {
+    const shopifyProductId = productIdOf(input.body);
+    if (shopifyProductId) {
+      job = { kind: PRODUCT_JOB, payload: { connectionId, shopifyProductId } };
     }
   } else if (ORDER_TOPICS.includes(input.topic)) {
     const orderId = orderIdOf(input.topic, input.body);
@@ -396,6 +419,7 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
         order?: ShopifyOrder;
         orderId?: string;
         reverseFulfillmentOrderId?: string;
+        shopifyProductId?: string;
       };
       attempts: number;
     }>(
@@ -408,6 +432,26 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
   );
   if (!job) return { status: 'missing' };
   try {
+    if (job.kind === PRODUCT_JOB) {
+      const outcome = await syncProductFromShopify(
+        deps,
+        shopId,
+        job.payload.connectionId,
+        job.payload.shopifyProductId!,
+      );
+      await deps.db.transaction({ shopId, userId: null }, (tx) =>
+        tx.query(
+          `update jobs set status = 'succeeded', last_error = null, updated_at = now(),
+             payload = payload || jsonb_build_object('result', $2::text)
+           where id = $1`,
+          [jobId, outcome],
+        ),
+      );
+      await deps.dispatch?.().catch((error) => {
+        deps.logger?.error('outbox_dispatch_failed', { error: String(error) });
+      });
+      return { status: 'done' };
+    }
     if (job.kind !== ORDER_JOB) throw new Error(`Unknown job kind ${job.kind}.`);
     let order = job.payload.order ?? null;
     if (!order && (job.payload.orderId || job.payload.reverseFulfillmentOrderId)) {

@@ -154,6 +154,20 @@ export {
   onboardingCsv,
 } from './shopify/catalog.ts';
 export {
+  airstockValues,
+  htmlToText,
+  LISTING_FIELDS,
+  type ListingField,
+  type Owners,
+  SHOPIFY_LISTING_TOPIC,
+  ShopifyProductState,
+  type StorefrontValues,
+  sameValue,
+  shopifyValues,
+  skuKey,
+  textToHtml,
+} from './shopify/listing.ts';
+export {
   type AffectedLevel,
   affectedLevels,
   type LevelTarget,

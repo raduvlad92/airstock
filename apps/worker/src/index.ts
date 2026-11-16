@@ -11,6 +11,7 @@ import {
   handleWebhookOutbox,
   ingestAuditEvents,
   type JobDeps,
+  type ListingField,
   type Logger,
   notifyAlertOpened,
   ONBOARDING_RUN_TOPIC,
@@ -22,6 +23,7 @@ import {
   runExportJob,
   runImportJob,
   runReportExportJob,
+  SHOPIFY_LISTING_TOPIC,
   SHOPIFY_PUSH_TOPIC,
   sendInvitationEmail,
   sendPurchaseOrderEmail,
@@ -45,6 +47,7 @@ import {
   httpShopifyAuth,
   NotConnectedError,
   type PushChange,
+  publishListing,
   pushChanges,
   reconcileShopify,
   runJob,
@@ -229,6 +232,20 @@ function jobDeps(env: Env, db: Database): JobDeps {
       get: files.get,
       put: (k, b, ct) => files.put(k, b, ct),
       delete: (k) => files.delete!(k),
+    },
+  };
+}
+
+/** Media originals in R2, read whole for picture uploads to Shopify (2,048 px, D19). */
+function originalsFor(env: Env): NonNullable<SyncDeps['originals']> {
+  return {
+    async get(key) {
+      const object = await env.FILES.get(key);
+      if (!object) return null;
+      return {
+        bytes: new Uint8Array(await object.arrayBuffer()),
+        contentType: object.httpMetadata?.contentType ?? 'application/octet-stream',
+      };
     },
   };
 }
@@ -466,7 +483,7 @@ async function runShopifyReconciliation(
   if (!shopify) return null;
   try {
     const result = await reconcileShopify(
-      { db, audit: queueSink(env), logger, shopify },
+      { db, audit: queueSink(env), logger, shopify, originals: originalsFor(env) },
       { daily, budgetMs: 20_000 },
     );
     logger.info?.('shopify_reconciliation', { daily, ...result });
@@ -623,6 +640,7 @@ async function runJobsBatch(env: Env, db: Database, items: JobsItem[]): Promise<
         logger,
         shopify,
         files: jobDeps(env, db).files,
+        originals: originalsFor(env),
         dispatch: () => deliverOutbox(env, db),
       }
     : null;
@@ -773,6 +791,17 @@ async function runJobsMessage(
       // batch's other pushes.
       if (!deps) return 300;
       queuePush(body.shopId, { topic: body.topic, payload: body.payload });
+      return null;
+    }
+    if (body.topic === SHOPIFY_LISTING_TOPIC) {
+      // List a product in Shopify, or push the storefront fields Airstock owns (D21).
+      if (!deps) return 300;
+      const p = body.payload as {
+        connectionId: string;
+        productId: string;
+        fields?: ListingField[];
+      };
+      await publishListing(deps, body.shopId, p.connectionId, p.productId, { fields: p.fields });
       return null;
     }
     if (body.topic === ONBOARDING_RUN_TOPIC) {

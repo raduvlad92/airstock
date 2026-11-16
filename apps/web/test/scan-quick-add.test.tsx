@@ -106,6 +106,7 @@ const SCHEMA = {
 };
 
 const ADDER = [...OPERATOR, 'catalog.write', 'costs.read'];
+const STORE = '0196f3a0-0000-7000-8000-0000000000d9';
 
 afterEach(() => {
   cleanup();
@@ -120,6 +121,15 @@ describe('scan page: quick add', () => {
       ...BASE(ADDER),
       [`/shops/${SHOP}/scan`]: scanRoutes({ [LOCATION.code]: LOCATION }),
       [`/shops/${SHOP}/catalog/schema`]: SCHEMA,
+      [`/shops/${SHOP}/shopify/connections`]: {
+        connections: [{ connectionId: STORE, shopDomain: 'store.myshopify.com', status: 'active' }],
+      },
+      [`POST /shops/${SHOP}/products/${PROD}/shopify-listing`]: {
+        connectionId: STORE,
+        productId: PROD,
+        status: 'active',
+        state: 'pending',
+      },
       [`POST /shops/${SHOP}/quick-add`]: (call: Call) =>
         (call.body as { acknowledgeSimilar: boolean }).acknowledgeSimilar
           ? {
@@ -159,11 +169,11 @@ describe('scan page: quick add', () => {
     fireEvent.change(screen.getByLabelText('Grade'), { target: { value: '9,5' } });
     fireEvent.change(screen.getByLabelText('Price'), { target: { value: '450' } });
     fireEvent.change(screen.getByLabelText('Cost'), { target: { value: '300' } });
-    // Listing on Shopify waits for the connector.
-    expect(screen.getByRole('checkbox', { name: /List on Shopify/ })).toHaveProperty(
-      'disabled',
-      true,
-    );
+    // Listed on Shopify as an active product, after the item and its picture.
+    fireEvent.click(await screen.findByRole('checkbox', { name: /List on Shopify/ }));
+    fireEvent.change(screen.getByLabelText('Shopify listing status'), {
+      target: { value: 'active' },
+    });
     expect(
       await screen.findByText('1 unit of Charizard Holo at 450 EUR → Main stock/B-02 · 1 picture'),
     ).toBeTruthy();
@@ -195,9 +205,16 @@ describe('scan page: quick add', () => {
     expect(vi.mocked(uploadToProduct).mock.calls[0]!.slice(0, 2)).toEqual([SHOP, PROD]);
     expect(
       await screen.findByText(
-        /Added Charizard Holo \(PSA-12345678\) at Main stock\/B-02, 1 of 1 pictures/,
+        /Added Charizard Holo \(PSA-12345678\) at Main stock\/B-02, 1 of 1 pictures, listing on Shopify as active/,
       ),
     ).toBeTruthy();
+    expect(
+      calls
+        .filter((c) => c.method === 'POST' && c.path.endsWith('/shopify-listing'))
+        .map((c) => c.body),
+    ).toEqual([{ productId: PROD, connectionId: STORE, status: 'active' }]);
+    // The choice is remembered for the next item.
+    expect(localStorage.getItem(`airstock.scan.quick-add-shopify.${SHOP}`)).toBe('active');
   });
 
   it('is offered for an unknown code, which becomes the certificate', async () => {

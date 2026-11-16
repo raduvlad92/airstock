@@ -78,11 +78,14 @@ export async function shopifyHarness() {
       },
     },
   });
+  /** Media originals as R2 holds them, for pictures listed to Shopify. */
+  const originals = new Map<string, { bytes: Uint8Array; contentType: string }>();
   const deps = (): SyncDeps => ({
     db: t.db,
     audit: t.sink,
     shopify,
     files: { get: fileStore.get, put: fileStore.put, delete: fileStore.delete },
+    originals: { get: async (key) => originals.get(key) ?? null },
   });
 
   async function dashboard(cookie: string, path: string, init: RequestInit = {}) {
@@ -288,6 +291,7 @@ export async function shopifyHarness() {
     runJobs,
     flush,
     flushTogether,
+    originals,
     runOnboardingSteps,
     newStore: (prefix: string) => new FakeStore(`${prefix}-${uuidv7().slice(-8)}.myshopify.com`),
   };

@@ -1,8 +1,8 @@
 import type { ops } from '@airstock/core';
 import { DEFAULT_ORIGINAL_MAX_SIDE } from '@airstock/core/media';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { ApiError, command, errorMessage, type Out } from '../api.ts';
+import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { type CatalogSchema, useCatalogSchema } from '../catalog/schema.ts';
 import { type PreparedFile, prepareFile } from '../components/media/derivatives.ts';
 import { uploadToProduct } from '../components/media/upload.ts';
@@ -126,6 +126,24 @@ function NewItem({ env, initialCertificate }: { env: ScanEnv; initialCertificate
   const queryClient = useQueryClient();
   const schema = useCatalogSchema(env.shopId);
   const familyKey = `airstock.scan.quick-add-family.${env.shopId}`;
+  // List on Shopify (D21): off, or a draft or active listing; the last choice is remembered.
+  const shopifyKey = `airstock.scan.quick-add-shopify.${env.shopId}`;
+  const [listing, setListingState] = useState<'off' | 'draft' | 'active'>(() => {
+    const v = remembered(shopifyKey);
+    return v === 'draft' || v === 'active' ? v : 'off';
+  });
+  const setListing = (next: 'off' | 'draft' | 'active') => {
+    setListingState(next);
+    remember(shopifyKey, next);
+  };
+  const canList = can(env.shop, 'catalog.write');
+  const stores = useQuery({
+    queryKey: ['shop', env.shopId, 'shopify'],
+    queryFn: () =>
+      api<Out<typeof ops.listShopifyConnections>>(`/shops/${env.shopId}/shopify/connections`),
+    enabled: canList,
+  });
+  const connected = (stores.data?.connections ?? []).filter((c) => c.status === 'active');
   const [certificate, setCertificate] = useState(initialCertificate);
   const [pictures, setPictures] = useState<Picture[]>([]);
   const [familyChoice, setFamilyChoice] = useState<string | null>(() => remembered(familyKey));
@@ -245,9 +263,23 @@ function NewItem({ env, initialCertificate }: { env: ScanEnv; initialCertificate
       setAdded({ ...r, name: name.trim(), path });
       const toSend = pictures.filter((p) => p.prepared);
       const failed = toSend.length > 0 ? await uploadAll(r.productId, toSend) : 0;
+      // Listed after the pictures are in, so the Shopify product has them from the start.
+      let listed = '';
+      if (listing !== 'off' && connected.length === 1) {
+        try {
+          await command(`/shops/${env.shopId}/products/${r.productId}/shopify-listing`, {
+            productId: r.productId,
+            connectionId: connected[0]!.connectionId,
+            status: listing,
+          });
+          listed = `, listing on Shopify as ${listing}`;
+        } catch (error) {
+          listed = `; not listed on Shopify: ${errorMessage(error)}`;
+        }
+      }
       env.feedback(
-        failed > 0 ? 'error' : 'ok',
-        `Added ${name.trim()} (${r.sku}) at ${path}${toSend.length ? `, ${toSend.length - failed} of ${toSend.length} pictures` : ''}.`,
+        failed > 0 || listed.startsWith(';') ? 'error' : 'ok',
+        `Added ${name.trim()} (${r.sku}) at ${path}${toSend.length ? `, ${toSend.length - failed} of ${toSend.length} pictures` : ''}${listed}.`,
       );
       void queryClient.invalidateQueries({ queryKey: ['shop', env.shopId] });
     },
@@ -481,13 +513,38 @@ function NewItem({ env, initialCertificate }: { env: ScanEnv; initialCertificate
         ) : null}
       </div>
 
-      <label className="scan-toggle disabled">
-        <input type="checkbox" disabled aria-describedby="qa-shopify-note" />
-        <span>List on Shopify</span>
-        <span id="qa-shopify-note" className="muted small-text">
-          After the Shopify connector.
-        </span>
-      </label>
+      {connected.length === 1 ? (
+        <div className="scan-toggle">
+          <label>
+            <input
+              type="checkbox"
+              checked={listing !== 'off'}
+              onChange={(e) => setListing(e.target.checked ? 'draft' : 'off')}
+            />
+            <span>List on Shopify</span>
+          </label>
+          {listing !== 'off' ? (
+            <select
+              aria-label="Shopify listing status"
+              value={listing}
+              onChange={(e) => setListing(e.target.value as 'draft' | 'active')}
+            >
+              <option value="draft">as a draft</option>
+              <option value="active">active (for sale)</option>
+            </select>
+          ) : null}
+        </div>
+      ) : canList && stores.isSuccess ? (
+        <label className="scan-toggle disabled">
+          <input type="checkbox" disabled aria-describedby="qa-shopify-note" />
+          <span>List on Shopify</span>
+          <span id="qa-shopify-note" className="muted small-text">
+            {connected.length === 0
+              ? 'No Shopify store is connected.'
+              : 'Several stores: list it from the product page.'}
+          </span>
+        </label>
+      ) : null}
 
       {!env.location ? (
         <p className="notice error">Scan a location label: where does it go?</p>

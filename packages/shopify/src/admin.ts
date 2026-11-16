@@ -1,4 +1,9 @@
-import type { CatalogImage, CatalogProduct, CatalogVariant } from '@airstock/core';
+import type {
+  CatalogImage,
+  CatalogProduct,
+  CatalogVariant,
+  ShopifyProductState,
+} from '@airstock/core';
 import { SHOPIFY_API_VERSION } from './oauth.ts';
 
 // The Admin GraphQL calls Phase 0 needs. Everything Shopify-specific stays behind this
@@ -140,6 +145,52 @@ export interface ShopifyAdmin {
   bulkOperation(id: string): Promise<BulkOperationState>;
   /** Downloads and parses a completed catalog read. */
   fetchCatalog(url: string): Promise<CatalogProduct[]>;
+  /** A product with its variants, or null when Shopify no longer has it. */
+  product(productId: string): Promise<ShopifyProductState | null>;
+  /** Variants whose SKU is one of these (to adopt a product a crashed create already made). */
+  variantsBySku(
+    skus: string[],
+  ): Promise<Array<{ productId: string; variantId: string; inventoryItemId: string; sku: string }>>;
+  /** Creates a product with its options, variants, and pictures (productSet). */
+  createProduct(input: ListingInput): Promise<ListedProduct>;
+  /** Changes product fields and adds pictures; variants are left as they are. */
+  updateProduct(input: {
+    productId: string;
+    title?: string;
+    descriptionHtml?: string;
+    status?: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
+    media?: Array<{ originalSource: string; alt: string | null }>;
+  }): Promise<void>;
+  /** Sets variant prices (productVariantsBulkUpdate). */
+  updateVariantPrices(
+    productId: string,
+    prices: Array<{ variantId: string; price: string }>,
+  ): Promise<void>;
+  /** Uploads a picture to Shopify's staged storage; returns the URL productSet takes. */
+  stagePicture(file: { filename: string; mimeType: string; bytes: Uint8Array }): Promise<string>;
+}
+
+/** A product Airstock lists in Shopify (created with productSet; D21). */
+export interface ListingInput {
+  title: string;
+  descriptionHtml: string;
+  status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
+  options: Array<{ name: string; values: string[] }>;
+  variants: Array<{
+    sku: string;
+    barcode: string | null;
+    price: string | null;
+    optionValues: Array<{ optionName: string; name: string }>;
+    /** Shopify locations where the item is stocked (at 0; the push sets the quantity). */
+    locationIds: string[];
+  }>;
+  /** Pictures by staged-upload URL. */
+  files: Array<{ originalSource: string; alt: string | null }>;
+}
+
+export interface ListedProduct {
+  productId: string;
+  variants: Array<{ variantId: string; inventoryItemId: string; sku: string | null }>;
 }
 
 export interface BulkOperationState {
@@ -232,6 +283,43 @@ const QUERIES = {
     }
   }`,
   reverseFulfillmentOrder: `query($id: ID!) { reverseFulfillmentOrder(id: $id) { id order { id } } }`,
+  product: `query($id: ID!) {
+    product(id: $id) {
+      id title descriptionHtml status updatedAt
+      mediaCount { count }
+      variants(first: 100) {
+        nodes { id title sku price barcodes(first: 1) { nodes { value } } inventoryItem { id tracked } }
+      }
+    }
+  }`,
+  variantsBySku: `query($query: String!) {
+    productVariants(first: 50, query: $query) {
+      nodes { id sku product { id } inventoryItem { id } }
+    }
+  }`,
+  productSet: `mutation($input: ProductSetInput!) {
+    productSet(input: $input, synchronous: true) {
+      product { id variants(first: 100) { nodes { id sku inventoryItem { id } } } }
+      userErrors { field message code }
+    }
+  }`,
+  productUpdate: `mutation($product: ProductUpdateInput!, $media: [CreateMediaInput!]) {
+    productUpdate(product: $product, media: $media) {
+      product { id }
+      userErrors { field message }
+    }
+  }`,
+  variantPrices: `mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      userErrors { field message }
+    }
+  }`,
+  stagedUpload: `mutation($input: [StagedUploadInput!]!) {
+    stagedUploadsCreate(input: $input) {
+      stagedTargets { url resourceUrl parameters { name value } }
+      userErrors { field message }
+    }
+  }`,
   lineLocations: `query($id: ID!) {
     order(id: $id) {
       fulfillmentOrders(first: 20) {
@@ -376,6 +464,8 @@ export const WEBHOOK_FIELDS: Record<string, string[] | undefined> = {
   FULFILLMENTS_UPDATE: ['id', 'order_id', 'status'],
   REFUNDS_CREATE: ['id', 'order_id'],
   REVERSE_FULFILLMENT_ORDERS_DISPOSE: ['id', 'admin_graphql_api_id'],
+  PRODUCTS_CREATE: ['id', 'admin_graphql_api_id', 'updated_at'],
+  PRODUCTS_UPDATE: ['id', 'admin_graphql_api_id', 'updated_at'],
 };
 
 interface RawOrder {
@@ -781,6 +871,228 @@ export function httpShopifyAdmin(
         }
       }
       return out;
+    },
+
+    async product(productId) {
+      const data = await call<{
+        product: {
+          id: string;
+          title: string;
+          descriptionHtml: string | null;
+          status: string;
+          updatedAt: string | null;
+          mediaCount: { count: number } | null;
+          variants: {
+            nodes: Array<{
+              id: string;
+              title: string;
+              sku: string | null;
+              barcodes: { nodes: Array<{ value: string }> } | null;
+              price: string | null;
+              inventoryItem: { id: string; tracked: boolean } | null;
+            }>;
+          };
+        } | null;
+      }>(QUERIES.product, { id: gid('Product', productId) });
+      const p = data.product;
+      if (!p) return null;
+      return {
+        productId: numeric(p.id),
+        title: p.title,
+        descriptionHtml: p.descriptionHtml,
+        status: p.status,
+        updatedAt: p.updatedAt,
+        mediaCount: p.mediaCount?.count ?? 0,
+        variants: p.variants.nodes.map((v) => ({
+          variantId: numeric(v.id),
+          inventoryItemId: v.inventoryItem ? numeric(v.inventoryItem.id) : null,
+          sku: v.sku,
+          barcode: v.barcodes?.nodes[0]?.value ?? null,
+          price: v.price,
+          title: v.title,
+          tracked: v.inventoryItem?.tracked ?? false,
+        })),
+      };
+    },
+
+    async variantsBySku(skus) {
+      if (skus.length === 0) return [];
+      const quoted = skus.map((s) => `sku:"${s.replace(/["\\]/g, '')}"`).join(' OR ');
+      const data = await call<{
+        productVariants: {
+          nodes: Array<{
+            id: string;
+            sku: string | null;
+            product: { id: string };
+            inventoryItem: { id: string } | null;
+          }>;
+        };
+      }>(QUERIES.variantsBySku, { query: quoted });
+      const wanted = new Set(skus.map((s) => s.trim().toUpperCase()));
+      return data.productVariants.nodes.flatMap((v) =>
+        v.sku && v.inventoryItem && wanted.has(v.sku.trim().toUpperCase())
+          ? [
+              {
+                productId: numeric(v.product.id),
+                variantId: numeric(v.id),
+                inventoryItemId: numeric(v.inventoryItem.id),
+                sku: v.sku,
+              },
+            ]
+          : [],
+      );
+    },
+
+    async createProduct(input) {
+      const data = await call<{
+        productSet: {
+          product: {
+            id: string;
+            variants: {
+              nodes: Array<{ id: string; sku: string | null; inventoryItem: { id: string } }>;
+            };
+          } | null;
+          userErrors: Array<{ field: string[] | null; message: string; code: string | null }>;
+        };
+      }>(QUERIES.productSet, {
+        input: {
+          title: input.title,
+          descriptionHtml: input.descriptionHtml,
+          status: input.status,
+          productOptions: input.options.map((o, i) => ({
+            name: o.name,
+            position: i + 1,
+            values: o.values.map((name) => ({ name })),
+          })),
+          variants: input.variants.map((v) => ({
+            optionValues: v.optionValues,
+            ...(v.price ? { price: v.price } : {}),
+            // 2026-10: `barcode` is deprecated in favour of `barcodes`.
+            ...(v.barcode ? { barcodes: [{ value: v.barcode }] } : {}),
+            sku: v.sku,
+            inventoryItem: { tracked: true },
+            inventoryQuantities: v.locationIds.map((l) => ({
+              locationId: gid('Location', l),
+              name: 'available',
+              quantity: 0,
+            })),
+          })),
+          ...(input.files.length > 0
+            ? {
+                files: input.files.map((f) => ({
+                  originalSource: f.originalSource,
+                  contentType: 'IMAGE',
+                  ...(f.alt ? { alt: f.alt } : {}),
+                })),
+              }
+            : {}),
+        },
+      });
+      const out = data.productSet;
+      if (!out.product || out.userErrors.length > 0) {
+        throw new ShopifyApiError(
+          out.userErrors.map((e) => e.message).join('; ') || 'Shopify did not create the product.',
+          200,
+          false,
+          out.userErrors[0]?.code ?? undefined,
+        );
+      }
+      return {
+        productId: numeric(out.product.id),
+        variants: out.product.variants.nodes.map((v) => ({
+          variantId: numeric(v.id),
+          inventoryItemId: numeric(v.inventoryItem.id),
+          sku: v.sku,
+        })),
+      };
+    },
+
+    async updateProduct(input) {
+      const data = await call<{
+        productUpdate: { userErrors: Array<{ field: string[] | null; message: string }> };
+      }>(QUERIES.productUpdate, {
+        product: {
+          id: gid('Product', input.productId),
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.descriptionHtml !== undefined
+            ? { descriptionHtml: input.descriptionHtml }
+            : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+        },
+        media: (input.media ?? []).map((m) => ({
+          originalSource: m.originalSource,
+          mediaContentType: 'IMAGE',
+          ...(m.alt ? { alt: m.alt } : {}),
+        })),
+      });
+      const errors = data.productUpdate.userErrors;
+      if (errors.length > 0) {
+        throw new ShopifyApiError(errors.map((e) => e.message).join('; '), 200, false);
+      }
+    },
+
+    async updateVariantPrices(productId, prices) {
+      if (prices.length === 0) return;
+      const data = await call<{
+        productVariantsBulkUpdate: {
+          userErrors: Array<{ field: string[] | null; message: string }>;
+        };
+      }>(QUERIES.variantPrices, {
+        productId: gid('Product', productId),
+        variants: prices.map((p) => ({ id: gid('ProductVariant', p.variantId), price: p.price })),
+      });
+      const errors = data.productVariantsBulkUpdate.userErrors;
+      if (errors.length > 0) {
+        throw new ShopifyApiError(errors.map((e) => e.message).join('; '), 200, false);
+      }
+    },
+
+    async stagePicture(file) {
+      const data = await call<{
+        stagedUploadsCreate: {
+          stagedTargets: Array<{
+            url: string;
+            resourceUrl: string;
+            parameters: Array<{ name: string; value: string }>;
+          }>;
+          userErrors: Array<{ message: string }>;
+        };
+      }>(QUERIES.stagedUpload, {
+        input: [
+          {
+            resource: 'IMAGE',
+            filename: file.filename,
+            mimeType: file.mimeType,
+            httpMethod: 'POST',
+            fileSize: String(file.bytes.byteLength),
+          },
+        ],
+      });
+      const target = data.stagedUploadsCreate.stagedTargets[0];
+      if (!target) {
+        throw new ShopifyApiError(
+          data.stagedUploadsCreate.userErrors.map((e) => e.message).join('; ') ||
+            'Shopify gave no upload target.',
+          200,
+          true,
+        );
+      }
+      const form = new FormData();
+      for (const p of target.parameters) form.append(p.name, p.value);
+      form.append(
+        'file',
+        new Blob([file.bytes as unknown as ArrayBuffer], { type: file.mimeType }),
+        file.filename,
+      );
+      const res = await doFetch(target.url, { method: 'POST', body: form });
+      if (!res.ok) {
+        throw new ShopifyApiError(
+          `Picture upload returned ${res.status}.`,
+          res.status,
+          res.status >= 500,
+        );
+      }
+      return target.resourceUrl;
     },
 
     async orderOfReverseFulfillmentOrder(id) {

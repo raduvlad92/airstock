@@ -1,6 +1,7 @@
 import type { CatalogImage, CatalogProduct } from '@airstock/core';
 import {
   type BulkOperationState,
+  type ListingInput,
   SHOPIFY_SCOPES,
   type ShopifyAdmin,
   ShopifyApiError,
@@ -32,6 +33,10 @@ export class FakeStore implements ShopifyAdmin {
   throttleNext = 0;
   /** Orders Shopify's search by updated time does not list yet (its index trails). */
   readonly searchLag = new Set<string>();
+  /** Pictures uploaded to staged storage, by resource URL. */
+  readonly staged = new Map<string, { filename: string; mimeType: string; size: number }>();
+  /** Product mutations, in order (createProduct, updateProduct, updateVariantPrices). */
+  readonly productCalls: Array<{ kind: string; input: unknown }> = [];
   locationList: ShopifyLocation[] = [
     { id: '1001', name: 'Shop location', active: true },
     { id: '1002', name: 'Warehouse', active: true },
@@ -498,6 +503,150 @@ export class FakeStore implements ShopifyAdmin {
     const order = this.orders.find((o) => o.orderId === orderId);
     return new Map((order?.lines ?? []).map((l) => [l.lineId, l.locationId ?? '1001']));
   }
+  private findProduct(productId: string) {
+    return this.products.find((p) => p.productId === productId);
+  }
+
+  /** The products/create or products/update webhook body. */
+  productBody(productId: string): string {
+    return JSON.stringify({
+      id: Number(productId),
+      admin_graphql_api_id: `gid://shopify/Product/${productId}`,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  async product(productId: string) {
+    const p = this.findProduct(productId);
+    if (!p) return null;
+    return {
+      productId: p.productId,
+      title: p.title,
+      descriptionHtml: p.description,
+      status: p.status,
+      updatedAt: new Date().toISOString(),
+      mediaCount: p.images.length,
+      variants: p.variants.map((v) => ({
+        variantId: v.variant.variantId,
+        inventoryItemId: v.variant.inventoryItemId,
+        sku: v.variant.sku || null,
+        barcode: v.barcode,
+        price: v.price,
+        title: v.variant.title,
+        tracked: v.variant.tracked,
+      })),
+    };
+  }
+  async variantsBySku(skus: string[]) {
+    const wanted = new Set(skus.map((s) => s.trim().toUpperCase()));
+    return this.products.flatMap((p) =>
+      p.variants
+        .filter((v) => v.variant.sku && wanted.has(v.variant.sku.trim().toUpperCase()))
+        .map((v) => ({
+          productId: p.productId,
+          variantId: v.variant.variantId,
+          inventoryItemId: v.variant.inventoryItemId,
+          sku: v.variant.sku,
+        })),
+    );
+  }
+  async createProduct(input: ListingInput) {
+    this.productCalls.push({ kind: 'create', input });
+    for (const f of input.files) {
+      if (!this.staged.has(f.originalSource)) throw new Error('unknown staged upload');
+    }
+    const product = {
+      productId: String(this.nextId++),
+      title: input.title,
+      status: input.status,
+      description: input.descriptionHtml,
+      options: input.options.map((o) => o.name),
+      images: input.files.map((f) => ({
+        url: f.originalSource,
+        alt: f.alt,
+        width: 2048,
+        height: 2048,
+      })),
+      variants: [] as (typeof this.products)[number]['variants'],
+    };
+    const variants: Array<{ variantId: string; inventoryItemId: string; sku: string | null }> = [];
+    for (const v of input.variants) {
+      const variant: ShopifyVariant = {
+        variantId: String(this.nextId++),
+        inventoryItemId: String(this.nextId++),
+        sku: v.sku,
+        title: v.optionValues.map((o) => o.name).join(' / '),
+        tracked: true,
+      };
+      this.variants.push(variant);
+      for (const l of v.locationIds) this.levels.set(this.key(variant.inventoryItemId, l), 0);
+      product.variants.push({
+        variant,
+        barcode: v.barcode,
+        price: v.price,
+        options: v.optionValues.map((o) => ({ name: o.optionName, value: o.name })),
+        image: null,
+      });
+      variants.push({
+        variantId: variant.variantId,
+        inventoryItemId: variant.inventoryItemId,
+        sku: v.sku,
+      });
+    }
+    this.products.push(product);
+    return { productId: product.productId, variants };
+  }
+  async updateProduct(input: {
+    productId: string;
+    title?: string;
+    descriptionHtml?: string;
+    status?: string;
+    media?: Array<{ originalSource: string; alt: string | null }>;
+  }) {
+    this.productCalls.push({ kind: 'update', input });
+    const p = this.findProduct(input.productId);
+    if (!p) throw new Error('no such product');
+    if (input.title !== undefined) p.title = input.title;
+    if (input.descriptionHtml !== undefined) p.description = input.descriptionHtml;
+    if (input.status !== undefined) p.status = input.status;
+    for (const m of input.media ?? []) {
+      p.images.push({ url: m.originalSource, alt: m.alt, width: 2048, height: 2048 });
+    }
+  }
+  async updateVariantPrices(
+    productId: string,
+    prices: Array<{ variantId: string; price: string }>,
+  ) {
+    this.productCalls.push({ kind: 'prices', input: { productId, prices } });
+    const p = this.findProduct(productId);
+    for (const x of prices) {
+      const v = p?.variants.find((v) => v.variant.variantId === x.variantId);
+      if (v) v.price = x.price;
+    }
+  }
+  async stagePicture(file: { filename: string; mimeType: string; bytes: Uint8Array }) {
+    const url = `https://shopify-staged-uploads.storage.test/${this.nextId++}/${file.filename}`;
+    this.staged.set(url, {
+      filename: file.filename,
+      mimeType: file.mimeType,
+      size: file.bytes.byteLength,
+    });
+    return url;
+  }
+  /** An edit in the Shopify admin. */
+  editProduct(
+    productId: string,
+    change: { title?: string; description?: string; price?: { sku: string; price: string } },
+  ) {
+    const p = this.findProduct(productId)!;
+    if (change.title !== undefined) p.title = change.title;
+    if (change.description !== undefined) p.description = change.description;
+    if (change.price) {
+      const v = p.variants.find((x) => x.variant.sku === change.price!.sku);
+      if (v) v.price = change.price.price;
+    }
+  }
+
   async orderOfReverseFulfillmentOrder(id: string) {
     return this.reverseOrders.get(id) ?? null;
   }

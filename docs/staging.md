@@ -56,8 +56,9 @@ CLI (`shopify app deploy --path config/shopify --config staging --allow-updates`
 - **Webhooks:** the mandatory privacy topics (`customers/data_request`, `customers/redact`,
   `shop/redact`) are subscribed on the app. Each store is subscribed at install to
   `orders/create`, `orders/edited`, `orders/cancelled`, `fulfillments/create`,
-  `fulfillments/update`, `refunds/create`, `reverse_fulfillment_orders/dispose`, and
-  `app/uninstalled`, with `includeFields` (ADR 0008, ADR 0035).
+  `fulfillments/update`, `refunds/create`, `reverse_fulfillment_orders/dispose`,
+  `products/create`, `products/update` (listings, ADR 0038), and `app/uninstalled`, with
+  `includeFields` (ADR 0008, ADR 0035).
 - Tokens are expiring offline tokens, stored encrypted with `SHOPIFY_TOKEN_KEY`.
 
 ## Secrets

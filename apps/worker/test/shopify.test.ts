@@ -247,6 +247,7 @@ describe('Shopify install', () => {
       'FULFILLMENTS_CREATE:subscribed',
       'FULFILLMENTS_UPDATE:subscribed',
       'REFUNDS_CREATE:subscribed',
+      'REVERSE_FULFILLMENT_ORDERS_DISPOSE:subscribed',
       'APP_UNINSTALLED:subscribed',
     ]);
     const store = await connectedStore(deps(), m.shopId, row.id);

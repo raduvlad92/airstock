@@ -92,6 +92,28 @@ export const ShopifyOrderState = z.object({
     )
     .max(100)
     .optional(),
+  /** Shopify returns: refunds issued through them, and what came back (dispositions). */
+  returns: z
+    .array(
+      z.object({
+        returnId: Num,
+        refundIds: z.array(Num).max(100),
+        dispositions: z
+          .array(
+            z.object({
+              dispositionId: Num,
+              lineId: Num,
+              quantity: z.number().int().min(1),
+              type: z.enum(['restocked', 'not_restocked', 'processing_required', 'missing']),
+              locationId: Num.nullable(),
+              createdAt: Time,
+            }),
+          )
+          .max(500),
+      }),
+    )
+    .max(50)
+    .optional(),
 });
 export type ShopifyOrderState = z.infer<typeof ShopifyOrderState>;
 
@@ -813,19 +835,37 @@ export const syncShopifyOrder = defineOperation({
       }
     }
 
-    // 3. What should still be held: the current quantity less what was fulfilled; nothing once
-    // the order is cancelled. Reserve the difference, or release the newest first.
-    const refundedByLine = new Map<string, number>();
+    // 3. What should still be held: the units Shopify has yet to ship, nothing once the order is
+    // cancelled. Reserve the difference, or release the newest first.
+    //
+    // Shopify's current quantity leaves out refunded units, shipped or not. A refund that
+    // restocks as `cancel` was of unshipped units and one as `return` (or issued through a return)
+    // of shipped units; for one without restock, refunds are taken from shipped units first, as
+    // Shopify counts its fulfillable quantity. Guessing wrong there holds a unit too many, never
+    // one too few.
+    const returnRefunds = new Set((order.returns ?? []).flatMap((r) => r.refundIds));
+    const refunded = new Map<string, { all: number; unshipped: number; shipped: number }>();
     for (const r of order.refunds ?? []) {
       for (const rl of r.lines) {
-        refundedByLine.set(rl.lineId, (refundedByLine.get(rl.lineId) ?? 0) + rl.quantity);
+        const sum = refunded.get(rl.lineId) ?? { all: 0, unshipped: 0, shipped: 0 };
+        sum.all += rl.quantity;
+        if (returnRefunds.has(r.refundId) || rl.restockType === 'return')
+          sum.shipped += rl.quantity;
+        else if (rl.restockType === 'cancel') sum.unshipped += rl.quantity;
+        refunded.set(rl.lineId, sum);
       }
     }
     for (const line of lines) {
       if (!live(line)) continue;
       const state = order.lines.find((l) => l.lineId === line.shopify_line_id)!;
       const current = state.currentQuantity ?? state.quantity;
-      const target = cancelled ? 0 : Math.max(0, current - line.fulfilled_items);
+      const r = refunded.get(line.shopify_line_id) ?? { all: 0, unshipped: 0, shipped: 0 };
+      // Ordered after edits: what Shopify still counts plus everything refunded.
+      const ordered = current + r.all;
+      const unknown = r.all - r.unshipped - r.shipped;
+      const shippedLeft = Math.max(0, line.fulfilled_items - r.shipped);
+      const unshippedRefunds = r.unshipped + Math.max(0, unknown - shippedLeft);
+      const target = cancelled ? 0 : Math.max(0, ordered - line.fulfilled_items - unshippedRefunds);
       if (target > line.open_items) {
         const made = await reserveItems(
           ctx,
@@ -855,7 +895,7 @@ export const syncShopifyOrder = defineOperation({
       // Units an edit removed went back to Shopify's available (Shopify restocks them); units it
       // added came out of it. A refund's restock is counted with the refund below.
       if (order.refunds !== undefined || state.currentQuantity !== undefined) {
-        const effect = current + (refundedByLine.get(line.shopify_line_id) ?? 0);
+        const effect = ordered;
         const before = line.effect_items ?? line.quantity;
         if (effect !== before && !cancelled) {
           await shopifyTook(
@@ -889,7 +929,10 @@ export const syncShopifyOrder = defineOperation({
           if (rl.quantity === 0 || seen.has(`${r.refundId}:${rl.lineId}`)) continue;
           const line = byLine.get(rl.lineId);
           let returnId: string | null = null;
-          const restocked = rl.restockType !== 'no_restock';
+          // A refund issued through a Shopify return: the return's dispositions restock and
+          // bring the units back (step 5), not the refund.
+          const viaReturn = (order.returns ?? []).find((x) => x.refundIds.includes(r.refundId));
+          const restocked = rl.restockType !== 'no_restock' && !viaReturn;
           if (line && live(line) && restocked) {
             await shopifyTook(
               ctx.tx,
@@ -902,24 +945,24 @@ export const syncShopifyOrder = defineOperation({
             );
           }
           const returned =
-            rl.restockType === 'return' ||
-            (rl.restockType === 'legacy_restock' && (line?.fulfilled_items ?? 0) > 0);
+            !viaReturn &&
+            (rl.restockType === 'return' ||
+              (rl.restockType === 'legacy_restock' && (line?.fulfilled_items ?? 0) > 0));
           if (line && live(line) && returned) {
-            returnId = await startReturn(
-              ctx,
-              acc,
-              order.orderId,
-              line,
-              r.refundId,
-              rl.quantity,
-              scopeOf(rl.locationId),
-            );
+            returnId = await startReturn(ctx, acc, order.orderId, line, rl.quantity, {
+              reference: `shopify:refund/${r.refundId}`,
+              reason: 'Refunded with restock in Shopify',
+              scope: scopeOf(rl.locationId) ?? scopeOf(line.shopify_location_id),
+            });
             result.returns.push(returnId);
           }
           await ctx.tx.query(
             `insert into shopify_refund_lines (shop_id, connection_id, shopify_refund_id, shopify_line_id,
-               items, restock_type, shopify_location_id, refunded_at, return_id)
-             values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7, $8)`,
+               items, restock_type, shopify_location_id, refunded_at, return_id, shopify_return_id)
+             values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+             on conflict (shop_id, connection_id, shopify_refund_id, shopify_line_id) do update set
+               items = shopify_refund_lines.items + excluded.items,
+               return_id = coalesce(shopify_refund_lines.return_id, excluded.return_id)`,
             [
               connectionId,
               r.refundId,
@@ -929,13 +972,84 @@ export const syncShopifyOrder = defineOperation({
               rl.locationId,
               r.createdAt,
               returnId,
+              viaReturn?.returnId ?? null,
             ],
           );
         }
       }
     }
 
-    // 5. The lines as applied.
+    // 5. Shopify returns: each disposition once. A restock raises Shopify's available at its
+    // location; units that came back (restocked or not, or to be processed) start a return here,
+    // received into quarantine (ADR 0029). Missing units never came back.
+    const dispositions = (order.returns ?? []).flatMap((x) =>
+      x.dispositions.map((d) => ({ ...d, returnId: x.returnId })),
+    );
+    if (dispositions.length > 0) {
+      const seen = new Set(
+        (
+          await ctx.tx.query<{ id: string }>(
+            `select shopify_disposition_id as id from shopify_return_dispositions
+             where connection_id = $1 and shopify_disposition_id = any($2::text[])`,
+            [connectionId, dispositions.map((d) => d.dispositionId)],
+          )
+        ).map((x) => x.id),
+      );
+      const inOrder = [...dispositions].sort(
+        (a, b) =>
+          a.dispositionId.length - b.dispositionId.length ||
+          (a.dispositionId < b.dispositionId ? -1 : a.dispositionId > b.dispositionId ? 1 : 0),
+      );
+      for (const d of inOrder) {
+        if (seen.has(d.dispositionId)) continue;
+        const line = byLine.get(d.lineId);
+        let returnId: string | null = null;
+        if (line && live(line)) {
+          if (d.type === 'restocked') {
+            await shopifyTook(
+              ctx.tx,
+              acc,
+              connectionId,
+              line.inventory_item_id,
+              d.locationId,
+              -d.quantity,
+              d.createdAt,
+            );
+          }
+          if (d.type !== 'missing') {
+            returnId = await startReturn(ctx, acc, order.orderId, line, d.quantity, {
+              reference: `shopify:return/${d.returnId}`,
+              reason:
+                d.type === 'restocked'
+                  ? 'Returned and restocked in Shopify'
+                  : 'Returned in Shopify, not restocked',
+              scope: scopeOf(d.locationId) ?? scopeOf(line.shopify_location_id),
+            });
+            result.returns.push(returnId);
+          }
+        }
+        await ctx.tx.query(
+          `insert into shopify_return_dispositions (shop_id, connection_id, shopify_disposition_id,
+             shopify_return_id, shopify_order_id, shopify_line_id, items, disposition_type,
+             shopify_location_id, disposed_at, return_id)
+           values (app_shop_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            connectionId,
+            d.dispositionId,
+            d.returnId,
+            order.orderId,
+            d.lineId,
+            d.quantity,
+            d.type,
+            d.locationId,
+            d.createdAt,
+            returnId,
+          ],
+        );
+      }
+    }
+
+    // 6. The lines as applied.
     for (const line of lines.filter(live)) {
       await ctx.tx.query(
         `update shopify_order_lines set open_items = $3, fulfilled_items = $4, effect_items = $5,
@@ -995,19 +1109,20 @@ export const syncShopifyOrder = defineOperation({
 });
 
 /**
- * Returned units of a refund line: a return for the line (so its cost traces back to the line's
- * fulfillments), authorized, and received into quarantine at the mapped location's receiving
- * location. Lot- and serial-tracked units are received by a person, who names lots or serials.
+ * Returned units of a line (a refund with restock, or a Shopify return's disposition): a return
+ * for the line (so its cost traces back to the line's fulfillments), authorized, and received into
+ * quarantine at the mapped location's receiving location. Lot- and serial-tracked units are
+ * received by a person, who names lots or serials; so are units at a location that is not mapped.
  */
 async function startReturn(
   ctx: HandlerContext,
   acc: Acc,
   orderId: string,
   line: LineRow,
-  refundId: string,
   items: number,
-  scope: ScopeMap | null,
+  how: { reference: string; reason: string; scope: ScopeMap | null },
 ): Promise<string> {
+  const scope = how.scope;
   const parts = line.bundle
     ? await ctx.tx.query<{ variant_id: string; per: string }>(
         `select c.variant_id, sum(c.base_quantity)::text as per
@@ -1024,8 +1139,8 @@ async function startReturn(
       quantity: normalize(exactProduct(String(items), p.per)),
     })),
     orderRef: lineRef(orderId, line.shopify_line_id),
-    reference: `shopify:refund/${refundId}`,
-    reason: 'Refunded with restock in Shopify',
+    reference: how.reference,
+    reason: how.reason,
     authorize: true,
   });
   const returnId = created.return.returnId;

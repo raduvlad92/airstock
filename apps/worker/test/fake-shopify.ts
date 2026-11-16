@@ -48,6 +48,8 @@ export class FakeStore implements ShopifyAdmin {
   bulkPolls = 1;
   private polls = new Map<string, number>();
   private nextId = 5_000_000;
+  /** Reverse fulfillment orders (one per return) and their orders. */
+  private readonly reverseOrders = new Map<string, string>();
 
   constructor(readonly domain: string) {}
 
@@ -300,6 +302,64 @@ export class FakeStore implements ShopifyAdmin {
     return refund;
   }
 
+  /**
+   * A return in Shopify's return flow, processed: each line's units are disposed (a restock gives
+   * them back to Shopify's available at the location), and with `refund` a refund is issued
+   * through the return, without a restock of its own.
+   */
+  returnItems(
+    order: ShopifyOrder,
+    lines: Array<{
+      lineId: string;
+      quantity: number;
+      type: 'restocked' | 'not_restocked' | 'processing_required' | 'missing';
+      location?: string;
+    }>,
+    opts: { refund?: boolean } = {},
+  ) {
+    const now = new Date().toISOString();
+    const ret = {
+      returnId: String(this.nextId++),
+      reverseFulfillmentOrderId: String(this.nextId++),
+      refundIds: [] as string[],
+      dispositions: lines.map((l) => ({
+        dispositionId: String(this.nextId++),
+        lineId: l.lineId,
+        quantity: l.quantity,
+        type: l.type,
+        locationId: l.type === 'restocked' ? (l.location ?? '1001') : null,
+        createdAt: now,
+      })),
+    };
+    for (const l of lines) {
+      if (l.type !== 'restocked') continue;
+      const line = order.lines.find((x) => x.lineId === l.lineId)!;
+      this.take(line.variantId, l.location ?? '1001', -l.quantity);
+    }
+    if (opts.refund) {
+      const perLine = new Map<string, number>();
+      for (const l of lines) perLine.set(l.lineId, (perLine.get(l.lineId) ?? 0) + l.quantity);
+      const refund = this.refund(
+        order,
+        [...perLine].map(([lineId, quantity]) => ({
+          lineId,
+          quantity,
+          restockType: 'no_restock' as const,
+        })),
+      );
+      ret.refundIds.push(refund.refundId);
+    }
+    this.reverseOrders.set(ret.reverseFulfillmentOrderId, order.orderId);
+    order.returns ??= [];
+    order.returns.push({
+      returnId: ret.returnId,
+      refundIds: ret.refundIds,
+      dispositions: ret.dispositions,
+    });
+    this.touch(order);
+    return ret;
+  }
+
   /** Cancels an order: unfulfilled units are refunded with restock (Shopify's default). */
   cancel(order: ShopifyOrder) {
     const fulfilled = new Map<string, number>();
@@ -338,6 +398,12 @@ export class FakeStore implements ShopifyAdmin {
   topicBody(topic: string, order: ShopifyOrder, id = '1'): string {
     if (topic === 'orders/edited') {
       return JSON.stringify({ order_edit: { id: Number(id), order_id: Number(order.orderId) } });
+    }
+    if (topic === 'reverse_fulfillment_orders/dispose') {
+      return JSON.stringify({
+        id: Number(id),
+        admin_graphql_api_id: `gid://shopify/ReverseFulfillmentOrder/${id}`,
+      });
     }
     if (topic.startsWith('orders/')) {
       return JSON.stringify({
@@ -403,6 +469,9 @@ export class FakeStore implements ShopifyAdmin {
   async lineLocations(orderId: string) {
     const order = this.orders.find((o) => o.orderId === orderId);
     return new Map((order?.lines ?? []).map((l) => [l.lineId, l.locationId ?? '1001']));
+  }
+  async orderOfReverseFulfillmentOrder(id: string) {
+    return this.reverseOrders.get(id) ?? null;
   }
   async ensureWebhooks(uri: string, topics: string[]): Promise<WebhookStatus[]> {
     return topics.map((topic) => {

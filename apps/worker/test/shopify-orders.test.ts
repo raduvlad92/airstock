@@ -290,6 +290,184 @@ describe('Shopify order lifecycle', () => {
     expect(returns).toHaveLength(1);
   });
 
+  it('a refund of a shipped unit keeps the unshipped ones held', async () => {
+    const s = await setup('Partial mug', 6);
+    const order = s.store.placeOrder([{ variant: s.item, quantity: 3 }]);
+    await event(s, 'orders/create', s.store.webhookBody(order));
+    const line = order.lines[0]!;
+    const f = s.store.fulfill(order, [{ lineId: line.lineId, quantity: 2 }]);
+    await event(
+      s,
+      'fulfillments/create',
+      s.store.topicBody('fulfillments/create', order, f.fulfillmentId),
+    );
+    expect(await onHand(s)).toEqual({ on_hand: '4.000000', allocated: '1.000000' });
+    // One of the shipped units is refunded without a restock: the third unit still ships.
+    const refund = s.store.refund(order, [
+      { lineId: line.lineId, quantity: 1, restockType: 'no_restock' },
+    ]);
+    await event(s, 'refunds/create', s.store.topicBody('refunds/create', order, refund.refundId));
+    expect(await onHand(s)).toEqual({ on_hand: '4.000000', allocated: '1.000000' });
+    expect(await h.available(s.m, s.variantId)).toBe('3.000000');
+    // A cancel refund of the unshipped unit releases it.
+    const cancel = s.store.refund(order, [
+      { lineId: line.lineId, quantity: 1, restockType: 'cancel' },
+    ]);
+    await event(s, 'refunds/create', s.store.topicBody('refunds/create', order, cancel.refundId));
+    expect(await onHand(s)).toEqual({ on_hand: '4.000000', allocated: '0.000000' });
+    expect(s.store.available(s.item)).toBe(4);
+    expect(s.store.refused).toHaveLength(0);
+  });
+
+  it('a Shopify return: each disposition once, quarantine first, the restock explained', async () => {
+    const s = await setup('Returned mug', 5);
+    const order = s.store.placeOrder([{ variant: s.item, quantity: 3 }]);
+    await event(s, 'orders/create', s.store.webhookBody(order));
+    const f = s.store.fulfill(order);
+    await event(
+      s,
+      'fulfillments/create',
+      s.store.topicBody('fulfillments/create', order, f.fulfillmentId),
+    );
+    const line = order.lines[0]!.lineId;
+    // Two come back: one restocked in Shopify, one kept aside; a third is lost in the post. The
+    // refund goes through the return, without a restock of its own.
+    const ret = s.store.returnItems(
+      order,
+      [
+        { lineId: line, quantity: 1, type: 'restocked' },
+        { lineId: line, quantity: 1, type: 'not_restocked' },
+        { lineId: line, quantity: 1, type: 'missing' },
+      ],
+      { refund: true },
+    );
+    expect(s.store.available(s.item)).toBe(3);
+    const body = s.store.topicBody(
+      'reverse_fulfillment_orders/dispose',
+      order,
+      ret.reverseFulfillmentOrderId,
+    );
+    const eventId = uuidv7();
+    expect(await event(s, 'reverse_fulfillment_orders/dispose', body, eventId)).toEqual([
+      { status: 'done' },
+    ]);
+    const returns = await ownerQuery<{ status: string; reference: string; quantity: string }>(
+      `select r.status, r.reference, sum(l.received)::text as quantity from returns r
+       join return_lines l on l.shop_id = r.shop_id and l.return_id = r.id
+       where r.shop_id = $1 group by r.id, r.status, r.reference, r.created_at order by r.created_at`,
+      [s.m.shopId],
+    );
+    expect(returns).toEqual([
+      { status: 'received', reference: `shopify:return/${ret.returnId}`, quantity: '1.000000' },
+      { status: 'received', reference: `shopify:return/${ret.returnId}`, quantity: '1.000000' },
+    ]);
+    const [quarantine] = await ownerQuery<{ on_hand: string }>(
+      `select sum(on_hand)::text as on_hand from inventory_positions
+       where shop_id = $1 and variant_id = $2 and condition = 'quarantine'`,
+      [s.m.shopId, s.variantId],
+    );
+    expect(quarantine?.on_hand).toBe('2.000000');
+    // Sellable stock waits for inspection; Shopify's restock is set back to Airstock's 2.
+    expect(await h.available(s.m, s.variantId)).toBe('2.000000');
+    expect(s.store.available(s.item)).toBe(2);
+    expect(s.store.refused).toHaveLength(0);
+    // The same dispositions again, by the duplicate webhook or the refund's own: nothing more.
+    expect(await event(s, 'reverse_fulfillment_orders/dispose', body, eventId)).toEqual([]);
+    await event(s, 'refunds/create', s.store.topicBody('refunds/create', order, ret.refundIds[0]));
+    const again = await ownerQuery('select 1 from returns where shop_id = $1', [s.m.shopId]);
+    expect(again).toHaveLength(2);
+    expect(s.store.available(s.item)).toBe(2);
+  });
+
+  it('A36 (Shopify): 3 gift sets ordered with 5 soaps, 2 per set: a shortage per component', async () => {
+    const m = await h.merchant('A36 orders');
+    const suffix = uuidv7().slice(-6);
+    const soap = await h.item(m, 'Soap', `SOAP-${suffix}`);
+    const candle = await h.item(m, 'Candle', `CANDLE-${suffix}`);
+    const gift = await h.item(m, 'Gift set', `GIFT-${suffix}`);
+    const bundle = await h.command(
+      m.cookie,
+      `/shops/${m.shopId}/variants/${gift.variantId}/bundle`,
+      {
+        variantId: gift.variantId,
+        bundleVersion: 0,
+        components: [
+          { variantId: soap.variantId, quantity: '2' },
+          { variantId: candle.variantId, quantity: '1' },
+        ],
+      },
+    );
+    expect(bundle.status, await bundle.clone().text()).toBe(200);
+    await h.receive(m, soap.variantId, 5);
+    await h.receive(m, candle.variantId, 10);
+    const store = h.newStore('a36o');
+    const [giftSet] = store.addProduct({
+      title: 'Gift set',
+      variants: [{ sku: `GIFT-${suffix}`, quantities: { '1001': 0 } }],
+    });
+    const connectionId = await h.install(m, store);
+    const base = `/shops/${m.shopId}/shopify/connections/${connectionId}`;
+    await h.command(m.cookie, `${base}/locations`, {
+      connectionId,
+      locations: [{ shopifyLocationId: '1001', warehouseId: m.warehouseId }],
+    });
+    await h.command(m.cookie, `${base}/variants`, {
+      connectionId,
+      variants: [
+        {
+          shopifyVariantId: giftSet!.variantId,
+          shopifyInventoryItemId: giftSet!.inventoryItemId,
+          variantId: gift.variantId,
+        },
+      ],
+    });
+    await h.flush(m.shopId);
+    expect(store.available(giftSet!)).toBe(2);
+    // Shopify oversells: 3 sets need 6 soaps; the order is accepted, never refused.
+    const order = store.placeOrder([{ variant: giftSet!, quantity: 3 }]);
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(order));
+    expect(await h.runJobs(m.shopId)).toEqual([{ status: 'done' }]);
+    await h.flush(m.shopId);
+    const parts = await ownerQuery<{ variant_id: string; quantity: string; shortage: string }>(
+      `select variant_id, quantity::text, shortage_quantity::text as shortage from reservations
+       where shop_id = $1 and parent_id is not null order by variant_id`,
+      [m.shopId],
+    );
+    expect(Object.fromEntries(parts.map((p) => [p.variant_id, [p.quantity, p.shortage]]))).toEqual({
+      [soap.variantId]: ['6.000000', '1.000000'],
+      [candle.variantId]: ['3.000000', '0.000000'],
+    });
+    const [line] = await ownerQuery<{ outcome: string }>(
+      'select outcome from shopify_order_lines where shop_id = $1',
+      [m.shopId],
+    );
+    expect(line?.outcome).toBe('shortage');
+    expect(store.available(giftSet!)).toBe(0);
+    expect(await h.available(m, soap.variantId)).toBe('0.000000');
+    // A soap arrives and fills the shortage; Shopify ships all three sets.
+    await h.receive(m, soap.variantId, 1);
+    const f = store.fulfill(order);
+    await h.deliver(
+      store.domain,
+      'fulfillments/create',
+      store.topicBody('fulfillments/create', order, f.fulfillmentId),
+    );
+    expect(await h.runJobs(m.shopId)).toEqual([{ status: 'done' }]);
+    await h.flush(m.shopId);
+    const left = await ownerQuery<{ variant_id: string; on_hand: string; allocated: string }>(
+      `select variant_id, sum(on_hand)::text as on_hand, sum(allocated)::text as allocated
+       from inventory_positions where shop_id = $1 and variant_id = any($2::uuid[])
+       group by variant_id`,
+      [m.shopId, [soap.variantId, candle.variantId]],
+    );
+    expect(Object.fromEntries(left.map((x) => [x.variant_id, [x.on_hand, x.allocated]]))).toEqual({
+      [soap.variantId]: ['0.000000', '0.000000'],
+      [candle.variantId]: ['7.000000', '0.000000'],
+    });
+    expect(store.available(giftSet!)).toBe(0);
+    expect(store.refused).toHaveLength(0);
+  });
+
   it('A29: an order larger than the stock is reserved with a shortage; a receipt fills it', async () => {
     const s = await setup('Short mug', 2);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }]);

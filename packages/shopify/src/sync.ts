@@ -27,8 +27,8 @@ import { SHOPIFY_SCOPES, type ShopifyAuth } from './oauth.ts';
 export interface ShopifyConfig {
   cipher: TokenCipher;
   auth: ShopifyAuth;
-  /** Builds an Admin API client for one store; tests pass a fake store. */
-  admin(shopDomain: string, accessToken: string): ShopifyAdmin;
+  /** Builds an Admin API client for one store (with its granted scopes); tests pass a fake. */
+  admin(shopDomain: string, accessToken: string, scopes?: readonly string[]): ShopifyAdmin;
   /** Where Shopify sends webhooks, such as https://airstock.example/shopify/webhooks. */
   webhookUri: string;
 }
@@ -48,6 +48,7 @@ export const ORDER_TOPICS = [
   'fulfillments/create',
   'fulfillments/update',
   'refunds/create',
+  'reverse_fulfillment_orders/dispose',
 ];
 export const WEBHOOK_TOPICS = [
   'ORDERS_CREATE',
@@ -56,6 +57,7 @@ export const WEBHOOK_TOPICS = [
   'FULFILLMENTS_CREATE',
   'FULFILLMENTS_UPDATE',
   'REFUNDS_CREATE',
+  'REVERSE_FULFILLMENT_ORDERS_DISPOSE',
   'APP_UNINSTALLED',
 ];
 /** Refresh the one-hour access token when less than this is left. */
@@ -64,6 +66,7 @@ const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 interface ConnectionRow {
   id: string;
   shop_domain: string;
+  scopes: string[];
   status: string;
   token_key_id: string;
   access_token_ciphertext: string | null;
@@ -73,7 +76,7 @@ interface ConnectionRow {
   created_at: Date;
 }
 
-const CONNECTION_COLUMNS = `id, shop_domain, status, token_key_id, access_token_ciphertext,
+const CONNECTION_COLUMNS = `id, shop_domain, scopes, status, token_key_id, access_token_ciphertext,
   access_token_expires_at, refresh_token_ciphertext, installed_by_membership_id, created_at`;
 
 export class NotConnectedError extends Error {
@@ -127,7 +130,7 @@ export async function completeInstall(
     },
   });
   const { connectionId } = connected.result as { connectionId: string };
-  const admin = deps.shopify.admin(input.shopDomain, tokens.accessToken);
+  const admin = deps.shopify.admin(input.shopDomain, tokens.accessToken, tokens.scopes);
   let locations: Array<{ id: string; name: string; active: boolean }> | undefined;
   try {
     locations = await admin.locations();
@@ -231,7 +234,7 @@ export async function connectedStore(
     shopDomain: row.shop_domain,
     createdAt: new Date(row.created_at),
     caller: shopifyConnectorCaller(shopId, connectionId, row.installed_by_membership_id),
-    admin: deps.shopify.admin(row.shop_domain, accessToken),
+    admin: deps.shopify.admin(row.shop_domain, accessToken, row.scopes),
   };
 }
 
@@ -265,7 +268,10 @@ export function parseOrderWebhook(body: string): ShopifyOrder {
   return { orderId, createdAt: raw.created_at, lines };
 }
 
-/** The order a webhook is about; its state is then read from the Admin API. */
+/**
+ * The order a webhook is about (for reverse_fulfillment_orders/dispose, the reverse fulfillment
+ * order); its state is then read from the Admin API.
+ */
 export function orderIdOf(topic: string, body: string): string | null {
   const raw = JSON.parse(body) as {
     id?: unknown;
@@ -276,11 +282,11 @@ export function orderIdOf(topic: string, body: string): string | null {
   const value =
     topic === 'orders/edited'
       ? raw.order_edit?.order_id
-      : topic.startsWith('orders/')
+      : topic.startsWith('orders/') || topic.startsWith('reverse_fulfillment_orders/')
         ? (raw.admin_graphql_api_id ?? raw.id)
         : raw.order_id;
   if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
-  if (typeof value === 'string' && /^(gid:\/\/shopify\/Order\/)?\d+$/.test(value)) {
+  if (typeof value === 'string' && /^(gid:\/\/shopify\/\w+\/)?\d+$/.test(value)) {
     return value.slice(value.lastIndexOf('/') + 1);
   }
   return null;
@@ -326,6 +332,12 @@ export async function receiveWebhook(
   let job: { kind: string; payload: unknown } | null = null;
   if (input.topic === 'orders/create') {
     job = { kind: ORDER_JOB, payload: { connectionId, order: parseOrderWebhook(input.body) } };
+  } else if (input.topic === 'reverse_fulfillment_orders/dispose') {
+    // The payload names the return's reverse fulfillment order; its order is read in the job.
+    const reverseFulfillmentOrderId = orderIdOf(input.topic, input.body);
+    if (reverseFulfillmentOrderId) {
+      job = { kind: ORDER_JOB, payload: { connectionId, reverseFulfillmentOrderId } };
+    }
   } else if (ORDER_TOPICS.includes(input.topic)) {
     const orderId = orderIdOf(input.topic, input.body);
     if (orderId) job = { kind: ORDER_JOB, payload: { connectionId, orderId } };
@@ -379,7 +391,12 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
   const [job] = await deps.db.transaction({ shopId, userId: null }, (tx) =>
     tx.query<{
       kind: string;
-      payload: { connectionId: string; order?: ShopifyOrder; orderId?: string };
+      payload: {
+        connectionId: string;
+        order?: ShopifyOrder;
+        orderId?: string;
+        reverseFulfillmentOrderId?: string;
+      };
       attempts: number;
     }>(
       `update jobs set status = 'running', attempts = attempts + 1, updated_at = now()
@@ -393,9 +410,12 @@ export async function runJob(deps: SyncDeps, shopId: string, jobId: string): Pro
   try {
     if (job.kind !== ORDER_JOB) throw new Error(`Unknown job kind ${job.kind}.`);
     let order = job.payload.order ?? null;
-    if (!order && job.payload.orderId) {
+    if (!order && (job.payload.orderId || job.payload.reverseFulfillmentOrderId)) {
       const store = await connectedStore(deps, shopId, job.payload.connectionId);
-      order = await store.admin.order(job.payload.orderId);
+      const orderId =
+        job.payload.orderId ??
+        (await store.admin.orderOfReverseFulfillmentOrder(job.payload.reverseFulfillmentOrderId!));
+      order = orderId ? await store.admin.order(orderId) : null;
     }
     const result = order
       ? await processOrder(deps, shopId, job.payload.connectionId, order)

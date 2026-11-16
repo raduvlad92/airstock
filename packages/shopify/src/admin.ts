@@ -55,6 +55,25 @@ export interface ShopifyOrder {
       locationId: string | null;
     }>;
   }>;
+  /**
+   * Shopify returns (read with `read_returns`): what came back, as Shopify's reverse fulfillment
+   * dispositions, and the refunds issued through the return.
+   */
+  returns?: ShopifyReturn[];
+}
+
+export interface ShopifyReturn {
+  returnId: string;
+  /** Refunds issued through this return: their restock is the return's dispositions. */
+  refundIds: string[];
+  dispositions: Array<{
+    dispositionId: string;
+    lineId: string;
+    quantity: number;
+    type: 'restocked' | 'not_restocked' | 'processing_required' | 'missing';
+    locationId: string | null;
+    createdAt: string;
+  }>;
 }
 
 export interface WebhookStatus {
@@ -91,6 +110,8 @@ export interface ShopifyAdmin {
   ): Promise<{ orders: ShopifyOrder[]; next: string | null }>;
   /** Where Shopify committed each line (its fulfillment orders' assigned locations). */
   lineLocations(orderId: string): Promise<Map<string, string>>;
+  /** The order a reverse fulfillment order (a return's) belongs to. */
+  orderOfReverseFulfillmentOrder(id: string): Promise<string | null>;
   ensureWebhooks(uri: string, topics: string[]): Promise<WebhookStatus[]>;
   /** Starts the onboarding read of the whole catalog as a bulk operation; returns its ID. */
   startCatalogRead(): Promise<string>;
@@ -152,7 +173,7 @@ const QUERIES = {
   // 10 fulfillments or refunds of 30 lines, is read in part (logged).
   order: `query($id: ID!) {
     order(id: $id) {
-      id createdAt updatedAt cancelledAt
+      id createdAt updatedAt cancelledAt returnStatus
       lineItems(first: 100) { nodes { id quantity currentQuantity variant { id } } }
       fulfillments(first: 10) {
         id status createdAt location { id }
@@ -164,6 +185,28 @@ const QUERIES = {
       }
     }
   }`,
+  // Read only for orders with returns, and only with read_returns.
+  returns: `query($id: ID!) {
+    order(id: $id) {
+      returns(first: 10) {
+        nodes {
+          id
+          refunds(first: 10) { nodes { id } }
+          reverseFulfillmentOrders(first: 5) {
+            nodes {
+              lineItems(first: 30) {
+                nodes {
+                  fulfillmentLineItem { lineItem { id } }
+                  dispositions { id createdAt type quantity location { id } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }`,
+  reverseFulfillmentOrder: `query($id: ID!) { reverseFulfillmentOrder(id: $id) { id order { id } } }`,
   lineLocations: `query($id: ID!) {
     order(id: $id) {
       fulfillmentOrders(first: 20) {
@@ -307,6 +350,7 @@ export const WEBHOOK_FIELDS: Record<string, string[] | undefined> = {
   FULFILLMENTS_CREATE: ['id', 'order_id', 'status'],
   FULFILLMENTS_UPDATE: ['id', 'order_id', 'status'],
   REFUNDS_CREATE: ['id', 'order_id'],
+  REVERSE_FULFILLMENT_ORDERS_DISPOSE: ['id', 'admin_graphql_api_id'],
 };
 
 interface RawOrder {
@@ -314,6 +358,7 @@ interface RawOrder {
   createdAt: string;
   updatedAt: string | null;
   cancelledAt: string | null;
+  returnStatus?: string | null;
   lineItems: {
     nodes: Array<{
       id: string;
@@ -401,6 +446,61 @@ export function parseOrder(o: RawOrder): ShopifyOrder {
   };
 }
 
+interface RawReturns {
+  returns: {
+    nodes: Array<{
+      id: string;
+      refunds: { nodes: Array<{ id: string }> };
+      reverseFulfillmentOrders: {
+        nodes: Array<{
+          lineItems: {
+            nodes: Array<{
+              fulfillmentLineItem: { lineItem: { id: string } } | null;
+              dispositions: Array<{
+                id: string;
+                createdAt: string;
+                type: string;
+                quantity: number;
+                location: { id: string } | null;
+              }>;
+            }>;
+          };
+        }>;
+      };
+    }>;
+  };
+}
+
+const DISPOSITIONS = ['restocked', 'not_restocked', 'processing_required', 'missing'] as const;
+
+/** An order's returns as the order sync applies them. */
+export function parseReturns(raw: RawReturns): ShopifyReturn[] {
+  return raw.returns.nodes.map((r) => ({
+    returnId: numeric(r.id),
+    refundIds: r.refunds.nodes.map((x) => numeric(x.id)),
+    dispositions: r.reverseFulfillmentOrders.nodes.flatMap((rfo) =>
+      rfo.lineItems.nodes.flatMap((li) => {
+        const lineId = li.fulfillmentLineItem?.lineItem.id;
+        if (!lineId) return [];
+        return li.dispositions.flatMap((d) => {
+          const type = d.type.toLowerCase() as (typeof DISPOSITIONS)[number];
+          if (!DISPOSITIONS.includes(type) || d.quantity <= 0) return [];
+          return [
+            {
+              dispositionId: numeric(d.id),
+              lineId: numeric(lineId),
+              quantity: d.quantity,
+              type,
+              locationId: d.location ? numeric(d.location.id) : null,
+              createdAt: d.createdAt,
+            },
+          ];
+        });
+      }),
+    ),
+  }));
+}
+
 interface CostExtension {
   requestedQueryCost?: number;
   throttleStatus?: { maximumAvailable: number; currentlyAvailable: number; restoreRate: number };
@@ -420,7 +520,11 @@ export function httpShopifyAdmin(
   shopDomain: string,
   accessToken: string,
   doFetch: typeof fetch = fetch,
+  /** Scopes the store granted; reads that need a missing scope are left out. */
+  scopes: readonly string[] | null = null,
 ): ShopifyAdmin {
+  const granted = (scope: string) =>
+    scopes === null || scopes.includes(scope) || scopes.includes(scope.replace(/^read_/, 'write_'));
   const endpoint = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
   async function call<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
@@ -489,7 +593,14 @@ export function httpShopifyAdmin(
 
   async function readOrder(id: string): Promise<ShopifyOrder | null> {
     const data = await call<{ order: RawOrder | null }>(QUERIES.order, { id });
-    return data.order ? parseOrder(data.order) : null;
+    if (!data.order) return null;
+    const order = parseOrder(data.order);
+    const status = data.order.returnStatus ?? 'NO_RETURN';
+    if (status !== 'NO_RETURN' && granted('read_returns')) {
+      const more = await call<{ order: RawReturns | null }>(QUERIES.returns, { id });
+      if (more.order) order.returns = parseReturns(more.order);
+    }
+    return order;
   }
 
   return {
@@ -623,6 +734,14 @@ export function httpShopifyAdmin(
         }
       }
       return out;
+    },
+
+    async orderOfReverseFulfillmentOrder(id) {
+      const data = await call<{
+        reverseFulfillmentOrder: { order: { id: string } | null } | null;
+      }>(QUERIES.reverseFulfillmentOrder, { id: gid('ReverseFulfillmentOrder', id) });
+      const order = data.reverseFulfillmentOrder?.order?.id;
+      return order ? numeric(order) : null;
     },
 
     async startCatalogRead() {

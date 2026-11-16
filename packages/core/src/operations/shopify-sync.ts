@@ -497,18 +497,23 @@ export const resolveShopifyConflict = defineOperation({
     if (!map.in_scope) {
       throw errors.forbidden('You do not have access to the locations of this Shopify location.');
     }
-    const [row] = await ctx.tx.query<{
-      expected_available: number | null;
-      conflict_at: Date | null;
-      conflict_shopify_available: number | null;
-      checked_at: Date | null;
-    }>(
-      `select expected_available, conflict_at, conflict_shopify_available, checked_at
-       from shopify_inventory_levels
-       where connection_id = $1 and shopify_inventory_item_id = $2 and shopify_location_id = $3
-       for update`,
-      [input.connectionId, item, location],
-    );
+    // The level row is locked only after the stock changes below: the stock engine's lock order
+    // is positions, reservations, then everything else (an order sync locks positions, then this
+    // row), so locking it first could deadlock with an order sync.
+    const levelRow = (lock: boolean) =>
+      ctx.tx.query<{
+        expected_available: number | null;
+        conflict_at: Date | null;
+        conflict_shopify_available: number | null;
+        checked_at: Date | null;
+      }>(
+        `select expected_available, conflict_at, conflict_shopify_available, checked_at
+         from shopify_inventory_levels
+         where connection_id = $1 and shopify_inventory_item_id = $2 and shopify_location_id = $3
+         ${lock ? 'for update' : ''}`,
+        [input.connectionId, item, location],
+      );
+    const [row] = await levelRow(false);
     if (!row?.conflict_at) {
       throw errors.conflict('no_conflict', 'There is no open conflict for this item and location.');
     }
@@ -602,6 +607,18 @@ export const resolveShopifyConflict = defineOperation({
       airstock = shopify;
     }
 
+    const [locked] = await levelRow(true);
+    if (
+      !locked?.conflict_at ||
+      locked.conflict_shopify_available !== shopify ||
+      locked.expected_available !== row.expected_available
+    ) {
+      // Resolved by someone else, or Shopify moved again, while the stock changed: undone.
+      throw errors.conflict(
+        'conflict_changed',
+        'This conflict changed while it was being resolved. Look at sync health again.',
+      );
+    }
     // Both sides now agree on Shopify's quantity as read; the push writes Airstock's from there.
     await ctx.tx.query(
       `update shopify_inventory_levels set expected_available = $4,

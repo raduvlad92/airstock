@@ -7,7 +7,8 @@ import {
   ShopifyApiError,
   type ShopifyVariant,
 } from '@airstock/shopify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import pg from 'pg';
+import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
 import { json } from './setup.ts';
@@ -299,5 +300,58 @@ describe('Shopify connector fixes', () => {
     await h.flushTogether(m.shopId);
     expect(await h.available(m, mapped!.variant_id)).toBe('7.000000');
     expect(store.available(v!)).toBe(7);
+  });
+
+  it('taking Shopify’s number locks the level after the stock, as an order sync does', async () => {
+    const s = await setup('Lock order', [5]);
+    const [only] = s.items as [Setup['items'][0]];
+    // Someone sets 8 in Shopify; the daily comparison makes it a conflict.
+    s.store.levels.set(s.store.key(only.shopify.inventoryItemId, '1001'), 8);
+    await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([{ status: 'open' }]);
+    // An order sync holds the item's stock rows (step 1 of the lock order) ...
+    const sync = new pg.Client({ connectionString: inject('databases').ownerUrl });
+    await sync.connect();
+    try {
+      await sync.query('begin');
+      await sync.query(
+        'select id from inventory_positions where variant_id = $1 order by id for update',
+        [only.variantId],
+      );
+      const [{ pid }] = (await sync.query<{ pid: number }>('select pg_backend_pid() as pid'))
+        .rows as [{ pid: number }];
+      // ... while a person takes Shopify's number: it waits for the stock rows.
+      const resolving = h.command(
+        s.m.cookie,
+        `/shops/${s.m.shopId}/shopify/connections/${s.connectionId}/conflicts/resolve`,
+        {
+          connectionId: s.connectionId,
+          inventoryItemId: only.shopify.inventoryItemId,
+          shopifyLocationId: '1001',
+          choice: 'take_shopify',
+        },
+      );
+      for (let i = 0; i < 200; i++) {
+        const [waiting] = await ownerQuery<{ n: number }>(
+          'select count(*)::int as n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))',
+          [pid],
+        );
+        if (waiting!.n > 0) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      // The order sync then reaches the level row (applying what Shopify took): it is free, so
+      // the two never wait on each other.
+      await sync.query(
+        `select 1 from shopify_inventory_levels where connection_id = $1
+           and shopify_inventory_item_id = $2 and shopify_location_id = '1001' for update nowait`,
+        [s.connectionId, only.shopify.inventoryItemId],
+      );
+      await sync.query('rollback');
+      const res = await resolving;
+      expect(res.status, await res.clone().text()).toBe(200);
+    } finally {
+      await sync.end();
+    }
+    expect(await h.available(s.m, only.variantId)).toBe('8.000000');
   });
 });

@@ -8,9 +8,12 @@ import {
 } from '../activity/query.ts';
 import { redactEventChanges } from '../activity/redact.ts';
 import { callerKey, type Membership } from '../caller.ts';
+import { errors } from '../errors.ts';
 import { uuidv7Time } from '../ids.ts';
+import { effectivePermissions } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
+import { ExportOut, exportOut, loadExport, storeCaller } from './imports.ts';
 
 const ActivityEvent = z.object({
   eventId: Id,
@@ -233,6 +236,43 @@ export const listActivity = defineOperation({
   },
 });
 
+export const createActivityExport = defineOperation({
+  id: 'activity.exports.create',
+  summary: 'Export the activity history as CSV',
+  description:
+    'Writes the events matching the filters (the same as the activity list) as CSV, newest first, at most 50,000 per file, as a job. The file is ready for 24 hours and listed with the other exports; creating, finishing, and downloading it are all in the history.',
+  kind: 'command',
+  scope: 'shop',
+  input: ActivityFilters,
+  output: z.object({ export: ExportOut }),
+  // Downloading any export needs exports.run; reading the history needs activity.read too.
+  permission: 'exports.run',
+  connectionScope: 'activity:read',
+  audit: { action: 'activity.export.created' },
+  idempotency: 'required',
+  http: { method: 'POST', path: '/shops/{shopId}/activity/exports', status: 201 },
+  mcp: {
+    exception:
+      'An activity export is a file, downloaded in the dashboard or through the API; MCP clients search the history with search_activity.',
+  },
+  async handler(ctx, input) {
+    if (!ctx.membership || !effectivePermissions(ctx.membership).has('activity.read')) {
+      throw errors.forbidden('Requires the activity.read permission.');
+    }
+    const exportId = ctx.newId();
+    const query = { mode: 'activity', filters: input };
+    await ctx.tx.query(
+      `insert into export_jobs (shop_id, id, caller, query) values (app_shop_id(), $1, $2, $3)`,
+      [exportId, JSON.stringify(storeCaller(ctx.caller)), JSON.stringify(query)],
+    );
+    return {
+      result: { export: exportOut(ctx.shopId, await loadExport(ctx.tx, exportId)) },
+      audit: { targetType: 'export', targetId: exportId, changes: { query } },
+      outbox: [{ topic: 'catalog.export.run', payload: { exportId } }],
+    };
+  },
+});
+
 export const getOperationOutcome = defineOperation({
   id: 'operations.outcome.get',
   summary: 'Look up the result of a command by its idempotency key',
@@ -388,4 +428,9 @@ export const recordClientEvents = defineOperation({
 });
 
 /** This module's operations, in registry order: MCP lists a tool's actions in this order. */
-export const activityOperations = [listActivity, recordClientEvents, getOperationOutcome] as const;
+export const activityOperations = [
+  listActivity,
+  createActivityExport,
+  recordClientEvents,
+  getOperationOutcome,
+] as const;

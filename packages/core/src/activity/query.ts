@@ -186,23 +186,27 @@ export function activityQuery(q: ActivityQuery): { sql: string; params: unknown[
   if (f.operationId) where.push(`e.operation_id = ${p(f.operationId, '::uuid')}`);
   if (f.action) {
     const { exact, prefixes } = actionPatterns(f.action);
+    // One predicate per pattern (not `like any`), so each can use the action index.
     const parts = [
       ...(exact.length ? [`e.action = any(${p(exact, '::text[]')})`] : []),
-      ...(prefixes.length ? [`e.action like any(${p(prefixes, '::text[]')})`] : []),
+      ...prefixes.map((prefix) => `e.action like ${p(prefix)}`),
     ];
     if (parts.length) where.push(`(${parts.join(' or ')})`);
   }
   if (f.integration) {
-    // Integrations act as API credentials, AI connections, or connectors; a client ID names the
-    // app behind a connection (or `shopify`).
-    const i = p(f.integration);
+    // Integrations act as API credentials, AI connections, or connectors, whose IDs are UUIDs; a
+    // client ID (`shopify`, an OAuth client) names the app behind them. Only integrations carry
+    // a client ID, so no actor-type predicate is needed (it also misleads the planner, being
+    // correlated with the client ID).
     where.push(
-      `e.actor_type in ('api_credential', 'connection', 'connector') and (e.actor_id = ${i} or e.client_id = ${i})`,
+      UUID_PATTERN.test(f.integration)
+        ? `e.actor_id = ${p(f.integration)}`
+        : `e.client_id = ${p(f.integration)}`,
     );
   }
   if (f.locationId) {
     where.push(
-      `e.location_ids && (select coalesce(array_agg(l.id), '{}') from locations l where ${p(f.locationId, '::uuid')} = any(l.path_ids))`,
+      `e.location_ids && array(select l.id from locations l where l.path_ids @> array[${p(f.locationId, '::uuid')}])`,
     );
   }
   if (q.cursor) {
@@ -214,7 +218,7 @@ export function activityQuery(q: ActivityQuery): { sql: string; params: unknown[
   // naming at least one location inside their scope. The scope's locations are listed once.
   const scoped = q.scope !== null;
   const scopeLocations = scoped
-    ? `(select coalesce(array_agg(l.id), '{}') from locations l where l.path_ids && ${p(q.scope, '::uuid[]')})`
+    ? `array(select l.id from locations l where l.path_ids && ${p(q.scope, '::uuid[]')})`
     : null;
   if (scopeLocations) {
     where.push(

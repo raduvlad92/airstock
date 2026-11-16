@@ -1,5 +1,7 @@
 import type { Database, Tx } from '@airstock/db';
 import { z } from 'zod';
+import { runActivityExport } from '../activity/export.ts';
+import type { ActivityFiltersInput } from '../activity/query.ts';
 import { type AuditEvent, type AuditSink, auditEvent, INSERT_AUDIT_EVENTS_SQL } from '../audit.ts';
 import type { Caller, Membership } from '../caller.ts';
 import { normalize } from '../catalog/decimal.ts';
@@ -37,7 +39,7 @@ export const importFileKey = (shopId: string, importId: string) =>
 export const exportFileKey = (shopId: string, exportId: string) =>
   `shops/${shopId}/exports/${exportId}.csv`;
 
-interface StoredCaller {
+export interface StoredCaller {
   kind: Caller['kind'];
   id: string;
   userId: string | null;
@@ -47,7 +49,7 @@ interface StoredCaller {
   source: Caller['source'];
 }
 
-function storeCaller(caller: Caller): StoredCaller {
+export function storeCaller(caller: Caller): StoredCaller {
   return {
     kind: caller.kind,
     id: caller.id,
@@ -1679,7 +1681,7 @@ async function receiveOpeningStock(
 
 // Exports --------------------------------------------------------------------------------
 
-const ExportOut = z.object({
+export const ExportOut = z.object({
   exportId: Id,
   status: z.string(),
   rowCount: z.number().nullable(),
@@ -1695,7 +1697,7 @@ const ExportOut = z.object({
     ),
 });
 
-interface ExportRow {
+export interface ExportRow {
   id: string;
   status: string;
   row_count: number | null;
@@ -1708,7 +1710,7 @@ interface ExportRow {
   query: z.infer<typeof ExportQuery>;
 }
 
-function exportOut(shopId: string, r: ExportRow) {
+export function exportOut(shopId: string, r: ExportRow) {
   const downloadable =
     r.status === 'completed' &&
     !r.file_deleted_at &&
@@ -1735,7 +1737,7 @@ const ExportQuery = QueryInput.pick({
   archived: true,
 });
 
-async function loadExport(tx: Tx, exportId: string): Promise<ExportRow> {
+export async function loadExport(tx: Tx, exportId: string): Promise<ExportRow> {
   const [row] = await tx.query<ExportRow>(
     `select id, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query
      from export_jobs where id = $1`,
@@ -1880,6 +1882,18 @@ export async function runExportJob(
   if (!job) return 'missing';
   try {
     const caller = await jobCaller(deps.db, shopId, job.caller);
+    const activity = job.query as unknown as { mode: string; filters?: ActivityFiltersInput };
+    if (activity.mode === 'activity') {
+      await runActivityExport(
+        deps,
+        shopId,
+        exportId,
+        exportFileKey(shopId, exportId),
+        caller,
+        activity.filters ?? {},
+      );
+      return 'done';
+    }
     const membership = caller.membership!;
     const locationScope = membership.allLocations ? null : membership.locationScopeIds;
     const mode = job.query.mode ?? 'variants';

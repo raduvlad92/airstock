@@ -23,7 +23,6 @@ type Preview = Out<typeof ops.previewImport>;
 type Rows = Out<typeof ops.listImportRows>;
 
 const BUILTINS: Array<[string, string]> = [
-  ['ignore', 'Ignore'],
   ['product', 'Product key (groups variants)'],
   ['name', 'Name'],
   ['sku', 'SKU'],
@@ -35,7 +34,21 @@ const BUILTINS: Array<[string, string]> = [
   ['tags', 'Tags'],
   ['weight', 'Weight'],
   ['dimensions', 'Dimensions'],
+  ['supplier', 'Supplier (an existing supplier’s name)'],
+  ['supplier_sku', 'Supplier SKU'],
 ];
+
+/** The pack a pack:<name> or pack_barcode:<name> target or header names. */
+function packName(text: string): string | null {
+  return /^pack(?:_barcode)?:(.+)$/i.exec(text)?.[1]?.trim() || null;
+}
+
+/** Names once each, ignoring case, in first-seen order. */
+function distinctNames(names: string[]): string[] {
+  const seen = new Map<string, string>();
+  for (const n of names) if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n);
+  return [...seen.values()];
+}
 
 /** Uploads a file to the import's upload path, as the API takes it: the raw CSV. */
 async function uploadFile(path: string, file: File) {
@@ -242,15 +255,17 @@ function ImportWizard({ shopId, importId }: { shopId: string; importId: string }
       void queryClient.invalidateQueries({ queryKey: ['shop', shopId, 'items'] });
   }, [imp?.status, queryClient, shopId]);
   const header = imp?.header ?? columns.data?.import.header ?? null;
-  const targets: Array<[string, string]> = [
-    ...BUILTINS,
-    ...(schema.data?.fields ?? [])
-      .filter((f) => f.status === 'active' && f.type !== 'file')
-      .map((f) => [`field:${f.key}`, f.label] as [string, string]),
-    ...(locations.data?.locations ?? [])
-      .filter((l) => l.holdsStockAllowed && l.status === 'active')
-      .map((l) => [`stock:${l.locationId}`, `Opening stock at ${l.path}`] as [string, string]),
-  ];
+  const fieldTargets = (schema.data?.fields ?? [])
+    .filter((f) => f.status === 'active' && f.type !== 'file')
+    .map((f) => [`field:${f.key}`, f.label] as [string, string]);
+  const stockTargets = (locations.data?.locations ?? [])
+    .filter((l) => l.holdsStockAllowed && l.status === 'active')
+    .map((l) => [`stock:${l.locationId}`, `Opening stock at ${l.path}`] as [string, string]);
+  // Packs the shop has and packs the mapping names; each column can also name its own.
+  const knownPacks = distinctNames([
+    ...(preview.data?.packNames ?? columns.data?.packNames ?? []),
+    ...Object.values(mapping ?? {}).flatMap((t) => packName(t) ?? []),
+  ]);
   if (!imp) return <Loading />;
   const done = imp.status === 'completed' || imp.status === 'failed';
   return (
@@ -268,7 +283,9 @@ function ImportWizard({ shopId, importId }: { shopId: string; importId: string }
         <div className="stack">
           <p className="muted">
             Match each column to a field. Columns named like <code>option:Size</code> become variant
-            options; rows sharing a product key become variants of one product.
+            options; rows sharing a product key become variants of one product. A pack column holds
+            the base units in one pack, such as 12 for a case of 12. Supplier columns name a
+            supplier you already have.
           </p>
           <div className="table-wrap">
             <table className="table compact">
@@ -290,17 +307,49 @@ function ImportWizard({ shopId, importId }: { shopId: string; importId: string }
                         value={mapping[h] ?? 'ignore'}
                         onChange={(e) => setMapping({ ...mapping, [h]: e.target.value })}
                       >
-                        {targets.map(([id, label]) => (
-                          <option key={id} value={id}>
-                            {label}
-                          </option>
-                        ))}
-                        {mapping[h]?.startsWith('option:') ? (
-                          <option value={mapping[h]}>Option {mapping[h]!.slice(7)}</option>
+                        <option value="ignore">Ignore</option>
+                        <optgroup label="Product and variant">
+                          {BUILTINS.map(([id, label]) => (
+                            <option key={id} value={id}>
+                              {label}
+                            </option>
+                          ))}
+                        </optgroup>
+                        {fieldTargets.length > 0 ? (
+                          <optgroup label="Custom fields">
+                            {fieldTargets.map(([id, label]) => (
+                              <option key={id} value={id}>
+                                {label}
+                              </option>
+                            ))}
+                          </optgroup>
                         ) : null}
-                        {!mapping[h]?.startsWith('option:') ? (
-                          <option value={`option:${h}`}>Option “{h}”</option>
+                        <optgroup label="Packs">
+                          {distinctNames([...knownPacks, packName(h) ?? h]).flatMap((name) => [
+                            <option key={`pack:${name}`} value={`pack:${name}`}>
+                              {name}: base units in one
+                            </option>,
+                            <option key={`pack_barcode:${name}`} value={`pack_barcode:${name}`}>
+                              {name}: barcode
+                            </option>,
+                          ])}
+                        </optgroup>
+                        {stockTargets.length > 0 ? (
+                          <optgroup label="Opening stock">
+                            {stockTargets.map(([id, label]) => (
+                              <option key={id} value={id}>
+                                {label}
+                              </option>
+                            ))}
+                          </optgroup>
                         ) : null}
+                        <optgroup label="Options">
+                          {mapping[h]?.startsWith('option:') ? (
+                            <option value={mapping[h]}>Option {mapping[h]!.slice(7)}</option>
+                          ) : (
+                            <option value={`option:${h}`}>Option “{h}”</option>
+                          )}
+                        </optgroup>
                       </select>
                     </td>
                   </tr>

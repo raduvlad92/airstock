@@ -10,11 +10,11 @@ test('imports a CSV with variants and exports it back', async ({ page }) => {
   await page.getByRole('link', { name: 'Import' }).click();
 
   const csv = [
-    'product,name,sku,price,option:Size',
-    'TEE,Plain tee,TEE-S,15,S',
-    'TEE,Plain tee,TEE-M,15,M',
-    ',Mug,MUG-1,8,',
-    ',Bad,BAD-1,abc,',
+    'product,name,sku,price,option:Size,Case qty',
+    'TEE,Plain tee,TEE-S,15,S,12',
+    'TEE,Plain tee,TEE-M,15,M,12',
+    ',Mug,MUG-1,8,,',
+    ',Bad,BAD-1,abc,,',
   ].join('\n');
   await page
     .getByLabel('CSV file (UTF-8, comma or semicolon)')
@@ -22,6 +22,10 @@ test('imports a CSV with variants and exports it back', async ({ page }) => {
   await page.getByRole('button', { name: 'Read the columns' }).click();
   await expect(page.getByLabel('Target for sku')).toHaveValue('sku');
   await expect(page.getByLabel('Target for option:Size')).toHaveValue('option:Size');
+  // "Case qty" is the base units in a case; the pack targets are a list, not free text.
+  await expect(page.getByLabel('Target for Case qty')).toHaveValue('pack:Case');
+  await page.getByLabel('Target for Case qty').selectOption({ label: 'Case: barcode' });
+  await page.getByLabel('Target for Case qty').selectOption({ label: 'Case: base units in one' });
   await page.getByRole('button', { name: 'Preview' }).click();
   await expect(page.getByText('Use a price such as 19.90.')).toBeVisible();
   await page.getByRole('button', { name: 'Import 3 rows' }).click();
@@ -41,6 +45,7 @@ test('imports a CSV with variants and exports it back', async ({ page }) => {
     .then((chunks) => Buffer.concat(chunks).toString('utf8'));
   expect(text).toContain('TEE-M');
   expect(text).toContain('option:Size');
+  expect(text).toContain('pack:Case');
 
   // Exports started anywhere, such as by an AI assistant, download from the import page.
   await page.getByRole('link', { name: 'Import' }).click();

@@ -40,6 +40,17 @@ Which files a change touches:
 | A new MCP tool | As above, plus one sorted line in `mcp-tools.test.ts` (16 tools or fewer) |
 | An ADR | The ADR file, and the generated `docs/adr/README.md` |
 
+## Update, 16 November 2026 (Phase 2, D16)
+
+The 16-tool budget above was our own, not a ChatGPT limit; OpenAI documents none. Phase 2 grows to about 22 task-shaped tools (Phase 2 plan, Section 5.16).
+
+The gate is measured tool choice, not a count. Each milestone's ChatGPT prompts are checked with `scripts/chatgpt-run.ts`, and a wrong pick is fixed before the milestone closes.
+
+Following OpenAI's guidance (Phase 2 status, Section 5.1):
+- Tool descriptions say "Use this when…" and name the cases a tool is not for.
+- Read-only tools carry `readOnlyHint`.
+- Cross-tool guidance lives in the server `instructions`, with its first 512 characters self-contained.
+
 ## Revisit when
 
-The tool count approaches 25, or a client needs per-action schemas instead of a flat object.
+A milestone's ChatGPT run shows wrong tool or action choices that wording does not fix, or a client needs per-action schemas instead of a flat object.

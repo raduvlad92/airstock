@@ -1,0 +1,256 @@
+{
+  "/api/v1/shops/{shopId}/shopify/onboardings/{onboardingId}": {
+    "get": {
+      "operationId": "shopify.onboarding.get",
+      "summary": "Get an onboarding import with its matches",
+      "description": "Shows an onboarding import’s status and totals, the Shopify locations whose quantities are not imported because they are not mapped, and each Shopify variant: matched by SKU or barcode, new, or skipped (with why). Filter by match; at most 500 rows.",
+      "x-permission": "shop.read",
+      "x-connection-scope": "shop:read",
+      "x-audit-action": "shopify.onboarding.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "onboardingId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "match",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "sku",
+              "barcode",
+              "new",
+              "skipped"
+            ]
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "onboarding": {
+                    "type": "object",
+                    "properties": {
+                      "onboardingId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "connectionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "reading",
+                          "matching",
+                          "previewed",
+                          "committing",
+                          "finishing",
+                          "completed",
+                          "failed",
+                          "cancelled"
+                        ]
+                      },
+                      "importId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "counts": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "number"
+                        }
+                      },
+                      "unmappedLocations": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "completedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "onboardingId",
+                      "connectionId",
+                      "status",
+                      "importId",
+                      "counts",
+                      "unmappedLocations",
+                      "error",
+                      "createdAt",
+                      "completedAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "shopifyVariantId": {
+                          "type": "string"
+                        },
+                        "shopifyProductId": {
+                          "type": "string"
+                        },
+                        "sku": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "barcode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "match": {
+                          "type": "string",
+                          "enum": [
+                            "sku",
+                            "barcode",
+                            "new",
+                            "skipped"
+                          ]
+                        },
+                        "variantId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "packId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "importSku": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "importRow": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "mapped": {
+                          "type": "boolean"
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "shopifyVariantId",
+                        "shopifyProductId",
+                        "sku",
+                        "barcode",
+                        "title",
+                        "match",
+                        "variantId",
+                        "packId",
+                        "importSku",
+                        "importRow",
+                        "mapped",
+                        "note"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "onboarding",
+                  "rows"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

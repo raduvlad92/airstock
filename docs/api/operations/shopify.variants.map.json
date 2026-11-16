@@ -1,0 +1,176 @@
+{
+  "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/variants": {
+    "post": {
+      "operationId": "shopify.variants.map",
+      "summary": "Map Shopify variants to variants, packs, or bundles",
+      "description": "Sets or removes the maps of up to 1,000 Shopify variants of one connected store. A Shopify variant sells one unit of a variant, one of its sales packs (Shopify shows whole packs: floor(available ÷ pack size), and a sale reserves that many units), or one bundle (its components are reserved). variantId null removes a map. Airstock then reads Shopify’s quantity for each changed item and sets it to Airstock’s.",
+      "x-permission": "connections.manage",
+      "x-connection-scope": "session",
+      "x-audit-action": "shopify.variants.mapped",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "connectionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "variants": {
+                  "minItems": 1,
+                  "maxItems": 1000,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "shopifyVariantId": {
+                        "type": "string",
+                        "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                      },
+                      "shopifyInventoryItemId": {
+                        "type": "string",
+                        "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                      },
+                      "shopifyProductId": {
+                        "type": "string",
+                        "pattern": "^(gid:\\/\\/shopify\\/[A-Za-z]+\\/)?[0-9]{1,20}$"
+                      },
+                      "sku": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 255
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "title": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "variantId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Null removes the map."
+                      },
+                      "packId": {
+                        "description": "A sales pack of the variant: one Shopify item is one pack.",
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "source": {
+                        "description": "How the match was found; maps set by a person are kept by later imports.",
+                        "type": "string",
+                        "enum": [
+                          "sku",
+                          "barcode",
+                          "manual"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "shopifyVariantId",
+                      "shopifyInventoryItemId",
+                      "variantId"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "variants"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "set": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "removed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "connectionId",
+                  "set",
+                  "removed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

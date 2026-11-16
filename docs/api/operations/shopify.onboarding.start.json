@@ -1,0 +1,155 @@
+{
+  "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/onboardings": {
+    "post": {
+      "operationId": "shopify.onboarding.start",
+      "summary": "Read a connected store’s catalog for the onboarding import",
+      "description": "Starts reading the store’s products, variants, SKUs, barcodes, prices, pictures, and quantities with a Shopify bulk operation. When it is read, every Shopify variant is matched by SKU, then barcode, and the new ones become an import preview to review and commit. Quantities at mapped Shopify locations arrive as opening stock; map the locations first. One run at a time per store.",
+      "x-permission": "connections.manage",
+      "x-connection-scope": "session",
+      "x-audit-action": "shopify.onboarding.started",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "connectionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "onboarding": {
+                    "type": "object",
+                    "properties": {
+                      "onboardingId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "connectionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "reading",
+                          "matching",
+                          "previewed",
+                          "committing",
+                          "finishing",
+                          "completed",
+                          "failed",
+                          "cancelled"
+                        ]
+                      },
+                      "importId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "counts": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "number"
+                        }
+                      },
+                      "unmappedLocations": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "completedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "onboardingId",
+                      "connectionId",
+                      "status",
+                      "importId",
+                      "counts",
+                      "unmappedLocations",
+                      "error",
+                      "createdAt",
+                      "completedAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "onboarding"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

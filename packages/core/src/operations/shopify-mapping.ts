@@ -252,9 +252,13 @@ export const VariantMapIn = z.object({
   packId: Id.nullable()
     .optional()
     .describe('A sales pack of the variant: one Shopify item is one pack.'),
+  source: z
+    .enum(['sku', 'barcode', 'manual'])
+    .optional()
+    .describe('How the match was found; maps set by a person are kept by later imports.'),
 });
 
-export type VariantMapInput = z.infer<typeof VariantMapIn> & {
+export type VariantMapInput = Omit<z.infer<typeof VariantMapIn>, 'source'> & {
   source?: 'sku' | 'barcode' | 'manual' | 'onboarding' | 'listing';
 };
 

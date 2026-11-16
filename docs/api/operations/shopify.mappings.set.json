@@ -2,8 +2,8 @@
   "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/mappings": {
     "post": {
       "operationId": "shopify.mappings.set",
-      "summary": "Map a Shopify store to a location and variants",
-      "description": "Replaces the mappings of one connected Shopify store: one Shopify location to one location, and the listed Shopify variants to variants. Airstock then sets Shopify’s available quantity at that location to Airstock’s availability, and keeps it in step.",
+      "summary": "Map a Shopify store to one location and its variants",
+      "description": "Replaces every mapping of one connected Shopify store: one Shopify location to one location, and the listed Shopify variants to variants. For several locations, packs, or bundles, use the location and variant maps. Airstock then sets Shopify’s available quantity at that location to Airstock’s availability, and keeps it in step.",
       "x-permission": "connections.manage",
       "x-connection-scope": "session",
       "x-audit-action": "shopify.mappings.set",

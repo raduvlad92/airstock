@@ -266,6 +266,28 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
       throw error;
     }
     const match = await matchBySku(pipeline, store);
+    if (body?.locationId === undefined) {
+      // Variants only: the location maps stay as they are (several Shopify locations).
+      const mapped =
+        match.variants.length > 0
+          ? await execute(pipeline, ops.mapShopifyVariants, {
+              caller,
+              shopId,
+              idempotencyKey: uuidv7(),
+              requestId,
+              input: {
+                connectionId,
+                variants: match.variants.map((v) => ({ ...v, source: 'sku' })),
+              },
+            })
+          : null;
+      await pipeline.dispatch?.().catch(() => {});
+      return c.json({
+        variantsMapped: (mapped?.result as { set?: number } | undefined)?.set ?? 0,
+        unmatchedShopify: match.unmatchedShopify,
+        untrackedShopify: match.untrackedShopify,
+      });
+    }
     const mapped = await execute(pipeline, ops.setShopifyMappings, {
       caller,
       shopId,

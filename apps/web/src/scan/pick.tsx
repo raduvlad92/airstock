@@ -133,7 +133,9 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
     target: Target;
   } | null>(null);
   const [shortFound, setShortFound] = useState<string | null>(null);
-  const [lastShort, setLastShort] = useState<(Shorted['count'] & { path: string }) | null>(null);
+  const [lastShort, setLastShort] = useState<
+    (Shorted['count'] & { path: string; sku: string; lotCode: string | null }) | null
+  >(null);
   const [completed, setCompleted] = useState<Completed | null>(null);
   const key = useRef(crypto.randomUUID());
 
@@ -189,7 +191,12 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
         'notice',
         `Short: ${formatDecimal(r.count.missing)} × ${p.line.sku} not found at ${p.line.locationPath}. Flagged for a count.`,
       );
-      setLastShort({ ...r.count, path: p.line.locationPath });
+      setLastShort({
+        ...r.count,
+        path: p.line.locationPath,
+        sku: p.line.sku,
+        lotCode: p.line.lotCode,
+      });
       done();
       await refresh();
     },
@@ -414,7 +421,7 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
         )}
         {lastShort ? (
           <div className="scan-actions">
-            {/* I4b: counting plugs in here, starting from the short line's position. */}
+            {/* Count opens on the short line's shelf with the item listed (ADR 0026). */}
             <button
               type="button"
               className="secondary"
@@ -426,6 +433,8 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
                   locationPath: lastShort.path,
                   variantId: lastShort.variantId,
                   missing: lastShort.missing,
+                  sku: lastShort.sku,
+                  ...(lastShort.lotCode ? { lotCode: lastShort.lotCode } : {}),
                 })
               }
             >

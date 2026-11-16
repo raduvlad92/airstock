@@ -147,11 +147,12 @@ function renderScan(search = '') {
   // A built-in detector, so the page does not fetch the zxing script into happy-dom.
   vi.stubGlobal(
     'BarcodeDetector',
-    class {
-      static getSupportedFormats() {
-        return Promise.resolve(['ean_13', 'code_128', 'qr_code']);
-      }
-    },
+    Object.assign(
+      function BarcodeDetector() {
+        return { detect: async () => [] };
+      },
+      { getSupportedFormats: async () => ['ean_13', 'code_128', 'qr_code'] },
+    ),
   );
   const router = createRouter({
     routeTree,

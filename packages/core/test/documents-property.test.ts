@@ -16,7 +16,8 @@ import { reconcileAll } from './documents-helpers.ts';
 
 // A21 for milestone I2: random mixes of receipts (in packs, by lot, by serial), reservations and
 // fulfillments, transfers (create, ready, partial dispatch and receipt, cancel, exception
-// resolution, moves), and returns (receipt into quarantine and every inspection disposition) keep the ledger, balances, allocations, reservations, serials, owned
+// resolution, moves), returns (receipt into quarantine and every inspection disposition), quick
+// counts, adjustments with reasons, and condition changes keep the ledger, balances, allocations, reservations, serials, owned
 // quantities, and every transfer line reconciled, with availability never below zero.
 
 const db = appDatabase({}, 6);
@@ -52,7 +53,10 @@ type Step =
   | { kind: 'resolve'; pick: number; qty: number | null }
   | { kind: 'move'; what: Kind; from: number; qty: number }
   | { kind: 'return'; what: Kind; qty: number; loc: number }
-  | { kind: 'inspect'; pick: number; disposition: Disposition; qty: number | null };
+  | { kind: 'inspect'; pick: number; disposition: Disposition; qty: number | null }
+  | { kind: 'count'; what: Kind; loc: number; counted: number }
+  | { kind: 'adjust'; what: Kind; loc: number; add: boolean; qty: number }
+  | { kind: 'condition'; what: Kind; loc: number; toDamaged: boolean };
 
 type Disposition = 'sellable' | 'damaged' | 'repair' | 'supplier_return' | 'disposal';
 
@@ -125,6 +129,23 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       qty: maybeQty,
     }),
   },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant('count' as const),
+      what,
+      loc,
+      counted: fc.integer({ min: 0, max: 6 }),
+    }),
+  },
+  fc.record({
+    kind: fc.constant('adjust' as const),
+    what,
+    loc,
+    add: fc.boolean(),
+    qty: fc.integer({ min: 1, max: 2 }),
+  }),
+  fc.record({ kind: fc.constant('condition' as const), what, loc, toDamaged: fc.boolean() }),
   fc.record({
     kind: fc.constant('move' as const),
     what,
@@ -149,6 +170,10 @@ const EXPECTED = new Set([
   'quantity_exceeds_uninspected',
   'return_closed',
   'nothing_returnable',
+  'below_reserved',
+  'below_zero',
+  'units_reserved',
+  'serial_not_here',
 ]);
 
 describe('stock conservation with transfers (A21, I2)', () => {
@@ -175,6 +200,21 @@ describe('stock conservation with transfers (A21, I2)', () => {
         const returns: Array<{ returnId: string; variantId: string }> = [];
         const back: Record<string, number> = {};
         const disposedSoFar: Record<string, number> = {};
+        const corrected: Record<string, number> = {};
+        const correct = (changes: Array<{ variantId: string; delta: string }>) => {
+          for (const c of changes)
+            corrected[c.variantId] = (corrected[c.variantId] ?? 0) + Number(c.delta);
+        };
+        // Serials of a variant now at a location in a condition.
+        const serialsAt = async (variantId: string, locationId: string, condition: string) =>
+          (
+            await ownerQuery<{ serial: string }>(
+              `select su.serial from serial_units su join inventory_positions p on p.id = su.position_id
+               where su.variant_id = $1 and p.location_id = $2 and p.condition = $3 and p.on_hand = 1
+                 and p.transfer_id is null order by su.serial`,
+              [variantId, locationId, condition],
+            )
+          ).map((r) => r.serial);
         // Some stock everywhere to start with, so transfers have something to move.
         for (const locationId of locations) {
           await h.run(ops.receiveStock, {
@@ -296,6 +336,57 @@ describe('stock conservation with transfers (A21, I2)', () => {
               const disposed = Number(done.return.lines[0].disposed);
               out(r.variantId, String(disposed - (disposedSoFar[r.returnId] ?? 0)));
               disposedSoFar[r.returnId] = disposed;
+            } else if (s.kind === 'count') {
+              const variantId = ids[s.what];
+              const locationId = locations[s.loc]!;
+              let item: Record<string, unknown> = { variantId, counted: String(s.counted) };
+              if (s.what === 'lot') item = { ...item, lotCode: 'A' };
+              if (s.what === 'serial') {
+                const here = await serialsAt(variantId, locationId, 'sellable');
+                item = { variantId, serials: here.slice(0, Math.min(here.length, s.counted)) };
+                if ((item.serials as string[]).length === 0) item = { variantId, counted: '0' };
+              }
+              const res = await h.run(ops.quickCount, { locationId, counts: [item] });
+              correct(res.changes);
+            } else if (s.kind === 'adjust') {
+              const variantId = ids[s.what];
+              const locationId = locations[s.loc]!;
+              let adjustment: Record<string, unknown> = {
+                variantId,
+                direction: s.add ? 'add' : 'remove',
+                quantity: String(s.qty),
+              };
+              if (s.what === 'lot') adjustment = { ...adjustment, lotCode: 'A' };
+              if (s.what === 'serial') {
+                const here = await serialsAt(variantId, locationId, 'sellable');
+                adjustment = s.add
+                  ? { variantId, direction: 'add', serials: [`FOUND-${++serialNo}`] }
+                  : { variantId, direction: 'remove', serials: here.slice(0, 1) };
+                if (!s.add && here.length === 0) continue;
+              }
+              const res = await h.run(ops.adjustStock, {
+                locationId,
+                adjustmentReason: s.add ? 'found' : 'damage',
+                adjustments: [adjustment],
+              });
+              correct(res.changes);
+            } else if (s.kind === 'condition') {
+              const variantId = ids[s.what];
+              const locationId = locations[s.loc]!;
+              const from = s.toDamaged ? 'sellable' : 'damaged';
+              let item: Record<string, unknown> = { variantId, quantity: '1' };
+              if (s.what === 'lot') item = { ...item, lotCode: 'A' };
+              if (s.what === 'serial') {
+                const here = await serialsAt(variantId, locationId, from);
+                if (here.length === 0) continue;
+                item = { variantId, serials: here.slice(0, 1) };
+              }
+              await h.run(ops.changeCondition, {
+                locationId,
+                fromCondition: from,
+                toCondition: s.toDamaged ? 'damaged' : 'sellable',
+                items: [item],
+              });
             } else if (s.kind === 'move') {
               await h.run(ops.moveStock, {
                 fromLocationId: locations[s.from],
@@ -346,7 +437,7 @@ describe('stock conservation with transfers (A21, I2)', () => {
         for (const k of ['plain', 'lot', 'serial'] as const) {
           const view = await h.run(ops.getAvailability, { variantId: ids[k] });
           expect(Number(view.totals.ownedTotal)).toBe(
-            received[k] - (gone[ids[k]] ?? 0) + (back[ids[k]] ?? 0),
+            received[k] - (gone[ids[k]] ?? 0) + (back[ids[k]] ?? 0) + (corrected[ids[k]] ?? 0),
           );
         }
         expect(await reconcileAll(shop.shopId)).toEqual([]);

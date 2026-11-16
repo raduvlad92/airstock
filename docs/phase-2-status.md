@@ -13,14 +13,16 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I1 Stock engine | Done | Schema, receipts, reservations, fulfillment, allocation rules, bundles, shortages, and valuation (PRs #45, #49). One-of-a-kind items, quick add, starter families for cards and sets, and the dashboard stock panel (PR #51). The scheduled stock check with a reviewed repair (PR #55, Settings › Stock check). |
 | I2 Transfers, returns, counts | Done | Transfers with holds, transit, exceptions, and one-command moves (PR #57, [ADR 0028](adr/0028-transfers.md)); returns with quarantine and inspection, serial checks, and one-of-a-kind items back in stock (PR #63, [ADR 0029](adr/0029-returns.md)); count sessions, quick counts, adjustments with reasons, condition changes, and reversals (PR #64, [ADR 0031](adr/0031-counts-and-adjustments.md)). |
 | I3 Purchasing and alerts | Done | Purchase orders (PR #59, [ADR 0027](adr/0027-purchase-orders.md)): PDF, email, receipts against lines, on order. Reorder rules, draft from low stock, and alerts in the app, by email, webhooks, and MCP (PR #62, [ADR 0030](adr/0030-reorder-rules-and-alerts.md)). |
-| I4 Scanning and picking | First half done | The scanner at `/app/scan` and the installed app (PR #54, [ADR 0025](adr/0025-scanning-and-installed-app.md)); look up, receive, and unknown codes (PR #58); pick lists on the phone and as PDF (PR #60, [ADR 0026](adr/0026-picking.md)). In progress (I4b): count, move, receive against a PO, quick add with pictures, and short pick to count. |
-| I5 Webhooks, activity, reports | Reports in progress | Webhooks (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views with the PRD 7.4 filters, location-scoped history, lifecycle, ingestion delay, and export; a shop-first audit key with no default partition, so a two-filter search over 1 million events is 9 ms p95 warm and 534 ms cold (PR #52, [ADR 0032](adr/0032-activity-views.md), [measurements](phase-2-measurements.md)). The eight standard reports are in progress. |
-| I6 Shopify connector | In progress | Mapping and onboarding, the order flow, batched push and reconciler, sync health, and listings in both directions, landing in that order. |
-| I7 MVP gate | Not started | |
+| I4 Scanning and picking | Done | The scanner at `/app/scan` and the installed app (PR #54, [ADR 0025](adr/0025-scanning-and-installed-app.md)); look up, receive, and unknown codes (PR #58); pick lists on the phone and as PDF (PR #60, [ADR 0026](adr/0026-picking.md)). Count, move, receive against a PO, quick add with pictures, and short pick to count (PR #69, ADR 0025 update). |
+| I5 Webhooks, activity, reports | Done for January | Webhooks (PR #47, [ADR 0023](adr/0023-outgoing-webhooks.md), [webhooks.md](webhooks.md)). Activity views with the PRD 7.4 filters, location-scoped history, lifecycle, ingestion delay, and export; a shop-first audit key with no default partition, so a two-filter search over 1 million events is 9 ms p95 warm and 534 ms cold (PR #52, [ADR 0032](adr/0032-activity-views.md), [measurements](phase-2-measurements.md)). The eight standard reports with filters, saved reports, CSV export, and `run_report` (PR #71, [ADR 0034](adr/0034-reports.md)). Scheduled report emails come after January. |
+| I6 Shopify connector | In progress | Mapping and onboarding (PR #67, [ADR 0033](adr/0033-shopify-mapping-and-onboarding.md)). The order flow (PR #70) is being finished; then batched push and reconciler, sync health, and listings in both directions. |
+| I7 MVP gate | In progress | A volume run of the stock features on the persona shops, and an independent correctness review of the inventory engine, started 16 November. The ChatGPT run and the owner's checks follow when I6 lands. |
 | I8 Pilot go-live | Not started | |
 | I9 After January | Not started | |
 
 **Night of 16 November:** every agent stopped at the account's 5-hour usage limit at about 03:20 UTC. Only pushed work survived: the stock engine's third part, the webhooks, and most of the activity views. The three milestones that had just started lost nothing, because they had not written code yet. Each agent now pushes within its first 30 minutes.
+
+**16 November, 09:10–12:10 UTC:** the usage limit stopped the agents a second time. The Shopify order-flow work was saved from its checkout. Since then, at most three agents run at once, so fewer are cut off mid-task.
 
 ## 2. Owner steps
 
@@ -149,5 +151,5 @@ Checked on 16 November 2026 against [Shopify's protected customer data page](htt
 
 | Where | Data | Purpose |
 | --- | --- | --- |
-| Bench project | Six "Bench" persona shops on branch `i0-personas`; the 1-million-event history on branch `i0-baseline` (I0) | Timings; see [measurements](phase-2-measurements.md) |
+| Bench project | Six "Bench" persona shops on branch `i0-personas`. The 1-million-event history branch `i0-baseline` was deleted on 16 November after the activity timings, to keep the project under its 1 GB limit (all branches count); `scripts/bench/seed-history.ts` recreates it in about 80 s | Timings; see [measurements](phase-2-measurements.md) |
 | Staging | As listed in [Phase 1 status](phase-1-status.md), Section 4 | Unchanged by Phase 2 seeds |

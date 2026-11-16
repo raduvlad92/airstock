@@ -370,15 +370,15 @@ The largest shop, Partline (20,000 variants, 16,990 positions):
 | Cost of goods, 30 days, per variant | 703 | 175 ms | 193 ms | 15 ms |
 | Low stock | 341 | 467 ms | 643 ms | 8 ms |
 
-The other shops, slowest shape each:
+The other shops:
 
-| Shop | Variants | Stock on hand (client, server) | Value 7 days ago, per variant (client, server) | Movements, entries (client, server) |
+| Shop | Variants | Stock on hand, positions (client, server) | Value 7 days ago, per variant (client, server) | Movements, entries (client, server) |
 | --- | --- | --- | --- | --- |
 | Bench Cards and Bricks | 1,254 | 256 ms, 56 ms | 177 ms, 12 ms | 230 ms, 56 ms |
 | Bench Fuel Kitchen | 300 | 203 ms, 19 ms | 185 ms, 21 ms | 231 ms, 61 ms |
-| Bench Lumen Skin | 2,000 | 295 ms, 102 ms | 171 ms, 15 ms | 243 ms, 78 ms |
-| Bench Maison Verre | 4,001 | 437 ms, 244 ms | 177 ms, 27 ms | 280 ms, 131 ms |
-| Bench Stride Sportswear | 4,014 | 401 ms, 208 ms | 189 ms, 26 ms | 253 ms, 84 ms |
+| Bench Lumen Skin | 2,000 | 284 ms, 90 ms | 171 ms, 15 ms | 243 ms, 78 ms |
+| Bench Maison Verre | 4,001 | 427 ms, 244 ms | 177 ms, 27 ms | 280 ms, 131 ms |
+| Bench Stride Sportswear | 4,014 | 396 ms, 208 ms | 189 ms, 26 ms | 253 ms, 84 ms |
 
 Purchasing, expiring lots, and shortages have no rows in the seed (no orders, lots, or shortages yet) and take 140 to 220 ms, all of it round trips.
 

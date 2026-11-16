@@ -220,3 +220,107 @@ DATABASE_APP_URL=… tsx scripts/bench/query-activity.ts --seed seed-personas.js
 - `--scale` makes smaller shops, for example `--scale 0.1` for a quick local run, and `--only <persona>` seeds one shop.
 - `cleanup.ts --names 'Bench %' --yes` removes the shops.
 - To start from a reset point, restore `production` from `i0-personas` or `i0-baseline` in the Neon console, or create a new branch from one of them.
+
+## I5 activity search
+
+**When:** 16 November 2026.  
+**Database:** Neon `airstock-bench`, on a branch `i5-activity-bench` created from `i0-baseline` for this run and deleted after it. Migrations 0016 to 0060, then 0061's tables and indexes. Same compute as I0 (0.25 to 2 CU).  
+**History:** the I0 history, unchanged: 1,000,000 events in six shops, 120,000 to 250,000 each.  
+**What runs:** the product's own search, `resolveActivityFilters` then `activityQuery` (packages/core/src/activity/query.ts), which `activity.list`, `search_activity`, and the activity export all use, as the runtime role in a read-only transaction with row-level security. Newest first, a page of 50 (51 rows read).
+
+### Shapes
+
+`scripts/bench/activity-filters.ts` draws each filter's value from each shop's own history, so a shape is a different search in every shop. Sixteen shapes combine two filters; four are the single-filter views the dashboard opens most (the first page, its ingestion check, one record's history, one request).
+
+Several shapes are worst cases on purpose:
+- the shop's busiest and quietest member;
+- its rarest action;
+- an action group and a source the shop never used;
+- its busiest and quietest warehouse;
+- a member limited to one warehouse, in the three shops that have one.
+
+### What changed, step by step
+
+Each step was timed warm on all twenty shapes; the column is the slowest shape's server p95.
+
+| Step | Slowest shape, warm server p95 | What it showed |
+| --- | --- | --- |
+| The new filters, no new indexes | 597 ms | Zero-match filters (an unused action group, an unused source) read the shop's whole history or all shops'. |
+| Six small filter indexes | 601 ms | Indexes alone did not help: for `action like 'inventory.transfer.%'` the planner guessed 700 matches and walked the primary key `(occurred_at, event_id)` through every shop's events, 100,000 pages. |
+| The shop-first key `(shop_id, occurred_at, event_id)` replaces that primary key and the shop/time index | 174 ms | No search can read another shop's events any more. |
+| No default partition | 167 ms | PostgreSQL now reads the months newest first and stops at a full page (an ordered Append instead of a Merge Append). This matters for actions new this month, which the older months do not have. |
+| Action groups resolved to the shop's own actions; unused sources stop the search; a source index | 144 ms | Exact action lists get real estimates; the never-used group fell from 601 ms to 1 ms. |
+| Scope and places resolved to literal location lists | see below | The busiest location with receipts fell from 3.0 s to 1.1 s cold. |
+
+### Results
+
+Warm: 6 runs per shop and shape. Cold: before each shape, for each shop, the compute was suspended through the Neon API, woken with `select 1` (not counted), and the search run once as `EXPLAIN (ANALYZE, BUFFERS)`, so the cold time is the search's own and its pages come from storage. Client times are from a laptop in Europe and include about 55 ms of round trips for the transaction (three of them).
+
+| Search | Warm server p50 | Warm server p95 | Warm client p95 | Cold server p95 | Cold client p95 | Pages read cold, max |
+| --- | --- | --- | --- | --- | --- | --- |
+| First page, no filter | 0.8 ms | 1.2 ms | 65 ms | 190 ms | 293 ms | 18 |
+| First page: the ingestion check | 1.7 ms | 1.8 ms | 57 ms | 114 ms | 259 ms | 4 |
+| One variant's history | 0.8 ms | 0.9 ms | 63 ms | 246 ms | 347 ms | 116 |
+| One bulk edit, every record (batch) | 0.7 ms | 0.8 ms | 61 ms | 250 ms | 364 ms | 16 |
+| Busiest member + last 30 days | 1.4 ms | 3.9 ms | 60 ms | 220 ms | 290 ms | 1,521 |
+| Quietest member + last 90 days | 6.0 ms | 9.1 ms | 63 ms | 296 ms | 390 ms | 2,384 |
+| Busiest member + outcome conflict | 1.7 ms | 1.8 ms | 61 ms | 251 ms | 370 ms | 775 |
+| One action + busiest member | 3.2 ms | 4.8 ms | 61 ms | 445 ms | 583 ms | 2,925 |
+| Action group `inventory.*` + failed | 2.6 ms | 3.0 ms | 77 ms | 207 ms | 328 ms | 550 |
+| Rarest action + phase outcome | 0.7 ms | 0.8 ms | 58 ms | 230 ms | 342 ms | 15 |
+| Group never used + last 90 days | 1.2 ms | 1.4 ms | 60 ms | 113 ms | 237 ms | 12 |
+| Source MCP + denied | 2.0 ms | 3.7 ms | 82 ms | 213 ms | 325 ms | 286 |
+| A source never used + phase outcome | 0.8 ms | 0.9 ms | 63 ms | 164 ms | 276 ms | 12 |
+| Integration + action group `catalog.*` | 6.1 ms | 7.0 ms | 82 ms | 370 ms | 529 ms | 2,839 |
+| Failed + last 7 days | 0.6 ms | 0.6 ms | 59 ms | 141 ms | 257 ms | 118 |
+| Busiest warehouse + last 7 days | 1.7 ms | 2.2 ms | 85 ms | 192 ms | 407 ms | 58 |
+| Quietest warehouse + succeeded | 2.0 ms | 2.4 ms | 87 ms | 163 ms | 340 ms | 157 |
+| Busiest location + receipts | 8.0 ms | 17 ms | 97 ms | 1,133 ms | 1,263 ms | 11,407 |
+| Limited member: `inventory.*` + last 30 days | 3.6 ms | 5.3 ms | 100 ms | 116 ms | 290 ms | 92 |
+| Limited member: busiest member + attempts | 11 ms | 211 ms | 382 ms | 5,123 ms | 5,275 ms | 33,687 |
+
+**Two filters over 1 million events (90 cold and 540 warm searches):**
+
+| | p50 | p95 | Max |
+| --- | --- | --- | --- |
+| Warm, server | 2.0 ms | 9.3 ms | |
+| Warm, client | | 88 ms | |
+| Cold, server | 163 ms | 534 ms | |
+| Cold, client | 287 ms | 685 ms | 5,275 ms |
+
+- **The target holds warm and cold:** p95 under 1 s for two filters. I0's cold worst cases took 1.6–8.5 s (one integration, rare outcomes, a batch); the matching searches here take 0.26–0.53 s cold. A batch is now one request's attempt ID, which imports carry too.
+- **Two of 90 cold searches took over 1 s:**
+  - **The busiest location with receipts, in one shop (1.3 s).** Most receipts in that shop are August's opening stock from the import; the planner picks the action index and reads them to find the 51 at that location.
+  - **"The busiest member's attempts" for a member limited to one warehouse, in the spare-parts shop (5.3 s).** That member is the shop's importer: 57,000 events in August, nearly all import records, and their only 565 attempts are in August. Any plan reads three months of the shop's history to reach them. The planner cannot see that correlation (the member is busy, attempts are 15% of events). Per-partition extended statistics, or an attempts index by actor, would fix it. Neither is worth adding before a real shop shows the pattern.
+- **Warm searches are 1–10 ms at the server.** The client times are round trips from the laptop; in the Worker they would be about 3 × 5 ms.
+
+### Storage
+
+After `VACUUM ANALYZE`, per event:
+
+| | I0 baseline | I5 |
+| --- | --- | --- |
+| Heap | 411 bytes | 411 bytes |
+| Target index | 124 | 124 |
+| Shop and time | 105 (shop/time index) | 59 (the new unique key, freshly built) |
+| Primary key `(occurred_at, event_id)` | 41 | none |
+| Attempt | 19 | 8 (partial: events with an attempt) |
+| Actor, action, source, operation, locations (GIN), problems | none | 8 + 8 + 7 + 5 + 4 + 0.2 |
+| **Total** | **699 bytes** | **633 bytes** |
+
+- **The new key was built in one pass, so its pages are full.** The old shop/time index grew with the inserts to 105 bytes. Expect the new key to grow toward that too: about 680 bytes per event, still under I0's 699, with six more indexes.
+- **The filter indexes stay small:** their keys leave out the time, so B-tree deduplication stores each shop and value once with a list of row pointers.
+
+### How to run it again
+
+```sh
+# Branch from i0-baseline (Neon console or API), then on the branch:
+DATABASE_OWNER_URL=… tsx packages/db/src/migrate-cli.ts
+
+# Warm only (about 5 minutes), or with --cold (about 45 minutes: one suspend per shop and shape).
+DATABASE_OWNER_URL=… DATABASE_APP_URL=… tsx scripts/bench/activity-filters.ts --n 6
+DATABASE_OWNER_URL=… DATABASE_APP_URL=… NEON_API_KEY=… NEON_PROJECT_ID=… NEON_ENDPOINT_ID=… \
+  tsx scripts/bench/activity-filters.ts --n 6 --cold --json activity-i5.json
+```
+
+`--only` takes shape keys (comma-separated), and `--explain` prints each plan. Delete the branch afterwards.

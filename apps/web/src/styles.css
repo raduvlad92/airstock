@@ -348,10 +348,12 @@ h3 {
   color: var(--muted);
 }
 
+/* Centred, so a badge beside buttons keeps its own height instead of stretching to theirs. */
 .chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
+  align-items: center;
 }
 
 .facts {
@@ -644,6 +646,14 @@ button.danger {
 
 .inline-form .field {
   flex: 1 1 11rem;
+}
+
+/*
+ * The row lines up at the bottom, so a hint under one field would lift its input above the
+ * others. Inline forms put their hint in a fine note instead, on a line of its own.
+ */
+.inline-form > .fine {
+  flex-basis: 100%;
 }
 
 .stack {

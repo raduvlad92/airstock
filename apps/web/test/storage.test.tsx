@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppInfoProvider } from '../src/context.tsx';
 import { routeTree } from '../src/router.tsx';
@@ -187,8 +187,12 @@ describe('warehouses page', () => {
     expect(screen.getByRole('button', { name: 'Move' })).toBeTruthy();
     // The second Edit button belongs to the location row.
     fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1]!);
-    fireEvent.change(await screen.findByLabelText('Code'), { target: { value: 'B-01' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // The add-location form has a Code field too; use the one in the row's edit form.
+    const save = await screen.findByRole('button', { name: 'Save' });
+    fireEvent.change(within(save.closest('form')!).getByLabelText('Code'), {
+      target: { value: 'B-01' },
+    });
+    fireEvent.click(save);
     await waitFor(() =>
       expect(calls.some((c) => c.path === `/shops/${SHOP}/locations/${LOC}`)).toBe(true),
     );

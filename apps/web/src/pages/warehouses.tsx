@@ -722,7 +722,12 @@ function EditLocation({
         <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
       </Field>
       <Field label="Code">
-        <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={50} />
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          maxLength={50}
+          placeholder="Optional, such as A-03"
+        />
       </Field>
       <label className="check">
         <input type="checkbox" checked={eligible} onChange={(e) => setEligible(e.target.checked)} />
@@ -772,7 +777,7 @@ function MoveLocation({
   };
   return (
     <form className="inline-form tree-form" onSubmit={submit}>
-      <Field label="Move inside" hint="Only while it and everything inside it hold no stock.">
+      <Field label="Move inside">
         <select value={parentId} onChange={(e) => setParentId(e.target.value)}>
           <option value="">Top level</option>
           {targets.map((l) => (
@@ -788,6 +793,9 @@ function MoveLocation({
       <button type="button" className="ghost" onClick={onDone}>
         Cancel
       </button>
+      <p className="fine">
+        A location can move only while it and everything inside it hold no stock.
+      </p>
       <ErrorNotice error={move.error} />
     </form>
   );
@@ -920,8 +928,13 @@ function CreateLocation({
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
         </Field>
-        <Field label="Code" hint="Optional, such as A-03.">
-          <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={50} />
+        <Field label="Code">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            maxLength={50}
+            placeholder="Optional, such as A-03"
+          />
         </Field>
         <button type="submit" disabled={create.isPending || !wh}>
           Add location

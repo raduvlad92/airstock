@@ -21,7 +21,8 @@
  *   Section 4), so the Worker estimate is the database time plus statements × 6 ms.
  *
  *   DATABASE_OWNER_URL=… DATABASE_APP_URL=… tsx scripts/bench/query-stock.ts \
- *     [--workers 10] [--per-worker 10] [--names 'Bench %'] [--json stock.json]
+ *     [--workers 10] [--per-worker 10] [--names 'Bench %'] [--json stock.json] \
+ *     [--phases commands,list,r5]
  *
  * Run it on the bench branch after seed-stock-activity.ts, never on staging. It writes: the
  * commands' own receipts, reservations, transfers, and counts, and the 200 lots (about 5 MB).
@@ -42,8 +43,11 @@ const { values: args } = parseArgs({
     only: { type: 'string', multiple: true, default: [] },
     'skip-shops': { type: 'boolean', default: false },
     json: { type: 'string' },
+    // Which parts to run: commands (the six commands and availability), list, r5 (200 lots).
+    phases: { type: 'string', default: 'commands,list,r5' },
   },
 });
+const want = (part: string) => args.phases.split(',').includes(part);
 const ownerUrl = process.env.DATABASE_OWNER_URL;
 const appUrl = process.env.DATABASE_APP_URL;
 if (!ownerUrl || !appUrl) throw new Error('Set DATABASE_OWNER_URL and DATABASE_APP_URL.');
@@ -269,7 +273,37 @@ console.log(`Round trip per statement: p50 ${rtt.toFixed(1)} ms; ${WORKERS} call
 const neonBefore = await neonUsage();
 const N = WORKERS * PER;
 
+// The inventory list: stock on hand by position (variant, location, condition, lot), 50 rows.
+async function inventoryList(shop: Shop) {
+  await phase(
+    'inventory list, 50 rows',
+    shop,
+    Array.from({ length: 10 }),
+    1,
+    ops.runStandardReport,
+    () => ({
+      report: 'stock_on_hand',
+      limit: 50,
+    }),
+  );
+  await phase(
+    'inventory list, 50 rows',
+    shop,
+    Array.from({ length: 30 }),
+    WORKERS,
+    ops.runStandardReport,
+    () => ({
+      report: 'stock_on_hand',
+      limit: 50,
+    }),
+  );
+}
+
 for (const shop of args['skip-shops'] ? [] : await shops()) {
+  if (!want('commands')) {
+    if (want('list')) await inventoryList(shop);
+    continue;
+  }
   // Leaf storage locations that are fulfillment-eligible, with their warehouse.
   const leaves = await oq<{ id: string; warehouse_id: string }>(
     `select l.id, l.warehouse_id from locations l
@@ -456,34 +490,12 @@ for (const shop of args['skip-shops'] ? [] : await shops()) {
     }),
   );
 
-  // The inventory list: stock on hand by position (variant, location, condition, lot), 50 rows.
-  await phase(
-    'inventory list, 50 rows',
-    shop,
-    Array.from({ length: 10 }),
-    1,
-    ops.runStandardReport,
-    () => ({
-      report: 'stock_on_hand',
-      limit: 50,
-    }),
-  );
-  await phase(
-    'inventory list, 50 rows',
-    shop,
-    Array.from({ length: 30 }),
-    WORKERS,
-    ops.runStandardReport,
-    () => ({
-      report: 'stock_on_hand',
-      limit: 50,
-    }),
-  );
+  if (want('list')) await inventoryList(shop);
 }
 
 // A reservation with earliest-expiry allocation on a variant with 200 lots (plan R5).
 const [food] = (await shops()).filter((s) => s.name === 'Bench Fuel Kitchen');
-if (food) {
+if (food && want('r5')) {
   const [v] = await oq<{ id: string; location_id: string; lots: number }>(
     `select p.variant_id as id, min(p.location_id::text)::uuid as location_id, count(distinct p.lot_id)::int as lots
      from inventory_positions p join locations l on l.shop_id = p.shop_id and l.id = p.location_id

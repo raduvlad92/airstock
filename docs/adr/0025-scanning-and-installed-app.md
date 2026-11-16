@@ -77,3 +77,6 @@ The remaining flows are plugged in as components, as planned above; none needed 
 - iOS ships `BarcodeDetector` with the formats above: zxing then stays only as the fallback.
 - zxing on the main thread makes the page stutter on older phones: move decoding to a dedicated worker (`worker-src 'self'` already allows it).
 - Offline counting or receiving is wanted (PRD 3.4 defers it): the service worker would then need a queue reconciled against stock versions.
+
+Update, 16 November 2026 (I6): **List on Shopify** in quick add is enabled when one Shopify store is connected. It lists the new item as a draft or active product after its pictures are uploaded, and remembers the choice per shop ([ADR 0038](0038-shopify-listings.md)).
+

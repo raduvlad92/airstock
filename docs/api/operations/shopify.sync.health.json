@@ -3,7 +3,7 @@
     "get": {
       "operationId": "shopify.sync.health",
       "summary": "Show whether Shopify is in step with Airstock",
-      "description": "Use this when someone asks whether Shopify is in sync, why a Shopify quantity looks wrong, or what the Shopify connection needs: per connected store, the last sync and push, pending pushes, quantity conflicts (with what Airstock and Shopify each show), Shopify order shortages, unmapped Shopify variants and locations, and the mappings. Read only. Not for stock levels themselves (use get_stock) or alerts in general (use stock_alerts).",
+      "description": "Use this when someone asks whether Shopify is in sync, why a Shopify quantity or listing looks wrong, or what the Shopify connection needs: per connected store, the last sync and push, pending pushes, quantity conflicts (with what Airstock and Shopify each show), Shopify order shortages, unmapped Shopify variants and locations, listings that failed or differ between the two (title, description, status, prices, pictures), and the mappings. Read only. Not for stock levels themselves (use get_stock) or alerts in general (use stock_alerts).",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "shopify.sync.health_viewed",
@@ -459,6 +459,95 @@
                             "additionalProperties": false
                           }
                         },
+                        "listings": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "pending": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "failed": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "productId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "error": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "productId",
+                                  "name",
+                                  "error"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "differences": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "productId": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "field": {
+                                    "type": "string"
+                                  },
+                                  "airstock": {},
+                                  "shopify": {},
+                                  "changedBy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "shopify",
+                                      "airstock"
+                                    ]
+                                  },
+                                  "detectedAt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "productId",
+                                  "name",
+                                  "field",
+                                  "airstock",
+                                  "shopify",
+                                  "changedBy",
+                                  "detectedAt"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "pending",
+                            "failed",
+                            "differences"
+                          ],
+                          "additionalProperties": false
+                        },
                         "mappings": {
                           "type": "object",
                           "properties": {
@@ -564,6 +653,7 @@
                         "shortages",
                         "unmappedVariants",
                         "unmappedLocations",
+                        "listings",
                         "mappings"
                       ],
                       "additionalProperties": false

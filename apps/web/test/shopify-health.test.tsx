@@ -62,6 +62,22 @@ const HEALTH = {
         ],
       },
       unmappedLocations: [{ id: '1002', name: 'Warehouse' }],
+      listings: {
+        count: 2,
+        pending: 0,
+        failed: [],
+        differences: [
+          {
+            productId: '0196f3a0-0000-7000-8000-0000000000e2',
+            name: 'Booster box',
+            field: 'title',
+            airstock: 'Booster box',
+            shopify: 'Booster box (Shopify)',
+            changedBy: 'shopify',
+            detectedAt: '2026-11-16T09:30:00.000Z',
+          },
+        ],
+      },
       mappings: { locations: [], variantCount: 1, variants: [] },
     },
   ],
@@ -108,7 +124,10 @@ describe('Shopify sync health', () => {
     expect(screen.getByText('shopify:order/1/line/2')).toBeTruthy();
     expect(screen.getByText(/Shopify locations not synced: Warehouse/)).toBeTruthy();
     expect(screen.getByText('Booster')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Push Airstock’s' }));
+    // A Shopify edit to a field Airstock owns, with both choices.
+    expect(screen.getByText('Booster box (Shopify)')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Take Shopify’s' })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Push Airstock’s' })[0]!);
     await waitFor(() => expect(screen.getByText('Resolved.')).toBeTruthy());
     const resolve = calls.find((c) => c.url.includes('/conflicts/resolve'))!;
     expect(resolve.body).toEqual({

@@ -53,6 +53,7 @@ export function SyncHealth({ shopId, connectionId }: { shopId: string; connectio
           <Conflicts shopId={shopId} health={h} />
           <Pending health={h} />
           <Shortages health={h} />
+          <Listings shopId={shopId} health={h} />
           <Unmapped health={h} onMap={setPrefill} />
           <Mappings
             key={prefill?.shopifyVariantId ?? ''}
@@ -435,5 +436,203 @@ function Mappings({
         ) : null}
       </form>
     </>
+  );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  title: 'Title',
+  description: 'Description',
+  status: 'Status',
+  prices: 'Prices',
+  pictures: 'Pictures',
+};
+
+function show(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 80)}…` : value;
+  if (typeof value === 'number') return `${value} picture(s)`;
+  if (Array.isArray(value)) return `${value.length} picture(s)`;
+  return Object.entries(value as Record<string, string>)
+    .map(([sku, price]) => `${sku} ${price}`)
+    .join(', ');
+}
+
+/** Listings (D21): failed publishes, and fields changed on the side that does not own them. */
+function Listings({ shopId, health: h }: { shopId: string; health: Health }) {
+  const queryClient = useQueryClient();
+  const resolve = useMutation({
+    mutationFn: (input: {
+      productId: string;
+      field: string;
+      choice: 'take_shopify' | 'push_airstock';
+    }) =>
+      command(
+        `/shops/${shopId}/shopify/connections/${h.connectionId}/listing-differences/resolve`,
+        {
+          connectionId: h.connectionId,
+          ...input,
+        },
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shop', shopId, 'shopify'] }),
+  });
+  const l = h.listings;
+  if (l.count === 0) return null;
+  return (
+    <>
+      <h4>Listings</h4>
+      <p className="fine">
+        {l.count} product(s) listed{l.pending ? `, ${l.pending} being published` : ''}.
+      </p>
+      {l.failed.length > 0 ? (
+        <p className="notice error">
+          Not published: {l.failed.map((f) => `${f.name} (${f.error ?? 'failed'})`).join('; ')}.
+          Airstock tries again with the next sync.
+        </p>
+      ) : null}
+      {l.differences.length > 0 ? (
+        <>
+          <p className="fine">
+            Changed on the side that does not own the field, so not copied across. Choose which is
+            right.
+          </p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Field</th>
+                  <th>Airstock</th>
+                  <th>Shopify</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {l.differences.map((d) => (
+                  <tr key={`${d.productId}:${d.field}`}>
+                    <td>{d.name}</td>
+                    <td>
+                      {FIELD_LABELS[d.field] ?? d.field}
+                      <span className="fine">
+                        {' '}
+                        (changed in {d.changedBy === 'shopify' ? 'Shopify' : 'Airstock'})
+                      </span>
+                    </td>
+                    <td>{show(d.airstock)}</td>
+                    <td>{show(d.shopify)}</td>
+                    <td className="actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={resolve.isPending}
+                        onClick={() =>
+                          resolve.mutate({
+                            productId: d.productId,
+                            field: d.field,
+                            choice: 'push_airstock',
+                          })
+                        }
+                      >
+                        Push Airstock’s
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={resolve.isPending || d.field === 'pictures'}
+                        onClick={() =>
+                          resolve.mutate({
+                            productId: d.productId,
+                            field: d.field,
+                            choice: 'take_shopify',
+                          })
+                        }
+                      >
+                        Take Shopify’s
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ErrorNotice error={resolve.error} />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** The product page's Shopify tab: list a product created here (D21). */
+export function ShopifyListingTab({
+  shopId,
+  item,
+  canWrite,
+}: {
+  shopId: string;
+  item: { product: { id: string; status: string } };
+  canWrite: boolean;
+}) {
+  const stores = useQuery({
+    queryKey: ['shop', shopId, 'shopify'],
+    queryFn: () =>
+      api<Out<typeof ops.listShopifyConnections>>(`/shops/${shopId}/shopify/connections`),
+  });
+  const connected = (stores.data?.connections ?? []).filter((c) => c.status === 'active');
+  const [connectionId, setConnectionId] = useState('');
+  const [status, setStatus] = useState<'draft' | 'active'>('draft');
+  const list = useMutation({
+    mutationFn: () =>
+      command<Out<typeof ops.createShopifyListing>>(
+        `/shops/${shopId}/products/${item.product.id}/shopify-listing`,
+        {
+          productId: item.product.id,
+          connectionId: connectionId || connected[0]?.connectionId,
+          status,
+        },
+      ),
+  });
+  if (stores.isPending) return <Loading />;
+  if (connected.length === 0) {
+    return <p className="fine">No Shopify store is connected (Settings → Integrations).</p>;
+  }
+  return (
+    <section className="subsection">
+      <p className="fine">
+        List this product in Shopify with its variants, SKUs, barcodes, prices, description, and
+        pictures. Airstock then owns those fields: changes here are pushed, and changes made in
+        Shopify show under Sync health. Shopify shows Airstock’s availability.
+      </p>
+      {connected.length > 1 ? (
+        <Field label="Store">
+          <select value={connectionId} onChange={(e) => setConnectionId(e.target.value)}>
+            {connected.map((c) => (
+              <option key={c.connectionId} value={c.connectionId}>
+                {c.shopDomain}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      <Field label="Listing status">
+        <select value={status} onChange={(e) => setStatus(e.target.value as 'draft' | 'active')}>
+          <option value="draft">Draft</option>
+          <option value="active">Active (for sale)</option>
+        </select>
+      </Field>
+      <button
+        type="button"
+        disabled={!canWrite || list.isPending || item.product.status === 'archived'}
+        onClick={() => list.mutate()}
+      >
+        List on Shopify
+      </button>
+      <ErrorNotice error={list.error} />
+      {list.data ? (
+        <Notice tone="ok">
+          {list.data.state === 'published'
+            ? `Listing status set to ${list.data.status}.`
+            : `Listing as ${list.data.status}: Shopify has it within a minute.`}
+        </Notice>
+      ) : null}
+    </section>
   );
 }

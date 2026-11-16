@@ -1,0 +1,119 @@
+{
+  "/api/v1/shops/{shopId}/shopify/connections/{connectionId}/listing-differences/resolve": {
+    "post": {
+      "operationId": "shopify.listing_differences.resolve",
+      "summary": "Resolve a listing difference with Shopify",
+      "description": "Use this when a product’s storefront field (title, description, status, prices, pictures) differs between Airstock and Shopify because the side that does not own it changed it (a difference in sync health), and the person has decided which is right. choice \"take_shopify\" copies Shopify’s value into Airstock; \"push_airstock\" writes Airstock’s value to Shopify. Pictures can only be pushed. Ask the person before calling.",
+      "x-permission": "catalog.write",
+      "x-connection-scope": "catalog:write",
+      "x-audit-action": "shopify.listing_difference.resolved",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "connectionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "productId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "title",
+                    "description",
+                    "status",
+                    "prices",
+                    "pictures"
+                  ]
+                },
+                "choice": {
+                  "type": "string",
+                  "enum": [
+                    "take_shopify",
+                    "push_airstock"
+                  ]
+                }
+              },
+              "required": [
+                "productId",
+                "field",
+                "choice"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "enum": [
+                      "title",
+                      "description",
+                      "status",
+                      "prices",
+                      "pictures"
+                    ]
+                  },
+                  "choice": {
+                    "type": "string",
+                    "enum": [
+                      "take_shopify",
+                      "push_airstock"
+                    ]
+                  }
+                },
+                "required": [
+                  "field",
+                  "choice"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,8 @@
-import { uuidv7 } from '@airstock/core';
+import { type ShopifyPushPayload, uuidv7 } from '@airstock/core';
 import {
   connectedStore,
   pushAvailability,
+  pushConnection,
   runJob,
   type ShopifyVariant,
   type SyncDeps,
@@ -193,16 +194,21 @@ async function runQueuedJobs() {
 const handledOutbox = new Set<string>();
 async function flushOutbox(shopId: string) {
   const rows = (
-    await ownerQuery<{ id: string; payload: object }>(
-      `select id, payload from outbox_events
-       where shop_id = $1 and topic = 'inventory.availability_changed' order by created_at, id`,
+    await ownerQuery<{ id: string; topic: string; payload: object }>(
+      `select id, topic, payload from outbox_events
+       where shop_id = $1 and topic in ('inventory.availability_changed', 'shopify.levels.push')
+       order by created_at, id`,
       [shopId],
     )
   ).filter((r) => !handledOutbox.has(r.id));
   const outcomes = [];
   for (const row of rows) {
     handledOutbox.add(row.id);
-    outcomes.push(...(await pushAvailability(deps(), shopId, row.payload)));
+    outcomes.push(
+      ...(row.topic === 'shopify.levels.push'
+        ? await pushConnection(deps(), shopId, row.payload as ShopifyPushPayload)
+        : await pushAvailability(deps(), shopId, row.payload)),
+    );
   }
   return outcomes.map((o) => o.outcome);
 }

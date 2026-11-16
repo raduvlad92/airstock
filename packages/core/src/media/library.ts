@@ -96,7 +96,7 @@ export interface MediaRow {
   kind: 'image' | 'document';
   file_name: string;
   content_type: string;
-  size_bytes: string | number;
+  size_bytes: string | number | null;
   sha256: string;
   width: number | null;
   height: number | null;
@@ -104,10 +104,28 @@ export interface MediaRow {
     Record<DerivativePart, { contentType: string; size: number; width: number; height: number }>
   >;
   created_at: Date;
+  /** A picture referenced by its Shopify URL (D17): no R2 objects, shown from Shopify's CDN. */
+  external_url: string | null;
 }
 
 export const MEDIA_COLUMNS =
-  'm.id, m.kind, m.file_name, m.content_type, m.size_bytes, m.sha256, m.width, m.height, m.derivatives, m.created_at';
+  'm.id, m.kind, m.file_name, m.content_type, m.size_bytes, m.sha256, m.width, m.height, m.derivatives, m.created_at, m.external_url';
+
+/** Pixel width asked of Shopify's CDN for each part (it scales on request). */
+const EXTERNAL_WIDTHS: Record<DerivativePart, number> = { thumbnail: 320, display: 1600 };
+
+function externalLink(row: MediaRow, part: DerivativePart): ImageLink {
+  const width = Math.min(EXTERNAL_WIDTHS[part], row.width ?? EXTERNAL_WIDTHS[part]);
+  const url = new URL(row.external_url!);
+  url.searchParams.set('width', String(width));
+  return {
+    url: url.href,
+    contentType: row.content_type,
+    size: 0,
+    width,
+    height: row.width && row.height ? Math.round((row.height * width) / row.width) : width,
+  };
+}
 
 export interface LinkRow {
   id: string;
@@ -142,6 +160,7 @@ async function derivativeLink(
   row: MediaRow,
   part: DerivativePart,
 ): Promise<ImageLink | null> {
+  if (row.kind === 'image' && row.external_url) return externalLink(row, part);
   const d = row.derivatives[part];
   if (row.kind !== 'image' || !d) return null;
   const signed = ctx.media
@@ -172,7 +191,7 @@ export async function renderMedia(
       kind: r.kind,
       fileName: r.file_name,
       contentType: r.content_type,
-      size: Number(r.size_bytes),
+      size: Number(r.size_bytes ?? 0),
       sha256: r.sha256,
       width: r.width,
       height: r.height,

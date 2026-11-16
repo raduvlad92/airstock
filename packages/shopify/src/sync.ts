@@ -8,8 +8,9 @@ import {
   normalizeSku,
   ops,
   type PipelineDeps,
+  salesMaps,
+  shopifyChannel,
   shopifyConnectorCaller,
-  uuidv7,
 } from '@airstock/core';
 import type { Tx } from '@airstock/db';
 import {
@@ -389,9 +390,12 @@ export interface OrderResult {
 }
 
 /**
- * Turns an order's lines into reservations as the Shopify connector (plan Section 8.2, step 4).
- * The idempotency key comes from the connection and the line, so a repeated webhook, job, or
- * catch-up reserves once. Each line also lowers Airstock's record of Shopify's quantity once,
+ * Turns an order's lines into reservations as the Shopify connector (ADR 0008). A line of a pack
+ * reserves pack × quantity base units; a line of a bundle reserves its components. Lines are
+ * allocated by the connection's allocation rule (its mapped warehouses and locations, D3), and
+ * what is short is recorded as a shortage: Shopify already accepted the order (D6). The
+ * idempotency key comes from the connection and the line, so a repeated webhook, job, or catch-up
+ * reserves once. Each line also lowers Airstock's record of Shopify's quantity for its item once,
  * because Shopify lowered its own quantity when it accepted the order.
  */
 export async function processOrder(
@@ -407,25 +411,17 @@ export async function processOrder(
       'select status, installed_by_membership_id from shopify_connections where id = $1',
       [connectionId],
     );
-    const [locationMap] = await tx.query<{ shopify_location_id: string; location_id: string }>(
-      'select shopify_location_id, location_id from shopify_location_maps where connection_id = $1 limit 1',
+    const locationMaps = await tx.query<{ shopify_location_id: string }>(
+      'select shopify_location_id from shopify_location_maps where connection_id = $1',
       [connectionId],
     );
-    const variantMaps = await tx.query<{
-      shopify_variant_id: string;
-      shopify_inventory_item_id: string;
-      variant_id: string;
-    }>(
-      `select shopify_variant_id, shopify_inventory_item_id, variant_id from shopify_variant_maps
-       where connection_id = $1 and shopify_variant_id = any($2::text[])`,
-      [connectionId, variantIds],
-    );
+    const maps = await salesMaps(tx, connectionId, variantIds);
     const done = await tx.query<{ shopify_line_id: string }>(
       `select shopify_line_id from shopify_order_lines
        where connection_id = $1 and shopify_line_id = any($2::text[])`,
       [connectionId, lineIds],
     );
-    return { connection, locationMap, variantMaps, done };
+    return { connection, locationMaps, maps, done };
   });
   if (state.connection?.status !== 'active') throw new NotConnectedError();
   const caller = shopifyConnectorCaller(
@@ -433,41 +429,44 @@ export async function processOrder(
     connectionId,
     state.connection.installed_by_membership_id,
   );
-  const maps = new Map(state.variantMaps.map((m) => [m.shopify_variant_id, m]));
   const done = new Set(state.done.map((d) => d.shopify_line_id));
   const result: OrderResult = { reserved: 0, shortage: 0, unmapped: 0, alreadyProcessed: 0 };
+  // With one mapped Shopify location, that is where Shopify committed the units.
+  const lineLocation =
+    state.locationMaps.length === 1 ? state.locationMaps[0]!.shopify_location_id : null;
 
   for (const line of order.lines) {
     if (done.has(line.lineId)) {
       result.alreadyProcessed++;
       continue;
     }
-    const map = line.variantId ? maps.get(line.variantId) : undefined;
-    const location = state.locationMap;
+    const map = line.variantId ? state.maps.get(line.variantId) : undefined;
     let outcome: 'reserved' | 'shortage' | 'unmapped' = 'unmapped';
     let reservationId: string | null = null;
-    if (map && location && line.quantity > 0) {
-      try {
-        const reserved = await execute(deps, ops.reserveStock, {
-          caller,
-          shopId,
-          idempotencyKey: `shopify:${connectionId}:line:${line.lineId}`,
-          input: {
-            variantId: map.variant_id,
-            quantity: String(line.quantity),
-            locationId: location.location_id,
-            purpose: 'external_order',
-            externalRef: `shopify:order/${order.orderId}/line/${line.lineId}`,
-          },
-        });
-        outcome = 'reserved';
-        reservationId = (reserved.result as { reservationId: string }).reservationId;
-      } catch (error) {
-        // Shopify already accepted the order. The shortage is recorded on the line and in the
-        // failed reservation's audit event; shortage reservations (A29) arrive in Phase 3.
-        if (!(error instanceof AppError) || error.code !== 'insufficient_stock') throw error;
-        outcome = 'shortage';
-      }
+    if (map && state.locationMaps.length > 0 && line.quantity > 0) {
+      const reserved = await execute(deps, ops.reserveStock, {
+        caller,
+        shopId,
+        idempotencyKey: `shopify:${connectionId}:line:${line.lineId}`,
+        input: {
+          variantId: map.variantId,
+          quantity: map.bundle ? String(line.quantity) : multiplyUnits(line.quantity, map.perItem),
+          purpose: 'external_order',
+          externalRef: `shopify:order/${order.orderId}/line/${line.lineId}`,
+          channel: shopifyChannel(connectionId),
+          allowShortage: true,
+        },
+      });
+      const r = reserved.result as {
+        reservationId: string;
+        shortage: string;
+        bundle: { components: Array<{ shortage: string }> } | null;
+      };
+      reservationId = r.reservationId;
+      const short = r.bundle
+        ? r.bundle.components.some((c) => Number(c.shortage) > 0)
+        : Number(r.shortage) > 0;
+      outcome = short ? 'shortage' : 'reserved';
     }
     const [inserted] = await deps.db.transaction({ shopId, userId: null }, (tx) =>
       tx.query<{ inserted: boolean }>(
@@ -492,8 +491,8 @@ export async function processOrder(
           line.quantity,
           outcome,
           reservationId,
-          map?.shopify_inventory_item_id ?? null,
-          outcome === 'unmapped' ? null : (location?.shopify_location_id ?? null),
+          map?.inventoryItemId ?? null,
+          outcome === 'unmapped' ? null : lineLocation,
           order.createdAt,
         ],
       ),
@@ -504,228 +503,14 @@ export async function processOrder(
   return result;
 }
 
-// Availability push -----------------------------------------------------------------------
-
-interface PushPair {
-  connectionId: string;
-  variantId: string;
-  locationId: string;
-  inventoryItemId: string;
-  shopifyLocationId: string;
-}
-
-export type PushOutcome = 'pushed' | 'unchanged' | 'conflict' | 'not_stocked';
-
-/** Payloads of `inventory.availability_changed` outbox events. */
-export interface AvailabilityChanged {
-  variantId?: string;
-  locationIds?: string[];
-  positionIds?: string[];
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * Pushes Airstock's availability to every mapped Shopify level an outbox event touches
- * (plan Section 8.2, step 5). Shops without a Shopify connection cost one query.
- */
-export async function pushAvailability(
-  deps: SyncDeps,
-  shopId: string,
-  payload: AvailabilityChanged,
-): Promise<Array<PushPair & { outcome: PushOutcome }>> {
-  const variantId = payload.variantId && UUID.test(payload.variantId) ? payload.variantId : null;
-  const locationIds = (payload.locationIds ?? []).filter((id) => UUID.test(id));
-  const positionIds = (payload.positionIds ?? []).filter((id) => UUID.test(id));
-  const pairs = await deps.db.transaction({ shopId, userId: null, readOnly: true }, (tx) =>
-    tx.query<{
-      connection_id: string;
-      variant_id: string;
-      location_id: string;
-      shopify_inventory_item_id: string;
-      shopify_location_id: string;
-    }>(
-      `with targets as (
-         select $1::uuid as variant_id, l as location_id from unnest($2::uuid[]) l where $1::uuid is not null
-         union
-         select p.variant_id, p.location_id from inventory_positions p where p.id = any($3::uuid[]))
-       select distinct vm.connection_id, vm.variant_id, lm.location_id, vm.shopify_inventory_item_id,
-         lm.shopify_location_id
-       from targets t
-       join shopify_variant_maps vm on vm.variant_id = t.variant_id
-       join shopify_location_maps lm on lm.shop_id = vm.shop_id and lm.connection_id = vm.connection_id
-         and lm.location_id = t.location_id
-       join shopify_connections c on c.shop_id = vm.shop_id and c.id = vm.connection_id
-         and c.status = 'active'
-       order by vm.connection_id, vm.variant_id`,
-      [variantId, locationIds, positionIds],
-    ),
-  );
-  const out: Array<PushPair & { outcome: PushOutcome }> = [];
-  const stores = new Map<string, ConnectedStore>();
-  for (const row of pairs) {
-    let store = stores.get(row.connection_id);
-    if (!store) {
-      store = await connectedStore(deps, shopId, row.connection_id);
-      stores.set(row.connection_id, store);
-    }
-    const pair: PushPair = {
-      connectionId: row.connection_id,
-      variantId: row.variant_id,
-      locationId: row.location_id,
-      inventoryItemId: row.shopify_inventory_item_id,
-      shopifyLocationId: row.shopify_location_id,
-    };
-    out.push({ ...pair, outcome: await pushLevel(deps, store, pair) });
-  }
-  return out;
-}
-
-/** Airstock's sellable availability for a variant at one location, as Shopify's integer. */
-async function availableAt(tx: Tx, variantId: string, locationId: string): Promise<number> {
-  const [row] = await tx.query<{ available: string }>(
-    `select coalesce(sum(sp.available), 0)::text as available
-     from stock_positions(array[$1::uuid]) sp where sp.location_id = $2`,
-    [variantId, locationId],
-  );
-  return Math.min(1_000_000_000, Math.max(0, Math.floor(Number(row?.available ?? '0'))));
-}
-
-const LEVEL_KEY = `connection_id = $1 and shopify_inventory_item_id = $2 and shopify_location_id = $3`;
-
-function syncEvent(
-  store: ConnectedStore,
-  pair: PushPair,
-  fields: Pick<AuditEvent, 'action' | 'outcome'> & Partial<AuditEvent>,
-): AuditEvent {
-  return auditEvent(
-    {
-      shopId: store.shopId,
-      caller: store.caller,
-      requestId: uuidv7(),
-      attemptId: null,
-      idempotencyKey: null,
-    },
-    {
-      phase: 'outcome',
-      target_type: 'variant',
-      target_id: pair.variantId,
-      location_ids: [pair.locationId],
-      external_ref: `shopify:inventory_item/${pair.inventoryItemId}/location/${pair.shopifyLocationId}`,
-      ...fields,
-    },
-  );
-}
-
-/**
- * Sets Shopify's available quantity for one item at one location with compare-and-set.
- *
- * Shopify lowers its own quantity when it accepts an order, so a refused write usually means an
- * order Airstock has not processed yet, not an edit. Before calling it a conflict, the push
- * processes any such orders and tries again; only a difference that remains unexplained is
- * recorded as a conflict, and Shopify is left untouched (plan P1).
- */
-export async function pushLevel(
-  deps: SyncDeps,
-  store: ConnectedStore,
-  pair: PushPair,
-): Promise<PushOutcome> {
-  const key = [pair.connectionId, pair.inventoryItemId, pair.shopifyLocationId];
-  const { shopId } = store;
-  // Recorded on the push event, so the P1 path is visible in the activity history.
-  let refusedWrites = 0;
-  let ordersCaughtUp = 0;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    // The level row stays locked while Shopify is called, so pushes and order lines for the
-    // same level apply one at a time.
-    const step = await deps.db.transaction({ shopId, userId: null }, async (tx) => {
-      await tx.query(
-        `insert into shopify_inventory_levels (shop_id, connection_id, shopify_inventory_item_id,
-           shopify_location_id) values (app_shop_id(), $1, $2, $3) on conflict do nothing`,
-        key,
-      );
-      const [level] = await tx.query<{
-        expected_available: number | null;
-        expected_as_of: Date | null;
-      }>(
-        `select expected_available, expected_as_of from shopify_inventory_levels where ${LEVEL_KEY} for update`,
-        key,
-      );
-      if (!level || level.expected_available === null) return { kind: 'init' as const };
-      const from = level.expected_available;
-      const target = await availableAt(tx, pair.variantId, pair.locationId);
-      if (target === from) return { kind: 'unchanged' as const };
-      const set = await store.admin.setAvailable({
-        inventoryItemId: pair.inventoryItemId,
-        locationId: pair.shopifyLocationId,
-        quantity: target,
-        from,
-        idempotencyKey: uuidv7(),
-        reference: `airstock://shops/${shopId}/shopify-connections/${pair.connectionId}`,
-      });
-      if (set.kind === 'stale') {
-        return { kind: 'stale' as const, from, target, asOf: level.expected_as_of };
-      }
-      // now() is when this transaction began, before Shopify accepted the write: an order that
-      // Shopify created after it is not in `target` and still lowers the record.
-      await tx.query(
-        `update shopify_inventory_levels set expected_available = $4, expected_as_of = now(),
-           last_pushed_available = $4, last_pushed_at = now(), conflict_at = null,
-           conflict_shopify_available = null, updated_at = now()
-         where ${LEVEL_KEY}`,
-        [...key, target],
-      );
-      await tx.query(INSERT_AUDIT_EVENTS_SQL, [
-        JSON.stringify([
-          syncEvent(store, pair, {
-            action: 'shopify.inventory.pushed',
-            outcome: 'succeeded',
-            changes: {
-              available: { from, to: target },
-              ...(refusedWrites > 0 ? { refusedWrites, ordersCaughtUp } : {}),
-            },
-          }),
-        ]),
-      ]);
-      return { kind: 'pushed' as const };
-    });
-
-    if (step.kind === 'pushed' || step.kind === 'unchanged') return step.kind;
-
-    if (step.kind === 'init') {
-      // First push for this level: process orders Shopify already counted, then read Shopify's
-      // quantity as the starting point.
-      ordersCaughtUp += await catchUpOrders(deps, store, store.createdAt);
-      const readAt = new Date();
-      const actual = await store.admin.getAvailable(pair.inventoryItemId, pair.shopifyLocationId);
-      if (actual === null) {
-        deps.logger?.error('shopify_item_not_stocked', { ...pair });
-        return 'not_stocked';
-      }
-      await deps.db.transaction({ shopId, userId: null }, (tx) =>
-        tx.query(
-          `update shopify_inventory_levels set expected_available = $4, expected_as_of = $5,
-             updated_at = now()
-           where ${LEVEL_KEY} and expected_available is null`,
-          [...key, actual, readAt.toISOString()],
-        ),
-      );
-      continue;
-    }
-
-    // Stale: explain the difference with orders Airstock has not processed yet (plan P1).
-    const since = new Date(
-      Math.max(store.createdAt.getTime(), (step.asOf ? new Date(step.asOf).getTime() : 0) - 60_000),
-    );
-    refusedWrites++;
-    const processed = await catchUpOrders(deps, store, since);
-    ordersCaughtUp += processed;
-    if (processed > 0) continue;
-    const actual = await store.admin.getAvailable(pair.inventoryItemId, pair.shopifyLocationId);
-    await recordConflict(deps, store, pair, { expected: step.from, airstock: step.target, actual });
-    return 'conflict';
-  }
-  return 'conflict';
+/** Shopify items times base units per item, exactly (a pack of 6 sold twice reserves 12). */
+function multiplyUnits(quantity: number, perItem: string): string {
+  const [whole, fraction = ''] = perItem.split('.');
+  const digits = fraction.replace(/0+$/, '');
+  const scaled = BigInt(`${whole}${digits}`) * BigInt(quantity);
+  if (!digits) return scaled.toString();
+  const text = scaled.toString().padStart(digits.length + 1, '0');
+  return `${text.slice(0, -digits.length)}.${text.slice(-digits.length)}`;
 }
 
 /** Processes orders Shopify created since `since` that Airstock has not seen. */
@@ -742,36 +527,6 @@ export async function catchUpOrders(
     processed += result.reserved + result.shortage;
   }
   return processed;
-}
-
-async function recordConflict(
-  deps: SyncDeps,
-  store: ConnectedStore,
-  pair: PushPair,
-  values: { expected: number; airstock: number; actual: number | null },
-): Promise<void> {
-  const key = [pair.connectionId, pair.inventoryItemId, pair.shopifyLocationId];
-  await deps.db.transaction({ shopId: store.shopId, userId: null }, async (tx) => {
-    const changed = await tx.query(
-      `update shopify_inventory_levels set conflict_shopify_available = $4,
-         conflict_at = now(), updated_at = now()
-       where ${LEVEL_KEY} and (conflict_at is null or conflict_shopify_available is distinct from $4)
-       returning 1`,
-      [...key, values.actual],
-    );
-    // One event per new difference, not one per retry.
-    if (changed.length === 0) return;
-    await tx.query(INSERT_AUDIT_EVENTS_SQL, [
-      JSON.stringify([
-        syncEvent(store, pair, {
-          action: 'shopify.inventory.conflict',
-          outcome: 'conflict',
-          changes: values,
-          reason: 'Shopify’s quantity differs from Airstock’s record and no order explains it.',
-        }),
-      ]),
-    ]);
-  });
 }
 
 // Mapping by SKU --------------------------------------------------------------------------

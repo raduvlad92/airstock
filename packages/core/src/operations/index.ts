@@ -37,6 +37,8 @@ import { purchasingOperations } from './purchasing.ts';
 import { reorderOperations } from './reorder.ts';
 import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
+import { shopifyMappingOperations } from './shopify-mapping.ts';
+import { shopifyOnboardingCallbacks, shopifyOnboardingOperations } from './shopify-onboarding.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
 import { suppliersOperations } from './suppliers.ts';
@@ -75,6 +77,8 @@ export const operations: readonly AnyOperation[] = [
   ...reorderOperations,
   ...returnsOperations,
   ...shopifyOperations,
+  ...shopifyMappingOperations,
+  ...shopifyOnboardingOperations,
   ...shopsOperations,
   ...storageOperations,
   ...suppliersOperations,
@@ -90,7 +94,10 @@ export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
  * Integration callbacks: run through the pipeline like any operation, but only from the
  * Shopify install flow and verified webhooks. No REST route or MCP tool (plan Section 5.4).
  */
-export const integrationCallbacks: readonly AnyOperation[] = [...shopifyIntegrationCallbacks];
+export const integrationCallbacks: readonly AnyOperation[] = [
+  ...shopifyIntegrationCallbacks,
+  ...shopifyOnboardingCallbacks,
+];
 
 export * from './access.ts';
 export * from './activity.ts';
@@ -122,6 +129,8 @@ export * from './purchasing.ts';
 export * from './reorder.ts';
 export * from './returns.ts';
 export * from './shopify.ts';
+export * from './shopify-mapping.ts';
+export * from './shopify-onboarding.ts';
 export * from './shops.ts';
 export * from './storage.ts';
 export * from './suppliers.ts';

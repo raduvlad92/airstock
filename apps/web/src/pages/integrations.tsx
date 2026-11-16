@@ -16,11 +16,11 @@ import {
   PageHeader,
 } from '../components/ui.tsx';
 import { can, useAppInfo, useShopContext } from '../context.tsx';
+import { ShopifyCard } from './shopify.tsx';
 
 type Connections = Out<typeof ops.listConnections>;
 type Credentials = Out<typeof ops.listApiCredentials>;
 type ShopifyConnections = Out<typeof ops.listShopifyConnections>;
-type Locations = Out<typeof ops.listLocations>;
 
 export const SCOPE_LABELS: Record<(typeof CONNECTION_SCOPES)[number], string> = {
   'shop:read': 'See the shop and your role',
@@ -306,11 +306,6 @@ export function ShopifyPage() {
     queryFn: () => api<ShopifyConnections>(`/shops/${shopId}/shopify/connections`),
     enabled: allowed,
   });
-  const locations = useQuery({
-    queryKey: ['shop', shopId, 'locations'],
-    queryFn: () => api<Locations>(`/shops/${shopId}/locations`),
-    enabled: allowed,
-  });
   if (!allowed)
     return <Notice>You need the connections.manage permission to manage Shopify.</Notice>;
   const connect = (e: FormEvent) => {
@@ -321,15 +316,10 @@ export function ShopifyPage() {
   return (
     <>
       {search.connected ? <Notice tone="ok">Shopify store connected. Map it below.</Notice> : null}
-      <ErrorNotice error={connections.error ?? locations.error} />
+      <ErrorNotice error={connections.error} />
       {connections.isPending ? <Loading /> : null}
       {connections.data?.connections.map((c) => (
-        <ShopifyCard
-          key={c.connectionId}
-          shopId={shopId}
-          connection={c}
-          locations={locations.data?.locations ?? []}
-        />
+        <ShopifyCard key={c.connectionId} shopId={shopId} connection={c} />
       ))}
       <Card
         title={
@@ -349,143 +339,10 @@ export function ShopifyPage() {
           <button type="submit">Connect store</button>
         </form>
         <p className="fine">
-          Shopify asks you to approve access to products, inventory, locations, and orders. Airstock
-          never reads customer details.
+          Shopify asks you to approve access to products, inventory, locations, orders,
+          fulfillments, and returns. Airstock never reads customer names or addresses.
         </p>
       </Card>
     </>
-  );
-}
-
-interface MapResult {
-  variantsMapped: number;
-  unmatchedShopify: string[];
-  untrackedShopify: string[];
-}
-
-function ShopifyCard({
-  shopId,
-  connection: c,
-  locations,
-}: {
-  shopId: string;
-  connection: ShopifyConnections['connections'][number];
-  locations: Locations['locations'];
-}) {
-  const queryClient = useQueryClient();
-  const stockable = locations.filter((l) => l.holdsStockAllowed && l.status === 'active');
-  const [shopifyLocationId, setShopifyLocationId] = useState(
-    c.locationMap?.shopifyLocationId ?? c.shopifyLocations.find((l) => l.active)?.id ?? '',
-  );
-  const [locationId, setLocationId] = useState(
-    c.locationMap?.locationId ?? stockable[0]?.locationId ?? '',
-  );
-  const map = useMutation({
-    mutationFn: async (): Promise<MapResult> => {
-      const res = await fetch(`/shopify/connections/${c.connectionId}/map`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-airstock-request': '1' },
-        body: JSON.stringify({ shopId, locationId, shopifyLocationId }),
-      });
-      const body = (await res.json()) as Record<string, unknown>;
-      if (!res.ok) {
-        throw new ApiError(
-          res.status,
-          String(body.code ?? 'http_error'),
-          String(body.title ?? 'Failed'),
-          body,
-        );
-      }
-      return body as unknown as MapResult;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shop', shopId, 'shopify'] }),
-  });
-  const mappedLabel = c.locationMap
-    ? `${c.shopifyLocations.find((l) => l.id === c.locationMap?.shopifyLocationId)?.name ?? c.locationMap.shopifyLocationId} → ${
-        stockable.find((l) => l.locationId === c.locationMap?.locationId)?.path ?? 'a location'
-      }`
-    : 'Not mapped yet';
-  return (
-    <Card
-      title={c.shopDomain}
-      actions={<Badge tone={c.status === 'active' ? 'ok' : 'muted'}>{c.status}</Badge>}
-    >
-      <dl className="facts">
-        <dt>Location</dt>
-        <dd>{mappedLabel}</dd>
-        <dt>Variants mapped</dt>
-        <dd>{c.variantsMapped}</dd>
-        <dt>Webhooks</dt>
-        <dd>
-          {c.webhooks.length
-            ? c.webhooks
-                .map((w) => `${w.topic} ${w.status}${w.message ? ` (${w.message})` : ''}`)
-                .join(', ')
-            : 'none'}
-        </dd>
-        <dt>Last webhook</dt>
-        <dd>{formatDateTime(c.lastWebhookAt)}</dd>
-      </dl>
-      {c.conflicts ? (
-        <p className="notice error">
-          {c.conflicts} quantity difference(s) with Shopify that no order explains. Airstock left
-          Shopify unchanged; map again to take Shopify's current quantity as the starting point.
-        </p>
-      ) : null}
-      {c.status === 'active' ? (
-        <form
-          className="inline-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            map.mutate();
-          }}
-        >
-          <Field label="Shopify location">
-            <select
-              value={shopifyLocationId}
-              onChange={(e) => setShopifyLocationId(e.target.value)}
-            >
-              {c.shopifyLocations
-                .filter((l) => l.active)
-                .map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Field label="Airstock location">
-            <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-              {stockable.map((l) => (
-                <option key={l.locationId} value={l.locationId}>
-                  {l.path}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <button type="submit" disabled={map.isPending}>
-            {c.locationMap ? 'Map again by SKU' : 'Map by SKU'}
-          </button>
-        </form>
-      ) : null}
-      <p className="fine">
-        Variants are matched by SKU. Airstock then sets Shopify's available quantity at that
-        location to Airstock's availability and keeps it in step.
-      </p>
-      <ErrorNotice error={map.error} />
-      {map.data ? (
-        <Notice tone="ok">
-          Mapped {map.data.variantsMapped} variant(s)
-          {map.data.unmatchedShopify.length
-            ? `; no match for ${map.data.unmatchedShopify.join(', ')}`
-            : ''}
-          {map.data.untrackedShopify.length
-            ? `; not tracked in Shopify: ${map.data.untrackedShopify.join(', ')}`
-            : ''}
-          .
-        </Notice>
-      ) : null}
-    </Card>
   );
 }

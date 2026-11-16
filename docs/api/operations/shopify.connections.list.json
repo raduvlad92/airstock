@@ -3,7 +3,7 @@
     "get": {
       "operationId": "shopify.connections.list",
       "summary": "List connected Shopify stores",
-      "description": "Shows each connected Shopify store with its location and variant mappings, webhook status, and unexplained quantity differences.",
+      "description": "Shows each connected Shopify store with its location and variant mappings, the Shopify locations not mapped, webhook status, and unexplained quantity differences.",
       "x-permission": "shop.read",
       "x-connection-scope": "shop:read",
       "x-audit-action": "shopify.connections.listed",
@@ -105,6 +105,69 @@
                             "additionalProperties": false
                           }
                         },
+                        "locationMaps": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "shopifyLocationId": {
+                                "type": "string"
+                              },
+                              "shopifyLocationName": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "warehouseId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "locationId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "receiveLocationId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "scopeName": {
+                                "type": "string",
+                                "description": "The warehouse name, or the location path."
+                              }
+                            },
+                            "required": [
+                              "shopifyLocationId",
+                              "shopifyLocationName",
+                              "warehouseId",
+                              "locationId",
+                              "receiveLocationId",
+                              "scopeName"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
                         "locationMap": {
                           "anyOf": [
                             {
@@ -114,8 +177,15 @@
                                   "type": "string"
                                 },
                                 "locationId": {
-                                  "type": "string",
-                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 }
                               },
                               "required": [
@@ -128,6 +198,30 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "unmappedLocations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "active": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "active"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Active Shopify locations without a map: never synced, never guessed."
                         },
                         "variantsMapped": {
                           "type": "integer",
@@ -155,7 +249,9 @@
                         "uninstalledAt",
                         "shopifyLocations",
                         "webhooks",
+                        "locationMaps",
                         "locationMap",
+                        "unmappedLocations",
                         "variantsMapped",
                         "conflicts",
                         "lastWebhookAt"

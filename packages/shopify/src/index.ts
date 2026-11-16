@@ -1,6 +1,9 @@
 export {
+  type BulkOperationState,
+  CATALOG_BULK_QUERY,
   gid,
   httpShopifyAdmin,
+  parseCatalogJsonl,
   type SetResult,
   type ShopifyAdmin,
   ShopifyApiError,
@@ -8,6 +11,7 @@ export {
   type ShopifyOrder,
   type ShopifyOrderLine,
   type ShopifyVariant,
+  throttleWaitMs,
   WEBHOOK_FIELDS,
   type WebhookStatus,
 } from './admin.ts';
@@ -30,8 +34,18 @@ export {
   ShopifyAuthError,
   type TokenSet,
 } from './oauth.ts';
+export { type OnboardingStep, runOnboarding } from './onboarding.ts';
 export {
   type AvailabilityChanged,
+  type PushLevel,
+  type PushOutcome,
+  pushAvailability,
+  pushConnection,
+  pushLevel,
+  pushLevels,
+  recordConflict,
+} from './push.ts';
+export {
   type ConnectedStore,
   catchUpOrders,
   completeInstall,
@@ -42,11 +56,8 @@ export {
   NotConnectedError,
   ORDER_JOB,
   type OrderResult,
-  type PushOutcome,
   parseOrderWebhook,
   processOrder,
-  pushAvailability,
-  pushLevel,
   receiveWebhook,
   runJob,
   type ShopifyConfig,

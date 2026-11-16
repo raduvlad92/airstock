@@ -381,6 +381,28 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Shopify connection card: locations, variants, and the onboarding import (I6). */
+.subsection {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.subsection h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+.subsection .table-wrap {
+  margin: 0.5rem 0;
+}
+
+.shopify-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
 .copyable {
   user-select: all;
   background: var(--surface-2);

@@ -17,6 +17,7 @@ import {
   APP_ASSETS,
   appShellPage,
   connectPage,
+  emailVerificationPage,
   invitationPage,
   landingPage,
   magicCodePage,
@@ -251,7 +252,51 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
       return await startSession(c, config, user, flow.returnTo, flow.provider ?? 'oauth');
     } catch (error) {
       if (error instanceof WorkosError) {
+        if (error.pendingVerification) {
+          const res = emailVerificationPage(error.pendingVerification.email);
+          res.headers.append(
+            'set-cookie',
+            await flowCookie(config, {
+              provider: flow.provider,
+              returnTo: flow.returnTo,
+              verify: error.pendingVerification,
+            }),
+          );
+          return res;
+        }
+        deps.logger.error('sign_in_failed', {
+          method: flow.provider ?? 'oauth',
+          status: error.status,
+          code: error.code,
+        });
         return signInPage(flow.returnTo, 'That sign-in did not work. Please try again.');
+      }
+      throw error;
+    }
+  });
+
+  app.post('/auth/verify-email', async (c) => {
+    if (!sameOrigin(c, config)) return messagePage('Request blocked', 'Please try again.', 403);
+    const flow = await readFlow(c, config);
+    if (!flow?.verify) return signInPage('/app', 'Your code expired. Please sign in again.');
+    const { email, token } = flow.verify;
+    const code = formString(await c.req.parseBody(), 'code').trim();
+    if (!/^\d{6}$/.test(code)) return emailVerificationPage(email, 'Enter the six-digit code.');
+    try {
+      const user = await config.workos.authenticateWithEmailVerification(
+        token,
+        code,
+        requestMeta(c),
+      );
+      return await startSession(c, config, user, flow.returnTo, flow.provider ?? 'oauth');
+    } catch (error) {
+      if (error instanceof WorkosError) {
+        deps.logger.info?.('email_verification_failed', {
+          method: flow.provider ?? 'oauth',
+          status: error.status,
+          code: error.code,
+        });
+        return emailVerificationPage(email, 'That code did not work. Check it and try again.');
       }
       throw error;
     }

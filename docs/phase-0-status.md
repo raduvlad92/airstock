@@ -1,6 +1,6 @@
 # Phase 0 status
 
-**Updated:** 14 November 2026  
+**Updated:** 16 November 2026  
 **Plan:** [Phase 0 build plan](phase-0-build-plan.md)
 
 Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.md)). All accounts exist: Cloudflare, Neon, WorkOS, the Shopify app and two development stores, ChatGPT, and Resend. **The results, measurements, and cost projection are in the [Phase 0 report](phase-0-report.md).**
@@ -25,7 +25,7 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 | --- | --- | --- |
 | E1 | Done | Repository public; CI in `.github/workflows/ci.yml` migrates and deploys staging on every push to `main`. |
 | E2 | Done | Requests run next to the database (4–8 ms per statement); jobs go through the fetch handler because consumers are not placed ([report, 4.4](phase-0-report.md#44-findings-that-changed-the-build)). |
-| E3 | Partly | Google on staging, for two accounts; an invitation accepted on staging by the invited address (Section 7); one user in two shops with different owners in CI. Still needed from the owner: the emailed code, Microsoft (passkey), and a shop created by the invited user. |
+| E3 | Partly | Google on staging, for two accounts; an emailed-code sign-in on staging (16 November, Section 7); an invitation accepted on staging by the invited address (Section 7); one user in two shops with different owners in CI. Microsoft reached WorkOS but needed an email-verification step Airstock did not have; that step is added (Section 7). Still needed from the owner: one Microsoft sign-in, and a shop created by the invited user. |
 | E4 | Done | `pnpm parity` in CI, `packages/core/test/registry.test.ts`, `docs/api/openapi.json` checked in CI. 24 operations, 9 MCP tools. |
 | E5 | Done in CI | See Section 4. |
 | E6 | Done | Real ChatGPT run on staging, 14 November 2026 (Section 6), plus `apps/worker/test/mcp.test.ts` and `web.test.ts`. |
@@ -37,7 +37,7 @@ Staging is live at https://airstock.deletecookies.dev (see [staging.md](staging.
 ## 3. What the owner needs to provide
 
 1. **Phone scan matrix (E8):** iPhone Safari and Android Chrome, in a tab and installed ([report, Section 8](phase-0-report.md#8-owner-actions-to-close-phase-0)).
-2. **Sign-ins (E3):** the invitation is accepted (Section 7). Still needed: as vlad@deletecookies.net, create a shop and sign in once with an emailed code; then sign in once with Microsoft.
+2. **Sign-ins (E3):** the invitation is accepted and an emailed code worked (Section 7). Still needed: sign in once with Microsoft (type the code WorkOS emails, if asked), and, as vlad@deletecookies.net, create a shop.
 3. **Email domain (E9):** decided by the owner on 14 November: keep sending from `mail.tracker.deletecookies.dev` for testing. `mail.airstock.deletecookies.dev` waits for Resend Pro or a freed domain slot, before any real merchant receives email.
 
 ## 4. Acceptance scenarios covered by tests
@@ -115,6 +115,18 @@ Checked in the staging database and the activity history. Times are UTC.
 | 21:24:33 | The invitation was accepted (`member.invitation.accepted`), and the user became an active viewer in "Bibica". The user then opened the shop's members, locations, Shopify, and AI connections pages. |
 
 This is the first invitation accepted on staging. It used Google, not an emailed code. WorkOS's event log for the evening agrees: two Google sign-ins (21:18 and 21:24) and no emailed-code or Microsoft attempt, successful or failed. The emailed code and Microsoft sign-ins are therefore still untested on staging. The invited user owns no shop yet, so staging does not yet have one user in two shops with different owners (CI covers it). Checked at 22:20 UTC; nothing happened on staging after 21:24:58.
+
+### Emailed code and Microsoft on staging (E3), 16 November
+
+Checked in WorkOS's event log and the staging activity history. Times are UTC.
+
+| Time | Event |
+| --- | --- |
+| 00:09:34 | Microsoft signed the owner in, and WorkOS logged `authentication.oauth_succeeded` with provider `MicrosoftOAuth`. In the same second WorkOS created an email verification and emailed a code (received 00:09:36): it answered `email_verification_required` instead of finishing the sign-in. The account's WorkOS user had signed in with Google before, and the Microsoft account uses the same Gmail address. |
+| 00:09:34 | Airstock's callback treated that answer as a failure and showed "That sign-in did not work." It had no step to ask for the code. |
+| 00:10:56 | A new account signed in with an emailed code (`user.signed_in`, method `email_code`). This is the first emailed-code sign-in on staging. |
+
+The fix: when WorkOS answers `email_verification_required`, Airstock keeps the pending token in the sealed flow cookie, asks for the emailed code, and finishes with the email-verification grant (`POST /auth/verify-email`). Other WorkOS sign-in errors are now logged with their code (`sign_in_failed`). The Microsoft identity is not linked yet; one more Microsoft sign-in closes it.
 
 ### Other changes
 

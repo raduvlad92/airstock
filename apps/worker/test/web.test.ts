@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
 import { seal, unseal } from '../src/session.ts';
 import { safeReturnTo } from '../src/web.ts';
-import type { WorkosUser } from '../src/workos.ts';
+import { createWorkosClient, WorkosError, type WorkosUser } from '../src/workos.ts';
 import { GRANT_CLAIM, ISSUER, json, PUBLIC_URL, type TestApp, testApp } from './setup.ts';
 
 let t: TestApp;
@@ -153,6 +153,55 @@ describe('sealed cookies', () => {
   });
 });
 
+describe('WorkOS client', () => {
+  it('carries the pending token when WorkOS holds a sign-in for email verification', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const responses = [
+      Response.json(
+        {
+          code: 'email_verification_required',
+          message: 'Email ownership must be verified before authentication.',
+          email: 'ana@example.com',
+          email_verification_id: 'email_verification_1',
+          pending_authentication_token: 'pending_1',
+        },
+        { status: 403 },
+      ),
+      Response.json({ user: { id: 'user_1', email: 'ana@example.com', first_name: 'Ana' } }),
+    ];
+    const client = createWorkosClient({
+      apiKey: 'sk_test',
+      clientId: 'client_1',
+      redirectUri: `${PUBLIC_URL}/auth/callback`,
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return responses.shift()!;
+      },
+    });
+    const held = await client.authenticateWithCode('code_1', {}).catch((e: unknown) => e);
+    expect(held).toBeInstanceOf(WorkosError);
+    expect((held as WorkosError).code).toBe('email_verification_required');
+    expect((held as WorkosError).pendingVerification).toEqual({
+      token: 'pending_1',
+      email: 'ana@example.com',
+    });
+    const user = await client.authenticateWithEmailVerification('pending_1', '654321', {});
+    expect(user).toEqual({
+      id: 'user_1',
+      email: 'ana@example.com',
+      firstName: 'Ana',
+      lastName: null,
+    });
+    expect(bodies[1]).toEqual({
+      client_id: 'client_1',
+      client_secret: 'sk_test',
+      grant_type: 'urn:workos:oauth:grant-type:email-verification:code',
+      code: '654321',
+      pending_authentication_token: 'pending_1',
+    });
+  });
+});
+
 describe('sign-in (plan M4)', () => {
   it('signs in with a provider and sets only a host-only session cookie', async () => {
     const user = newUser();
@@ -215,6 +264,62 @@ describe('sign-in (plan M4)', () => {
     });
     expect(right.status).toBe(303);
     expect(cookiesFrom(right)['__Host-airstock_session']).toBeTruthy();
+  });
+
+  it('finishes a provider sign-in that WorkOS holds for email verification', async () => {
+    const user = newUser();
+    const code = `held-${user.id}`;
+    t.workos.addUserNeedingVerification(code, user);
+    const start = await t.app.request('/auth/oauth/microsoft?return_to=%2Fapp%2Fitems');
+    const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
+    const callback = await t.app.request(`/auth/callback?code=${code}&state=${state}`, {
+      headers: { cookie: cookieHeader(cookiesFrom(start)) },
+    });
+    expect(callback.status).toBe(200);
+    const page = await callback.text();
+    expect(page).toContain(user.email);
+    expect(page).toContain('action="/auth/verify-email"');
+    expect(cookiesFrom(callback)['__Host-airstock_session']).toBeUndefined();
+    const flow = cookieHeader(cookiesFrom(callback));
+
+    const crossSite = await t.app.request('/auth/verify-email', {
+      method: 'POST',
+      headers: { origin: 'https://evil.example', cookie: flow },
+      body: form({ code: '654321' }),
+    });
+    expect(crossSite.status).toBe(403);
+    // The held sign-in is not an emailed-code sign-in: that form refuses its flow.
+    const asMagic = await t.app.request('/auth/magic/verify', {
+      method: 'POST',
+      headers: { ...ORIGIN, cookie: flow },
+      body: form({ code: '654321' }),
+    });
+    expect(cookiesFrom(asMagic)['__Host-airstock_session']).toBeUndefined();
+    const wrong = await t.app.request('/auth/verify-email', {
+      method: 'POST',
+      headers: { ...ORIGIN, cookie: flow },
+      body: form({ code: '000000' }),
+    });
+    expect(wrong.status).toBe(400);
+    expect(cookiesFrom(wrong)['__Host-airstock_session']).toBeUndefined();
+
+    const right = await t.app.request('/auth/verify-email', {
+      method: 'POST',
+      headers: { ...ORIGIN, cookie: flow },
+      body: form({ code: '654321' }),
+    });
+    expect(right.status).toBe(303);
+    expect(right.headers.get('location')).toBe('/app/items');
+    expect(cookiesFrom(right)['__Host-airstock_session']).toBeTruthy();
+    const [row] = await ownerQuery<{ id: string }>(
+      'select id from users where workos_user_id = $1',
+      [user.id],
+    );
+    const signedIn = t.sink.events.filter(
+      (e) => e.action === 'user.signed_in' && e.target_id === row!.id,
+    );
+    expect(signedIn).toHaveLength(1);
+    expect(signedIn[0]!.context).toMatchObject({ method: 'microsoft' });
   });
 
   it('serves the dashboard API to a session only with the custom header from this site', async () => {

@@ -1855,10 +1855,6 @@ button.danger {
   cursor: pointer;
 }
 
-.table tr.clickable:hover td {
-  background: var(--surface-2);
-}
-
 .chip-list {
   display: flex;
   flex-wrap: wrap;
@@ -2008,4 +2004,9 @@ button.danger {
 .alert-main {
   min-width: 0;
   flex: 1 1 18rem;
+}
+
+/* After the picking rows' selected style, which this hover must not outrank in order. */
+.table tr.clickable:hover td {
+  background: var(--surface-2);
 }

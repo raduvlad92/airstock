@@ -54,7 +54,7 @@ export function AlertCount({ shopId }: { shopId: string }) {
   const open = summary.data?.open ?? 0;
   if (open === 0) return null;
   return (
-    <span className="nav-count" aria-label={`${open} open alerts`}>
+    <span className="nav-count" role="img" aria-label={`${open} open alerts`}>
       {open > 99 ? '99+' : open}
     </span>
   );

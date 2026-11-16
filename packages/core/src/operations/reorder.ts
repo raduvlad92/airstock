@@ -167,7 +167,7 @@ export const setReorderRule = defineOperation({
          from reorder_rules where id = $1 for update`,
         [input.ruleId],
       );
-      if (!row || row.status !== 'active') throw errors.notFound('Reorder rule');
+      if (row?.status !== 'active') throw errors.notFound('Reorder rule');
       before = row;
       if (input.expectedVersion === undefined) {
         throw errors.validation([

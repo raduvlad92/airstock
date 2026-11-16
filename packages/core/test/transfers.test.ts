@@ -544,7 +544,7 @@ describe('a move within a warehouse (D8)', () => {
       shortage: '0.000000',
       available: '1.000000',
     });
-    await sweepShortages(db);
+    await sweepShortages(db, 50, [shop.shopId]);
     expect(await reconcileAll(shop.shopId)).toEqual([]);
   });
 });

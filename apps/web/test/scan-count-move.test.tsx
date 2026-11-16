@@ -258,6 +258,61 @@ describe('scan page: quick count', () => {
   });
 });
 
+describe('scan page: quick bursts', () => {
+  // A wedge scanner reads codes faster than lookups answer. Each scan is applied in the order it
+  // was read, after the page shows the one before it.
+
+  /** Types and submits each code at once, as a scanner does, without waiting for an answer. */
+  async function burst(...codes: string[]) {
+    const field = await screen.findByRole('textbox', { name: 'Code' });
+    for (const code of codes) {
+      fireEvent.change(field, { target: { value: code } });
+      fireEvent.submit(field.closest('form')!);
+    }
+  }
+
+  const toConfirm = () => screen.getByRole('list', { name: 'To confirm' }).textContent;
+
+  it('counts both of two quick scans of the same case', async () => {
+    mockApi({
+      ...BASE(COUNTER),
+      [`/shops/${SHOP}/scan`]: scanRoutes({ [LOCATION.code]: LOCATION, 'CASE-BOX-6': CASE_SCAN }),
+    });
+    renderScan('?flow=count');
+    await scan(LOCATION.code);
+    expect(await screen.findByRole('heading', { name: 'Count Main stock/B-02' })).toBeTruthy();
+    await burst('CASE-BOX-6', 'CASE-BOX-6');
+    await waitFor(() => expect(toConfirm()).toBe('BOX-1: 2 × Case (6) = 12 units'));
+  });
+
+  it('applies a shelf label before the item scanned after it, whichever answers first', async () => {
+    let answerLocation = () => {};
+    const located = new Promise<void>((resolve) => {
+      answerLocation = resolve;
+    });
+    const routes = scanRoutes({ [LOCATION.code]: LOCATION, 'CASE-BOX-6': CASE_SCAN });
+    const calls = mockApi({
+      ...BASE(COUNTER),
+      [`/shops/${SHOP}/scan`]: async (call: Call) => {
+        // The label's lookup is slow; the case's answers at once.
+        if (call.query.code === LOCATION.code) await located;
+        return routes(call);
+      },
+    });
+    renderScan('?flow=count');
+    expect(
+      await screen.findByText('Scan the shelf’s location label, then every item on it.'),
+    ).toBeTruthy();
+    await burst(LOCATION.code, 'CASE-BOX-6');
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === `/shops/${SHOP}/scan`)).toHaveLength(2),
+    );
+    answerLocation();
+    await waitFor(() => expect(toConfirm()).toBe('BOX-1: 1 × Case (6) = 6 units'));
+    expect(screen.queryByText('Scan the shelf’s location label first.')).toBeNull();
+  });
+});
+
 describe('scan page: count sessions', () => {
   it('records lines, then submits with a decision for a line that moved after counting', async () => {
     const line = (over: Record<string, unknown>) => ({

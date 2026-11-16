@@ -103,6 +103,18 @@ export interface PreviewContext {
 const BARCODE_HEADERS = ['ean', 'ean13', 'ean-13', 'upc', 'gtin', 'barcode number'];
 /** Headers compared after lower-casing and turning `_`, `-`, and `.` into spaces. */
 const SUPPLIER_HEADERS = ['vendor', 'supplier name', 'vendor name'];
+/** Supplier headers that Shopify's product CSV uses for the brand. */
+const VENDOR_HEADERS = ['vendor', 'vendor name'];
+
+/** Whether a header is "Vendor" or "Vendor name", which may hold a brand rather than a supplier. */
+export function isVendorHeader(header: string): boolean {
+  return VENDOR_HEADERS.includes(
+    header
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_.-]+/g, ' '),
+  );
+}
 const SUPPLIER_SKU_HEADERS = [
   'supplier sku',
   'vendor sku',

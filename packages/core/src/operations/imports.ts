@@ -6,6 +6,7 @@ import { normalize } from '../catalog/decimal.ts';
 import { displayValue } from '../catalog/fields.ts';
 import {
   IMPORT_LIMITS,
+  isVendorHeader,
   loadExistingPacks,
   type Mapping,
   planPack,
@@ -196,6 +197,40 @@ const ProblemRow = z.object({
   warnings: z.array(z.string()),
 });
 
+/**
+ * Shopify's product CSV calls the brand "Vendor". A vendor column is suggested as the supplier
+ * only when one of its values names an active supplier; otherwise a Shopify file would open with
+ * every row in error. A supplier SKU column needs a supplier column, so it follows.
+ */
+async function checkVendorColumn(
+  tx: Tx,
+  parsed: { header: string[]; rows: string[][] },
+  suggested: Mapping,
+): Promise<Mapping> {
+  const column = parsed.header.findIndex(
+    (h) => suggested[h.trim()] === 'supplier' && isVendorHeader(h),
+  );
+  if (column < 0) return suggested;
+  const values = [
+    ...new Set(parsed.rows.map((r) => (r[column] ?? '').trim().toLowerCase()).filter(Boolean)),
+  ].slice(0, 1000);
+  const [match] =
+    values.length > 0
+      ? await tx.query(
+          `select 1 from suppliers where status = 'active'
+           and (lower(name) = any($1::text[]) or id::text = any($1::text[])) limit 1`,
+          [values],
+        )
+      : [];
+  if (match) return suggested;
+  const out: Mapping = { ...suggested, [parsed.header[column]!.trim()]: 'ignore' };
+  if (!Object.values(out).includes('supplier')) {
+    for (const [header, target] of Object.entries(out))
+      if (target === 'supplier_sku') out[header] = 'ignore';
+  }
+  return out;
+}
+
 export const previewImport = defineOperation({
   id: 'imports.preview',
   summary: 'Map an import’s columns and validate every row',
@@ -251,7 +286,11 @@ export const previewImport = defineOperation({
       );
     }
     const fields = visible(await loadFields(ctx.tx), ctx.membership);
-    const suggested = suggestMapping(parsed.header, fields);
+    const suggested = await checkVendorColumn(
+      ctx.tx,
+      parsed,
+      suggestMapping(parsed.header, fields),
+    );
     const packNames = (
       await ctx.tx.query<{ name: string }>(
         `select min(name) as name from packs where status = 'active'

@@ -503,6 +503,21 @@ describe('packs and suppliers in CSV (ADR 0018)', () => {
     });
   });
 
+  it('suggests a Vendor column as the supplier only when it names the shop’s suppliers', async () => {
+    const tag = uuidv7().slice(-6).toUpperCase();
+    // Shopify's product CSV: Vendor holds the brand, and no supplier has that name.
+    const brand = await upload(
+      `name,Vendor,Vendor SKU,sku\nMug ${tag},Brand ${tag},B-1,VEN-${tag}-1\n`,
+    );
+    expect(brand.suggested).toMatchObject({ Vendor: 'ignore', 'Vendor SKU': 'ignore' });
+    expect(brand.preview.problems).toEqual([]);
+    await supplier(`Acme ${tag}`);
+    const named = await upload(
+      `name,Vendor,Vendor SKU,sku\nCup ${tag},acme ${tag.toLowerCase()},AC-1,VEN-${tag}-2\n`,
+    );
+    expect(named.suggested).toMatchObject({ Vendor: 'supplier', 'Vendor SKU': 'supplier_sku' });
+  });
+
   it('refuses unknown suppliers, taken supplier SKUs and barcodes, and unsafe pack changes', async () => {
     const tag = uuidv7().slice(-6).toUpperCase();
     const acme = await supplier(`Acme ${tag}`);

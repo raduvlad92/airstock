@@ -263,4 +263,41 @@ describe('Shopify connector review findings', () => {
     expect(await h.available(s.m, s.variantId)).toBe('9.000000');
     expect(s.store.available(s.item)).toBe(9);
   });
+  // FINDING 6 (uninstall lost, tokens kept; main). receiveWebhook records the app/uninstalled
+  // receipt in one transaction and marks the connection uninstalled in a second, only when the
+  // receipt is new. If the second fails (a crash, a lost connection), Airstock answers 500 and
+  // Shopify retries with the same event ID, which is now a duplicate: the uninstall is skipped and
+  // answered 200. The connection stays active with its tokens, the store stays locked to this shop
+  // (it cannot be connected elsewhere), and the reconciler keeps calling Shopify.
+  it.fails('F6: an uninstall that failed once is applied when Shopify retries the webhook', async () => {
+    const s = await setup('Uninstall retry', 1);
+    const fn = `test_fail_uninstall_${s.connectionId.replace(/-/g, '')}`;
+    // A failure injected for this connection only (other test files share the table).
+    await ownerQuery(`
+      create function ${fn}() returns trigger language plpgsql as $$
+      begin
+        if new.id = '${s.connectionId}' and new.status = 'uninstalled' then
+          raise exception 'simulated failure while marking the uninstall';
+        end if;
+        return new;
+      end $$;
+      create trigger ${fn} before update on shopify_connections
+        for each row execute function ${fn}();`);
+    const eventId = uuidv7();
+    const body = JSON.stringify({ id: 1, domain: s.store.domain });
+    try {
+      const first = await h.deliver(s.store.domain, 'app/uninstalled', body, { eventId });
+      expect(first.status).toBeGreaterThanOrEqual(500);
+    } finally {
+      await ownerQuery(`drop trigger ${fn} on shopify_connections; drop function ${fn}();`);
+    }
+    // Shopify retries the same event.
+    const retry = await h.deliver(s.store.domain, 'app/uninstalled', body, { eventId });
+    expect(retry.status).toBe(200);
+    const [conn] = await ownerQuery<{ status: string; access: string | null }>(
+      `select status, access_token_ciphertext as access from shopify_connections where id = $1`,
+      [s.connectionId],
+    );
+    expect(conn).toEqual({ status: 'uninstalled', access: null });
+  });
 });

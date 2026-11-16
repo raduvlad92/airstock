@@ -396,3 +396,6 @@ DATABASE_OWNER_URL=… tsx scripts/bench/seed-stock-ledger.ts --days 21 --per-da
 # The timings, and the export job of the largest shop.
 DATABASE_APP_URL=… DATABASE_OWNER_URL=… tsx scripts/bench/query-reports.ts --n 5 --json reports.json
 ```
+## I7 volume run
+
+**Status:** in progress (16 November 2026). Bench branch `i7-volume`, created from `i0-personas` and migrated to current main (migrations 0016–0070). Results follow as each step finishes.

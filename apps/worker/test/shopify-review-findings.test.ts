@@ -1,5 +1,10 @@
 import { uuidv7 } from '@airstock/core';
-import { reconcileConnection, type ShopifyVariant } from '@airstock/shopify';
+import {
+  pushAvailability,
+  reconcileConnection,
+  ShopifyApiError,
+  type ShopifyVariant,
+} from '@airstock/shopify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
@@ -299,5 +304,34 @@ describe('Shopify connector review findings', () => {
       [s.connectionId],
     );
     expect(conn).toEqual({ status: 'uninstalled', access: null });
+  });
+  // FINDING 7 (level frozen by a retry; main). Each inventorySetQuantities call gets a new
+  // idempotency key, and the record is updated only when the call returns. When Shopify applies
+  // the write but the response is lost (a timeout, a 502, the Worker stopped), the queue retries
+  // with the old record as changeFromQuantity: Shopify refuses it as stale, no order explains it,
+  // and a conflict is recorded although Shopify already shows Airstock's number. The reconciler
+  // compares Shopify with the (old) record, not with Airstock's target, so the conflict never
+  // clears by itself: the level stops syncing until a person resolves an alert about nothing.
+  it.fails('F7: a push whose response was lost is not a conflict on retry', async () => {
+    const s = await setup('Lost response', 5);
+    await h.receive(s.m, s.variantId, 1);
+    // Shopify applies the write, then the response is lost.
+    const set = s.store.setAvailable.bind(s.store);
+    let lose = 1;
+    s.store.setAvailable = async (input) => {
+      const done = await set(input);
+      if (lose-- > 0) throw new ShopifyApiError('Shopify Admin API returned 502.', 502, true);
+      return done;
+    };
+    await expect(h.flush(s.m.shopId)).rejects.toMatchObject({ retryable: true });
+    expect(s.store.available(s.item)).toBe(6);
+    // The queue retries the message.
+    const retried = await pushAvailability(h.deps(), s.m.shopId, {
+      variantId: s.variantId,
+      locationIds: [s.m.locationId],
+    });
+    expect(retried.map((r) => r.outcome)).not.toContain('conflict');
+    await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
+    expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
   });
 });

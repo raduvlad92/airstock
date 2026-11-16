@@ -18,6 +18,7 @@ import { ShopsPage } from './pages/shops.tsx';
 import { SuppliersPage } from './pages/suppliers.tsx';
 import { WarehousesPage } from './pages/warehouses.tsx';
 import { WebhooksPage } from './pages/webhooks.tsx';
+import { parseScanSearch, ScanPage } from './scan/page.tsx';
 
 const rootRoute = createRootRoute({ component: RootLayout });
 
@@ -31,6 +32,14 @@ const homeRoute = createRoute({
       ? { joined: String(search.joined) }
       : {}),
   }),
+});
+
+/** The phone scanning app (plan D13): the installed app starts here. */
+const scanRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/scan',
+  component: ScanPage,
+  validateSearch: parseScanSearch,
 });
 
 const shopRoute = createRoute({
@@ -162,6 +171,7 @@ const familiesRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   homeRoute,
+  scanRoute,
   shopRoute.addChildren([
     shopIndexRoute,
     productsRoute,

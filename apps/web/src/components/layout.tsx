@@ -7,6 +7,9 @@ import { ErrorNotice, Loading } from './ui.tsx';
 /** Top bar for every page: brand, shop switcher, and the signed-in user. */
 export function RootLayout() {
   const { email } = useAppInfo();
+  const scanning = useRouterState({ select: (s) => s.matches.some((m) => m.routeId === '/scan') });
+  // The scanning app is full screen on the phone, with its own header.
+  if (scanning) return <Outlet />;
   return (
     <div className="app">
       <header className="topbar">
@@ -103,6 +106,11 @@ export function ShopLayout() {
             {item.label}
           </Link>
         ))}
+        {can(context.data, 'inventory.read') ? (
+          <Link to="/scan" search={{ shop: shopId }} className="nav-link">
+            Scan
+          </Link>
+        ) : null}
       </nav>
       <main className="content">
         <Outlet />

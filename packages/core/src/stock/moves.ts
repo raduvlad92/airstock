@@ -359,6 +359,11 @@ export async function applyMoves(
 /**
  * Keeps serial units in step with moves: a serial that lands in a position is there (in stock,
  * or in transit for a transfer position); one that leaves stock gets `outStatus`.
+ *
+ * Each update is guarded by where the serial is now: a move out of a position needs the serial
+ * at that position, and a move from outside stock (a find, a return, a reversal) needs it out of
+ * stock. The row update re-checks a concurrently committed change, so one serial can never be on
+ * hand twice (serial_in_stock) or leave a position it is not at (serial_not_here).
  */
 export async function syncSerials(
   ctx: HandlerContext,
@@ -371,15 +376,42 @@ export async function syncSerials(
     .map((m) => ({
       serialId: m.serialId,
       positionId: m.toPositionId,
+      fromPositionId: m.from?.positionId ?? null,
       status: m.to ? (m.to.transferId ? 'in_transit' : 'in_stock') : outStatus,
-    }));
+    }))
+    .sort((a, b) => (a.serialId! < b.serialId! ? -1 : 1));
   if (rows.length === 0) return;
-  await ctx.tx.query(
+  const updated = await ctx.tx.query<{ id: string }>(
     `update serial_units s set status = x.status, position_id = x."positionId",
        last_operation_id = $2, updated_at = now(), version = s.version + 1
-     from jsonb_to_recordset($1::jsonb) as x("serialId" uuid, "positionId" uuid, status text)
-     where s.shop_id = app_shop_id() and s.id = x."serialId"`,
+     from jsonb_to_recordset($1::jsonb)
+       as x("serialId" uuid, "positionId" uuid, "fromPositionId" uuid, status text)
+     where s.shop_id = app_shop_id() and s.id = x."serialId"
+       and case when x."fromPositionId" is null
+         then s.status not in ('in_stock', 'in_transit')
+         else s.status in ('in_stock', 'in_transit') and s.position_id = x."fromPositionId" end
+     returning s.id`,
     [JSON.stringify(rows), operationId],
+  );
+  if (updated.length === rows.length) return;
+  const done = new Set(updated.map((u) => u.id));
+  const failed = rows.filter((r) => !done.has(r.serialId!));
+  const serials = await ctx.tx.query<{ serial: string }>(
+    'select serial from serial_units where id = any($1::uuid[]) order by serial',
+    [failed.map((f) => f.serialId)],
+  );
+  const names = serials.map((x) => x.serial);
+  if (failed.some((f) => f.fromPositionId === null)) {
+    throw errors.conflict(
+      'serial_in_stock',
+      `Serial ${names.join(', ')} is already in stock elsewhere; move it instead.`,
+      { serials: names },
+    );
+  }
+  throw errors.conflict(
+    'serial_not_here',
+    `Serial ${names.join(', ')} is no longer at this position.`,
+    { serials: names },
   );
 }
 

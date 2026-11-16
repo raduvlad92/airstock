@@ -425,6 +425,8 @@ export async function applyChanges(
     }
   }
 
+  await checkSerials(ctx, live, byKey);
+
   const moves: StockMove[] = live.map((c) => {
     const pos = byKey.get(keyOf(c.key));
     const q = normalize(c.delta.replace(/^-/, ''));
@@ -477,6 +479,52 @@ export async function applyChanges(
     shortagesFilled,
     costs: Object.fromEntries([...costs].map(([v, c]) => [v, c.unitCost])),
   };
+}
+
+/**
+ * Locks the serial units the changes move (step 3 of the lock order, after the cost rows, as
+ * fulfillments and return receipts take them) and checks them again now that the positions are
+ * held: the checks before the locks were plain reads. A serial added must be out of stock (not on
+ * hand anywhere, not in transit); a serial removed must be on hand at that position. Without this
+ * a concurrent find, return, or the reversal of a removal could put one serial in two places.
+ */
+async function checkSerials(
+  ctx: HandlerContext,
+  live: Array<StockChange & { delta: string }>,
+  byKey: Map<string, { id: string }>,
+): Promise<void> {
+  const changes = live.filter((c) => c.key.serialId);
+  if (changes.length === 0) return;
+  const units = await ctx.tx.query<{
+    id: string;
+    serial: string;
+    status: string;
+    position_id: string | null;
+  }>(
+    `select id, serial, status, position_id from serial_units
+     where id = any($1::uuid[]) order by id for update`,
+    [[...new Set(changes.map((c) => c.key.serialId!))]],
+  );
+  for (const c of changes) {
+    const unit = units.find((u) => u.id === c.key.serialId);
+    if (!unit) throw errors.notFound('Serial');
+    const held = unit.status === 'in_stock' || unit.status === 'in_transit';
+    if (positive(c.delta)) {
+      if (held) {
+        throw errors.conflict(
+          'serial_in_stock',
+          `Serial ${unit.serial} is already in stock elsewhere; move it instead.`,
+          { serial: unit.serial },
+        );
+      }
+    } else if (!held || unit.position_id !== byKey.get(keyOf(c.key))?.id) {
+      throw errors.conflict(
+        'serial_not_here',
+        `Serial ${unit.serial} is not at this location in this condition.`,
+        { serial: unit.serial },
+      );
+    }
+  }
 }
 
 /** Serial units by serial for a variant; unknown ones are created (not in stock) to be found. */

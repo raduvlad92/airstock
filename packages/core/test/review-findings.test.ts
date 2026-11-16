@@ -379,7 +379,7 @@ describe('F-ONE-OF-A-KIND-COUNT: a count can give a one-of-a-kind item more than
 // The same happens when a count recorded S as found and a return receipt brings S back first.
 // ---------------------------------------------------------------------------------------------
 describe('F-SERIAL-TWO-PLACES: one serial can end up on hand at two locations', () => {
-  it.fails('refuses to reverse a removal once the serial is back in stock elsewhere', async () => {
+  it('refuses to reverse a removal once the serial is back in stock elsewhere', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'serial' });
     const serial = `SN-${uuidv7().slice(-6)}`;

@@ -4,6 +4,8 @@ import type { AuditEvent, AuditOutcome } from './audit.ts';
 import type { Caller, Membership } from './caller.ts';
 import type { MediaDelivery } from './media/signing.ts';
 import type { Permission, RequiredScope } from './permissions.ts';
+import type { WebhookEmit } from './webhooks/events.ts';
+import type { WebhookSecretCipher } from './webhooks/signing.ts';
 
 /** How an operation appears to MCP clients: as part of a task-shaped tool (PRD 9.3). */
 export interface McpExposure {
@@ -42,6 +44,8 @@ export interface HandlerContext {
   newId(): string;
   /** Signs media links (ADR 0015); absent where media delivery is not configured. */
   media?: MediaDelivery;
+  /** Encrypts webhook signing secrets (D14); absent where webhooks are not configured. */
+  webhookSecrets?: WebhookSecretCipher;
   /** An extra event produced inside the transaction, such as a reservation expired lazily. */
   event(fields: Pick<AuditEvent, 'action' | 'outcome'> & Partial<AuditEvent>): AuditEvent;
 }
@@ -63,6 +67,11 @@ export interface HandlerResult<O> {
   result: O;
   audit: AuditDetails;
   outbox?: Array<{ topic: string; payload: unknown }>;
+  /**
+   * Domain events for outgoing webhooks (`webhookEvent(type, input)`). Written to the outbox in
+   * the same transaction as the change, and only when the shop subscribes to the type (D14).
+   */
+  webhooks?: WebhookEmit[];
   /**
    * Extra events. Commands write them in the transaction with the success event; reads send
    * them with the access event, in the same queue message.

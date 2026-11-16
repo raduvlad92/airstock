@@ -1,0 +1,243 @@
+{
+  "/api/v1/shops/{shopId}/webhook-subscriptions/{subscriptionId}": {
+    "post": {
+      "operationId": "webhooks.subscriptions.update",
+      "summary": "Change a webhook subscription",
+      "description": "Changes the name, URL, event types, or filters. Fields left out keep their values. Send `expectedVersion` to refuse the change if someone else changed the subscription first.",
+      "x-permission": "webhooks.manage",
+      "x-connection-scope": "webhooks:manage",
+      "x-audit-action": "webhook.subscription.updated",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "subscriptionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "expectedVersion": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "eventTypes": {
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                },
+                "filters": {
+                  "type": "object",
+                  "properties": {
+                    "locationIds": {
+                      "default": [],
+                      "description": "Warehouse or location IDs. Event types that carry locations are sent only when the event touches one of them, or a location inside one. Empty means every location.",
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      }
+                    },
+                    "alertKinds": {
+                      "default": [],
+                      "description": "Alert kinds for alert event types. Empty means every kind.",
+                      "maxItems": 5,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "low_stock",
+                          "lot_expiring",
+                          "shortage",
+                          "shopify_sync",
+                          "reconciliation_mismatch"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscription": {
+                    "type": "object",
+                    "properties": {
+                      "subscriptionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "eventTypes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filters": {
+                        "type": "object",
+                        "properties": {
+                          "locationIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            }
+                          },
+                          "alertKinds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "locationIds",
+                          "alertKinds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "disabled"
+                        ]
+                      },
+                      "disabledReason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "manual",
+                              "failing"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "secretHint": {
+                        "type": "string",
+                        "description": "The last four characters of the current signing secret."
+                      },
+                      "previousSecretExpiresAt": {
+                        "description": "During a rotation, deliveries carry a signature from the previous secret too.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "failingSince": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastSuccessAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastFailureAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "subscriptionId",
+                      "name",
+                      "url",
+                      "eventTypes",
+                      "filters",
+                      "status",
+                      "disabledReason",
+                      "secretHint",
+                      "previousSecretExpiresAt",
+                      "failingSince",
+                      "lastSuccessAt",
+                      "lastFailureAt",
+                      "createdAt",
+                      "updatedAt",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "subscription"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

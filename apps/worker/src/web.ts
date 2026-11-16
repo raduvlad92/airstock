@@ -2,11 +2,11 @@ import {
   AppError,
   acceptInvitation,
   auditEvent,
-  CONNECTION_SCOPES,
-  type ConnectionScope,
   ensureUser,
   errors,
   execute,
+  MCP_CONNECTION_SCOPES,
+  type McpConnectionScope,
   ops,
   sessionCaller,
   viewInvitation,
@@ -59,7 +59,7 @@ const PROVIDERS: Record<string, OAuthProvider> = {
   microsoft: 'MicrosoftOAuth',
 };
 
-const SCOPE_LABELS: Record<ConnectionScope, string> = {
+const SCOPE_LABELS: Record<McpConnectionScope, string> = {
   'shop:read': 'See the shop and your role',
   'catalog:read': 'Read items and variants',
   'catalog:write': 'Create and change items',
@@ -461,7 +461,7 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
       requestId: c.get('requestId'),
     });
     const { shops } = listed.result as { shops: Array<{ id: string; name: string; role: string }> };
-    const scopes: ScopeChoice[] = CONNECTION_SCOPES.map((scope) => ({
+    const scopes: ScopeChoice[] = MCP_CONNECTION_SCOPES.map((scope) => ({
       scope,
       label: SCOPE_LABELS[scope],
       checked: scope.endsWith(':read'),
@@ -522,8 +522,8 @@ export function mountWeb(app: Hono<AppEnv>, deps: AppDeps): void {
     if (!ctx) return messagePage('Request blocked', 'Start the connection again.', 403);
     const { session, form, externalAuthId } = ctx;
     const shopId = formString(form, 'shop_id');
-    const scopes = formList(form, 'scope').filter((s): s is ConnectionScope =>
-      (CONNECTION_SCOPES as readonly string[]).includes(s),
+    const scopes = formList(form, 'scope').filter((s): s is McpConnectionScope =>
+      (MCP_CONNECTION_SCOPES as readonly string[]).includes(s),
     );
     if (!UUID.test(shopId) || scopes.length === 0) {
       return renderConnect(c, session, externalAuthId, 'Choose a shop and at least one access.');

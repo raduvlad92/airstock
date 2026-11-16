@@ -1,4 +1,4 @@
-import type { AuditEvent, OutboxMessage } from '@airstock/core';
+import type { AuditEvent, OutboxMessage, WebhookDeliveryMessage } from '@airstock/core';
 import type { JobMessage } from './shopify.ts';
 
 /** One queue message: a single event (Phase 0) or every event of one send (ADR 0011). */
@@ -7,7 +7,7 @@ export type AuditMessage = AuditEvent | { events: AuditEvent[] };
 export interface Env {
   HYPERDRIVE: Hyperdrive;
   AUDIT_QUEUE: Queue<AuditMessage>;
-  JOBS_QUEUE: Queue<OutboxMessage | JobMessage>;
+  JOBS_QUEUE: Queue<OutboxMessage | JobMessage | WebhookDeliveryMessage>;
   FILES: R2Bucket;
   /** MCP OAuth settings; /mcp answers 503 until they are set (plan M5). */
   MCP_ISSUER?: string;
@@ -41,6 +41,10 @@ export interface Env {
   INTERNAL_SECRET?: string;
   /** Signs short-lived media links (ADR 0015); media uploads and links are off until it is set. */
   MEDIA_SIGNING_KEY?: string;
+  /** 32 random bytes, Base64: encrypts stored webhook signing secrets (D14). Webhooks are off until it is set. */
+  WEBHOOK_SECRET_KEY?: string;
+  /** Names the webhook secret key, stored next to each ciphertext so the key can rotate. */
+  WEBHOOK_SECRET_KEY_ID?: string;
   /** Workers Rate Limiting bindings (ADR 0011); limits are in wrangler.jsonc. */
   RATE_LIMIT_SESSION?: RateLimit;
   RATE_LIMIT_API?: RateLimit;

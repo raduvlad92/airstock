@@ -92,6 +92,8 @@ export {
   CONNECTION_SCOPES,
   type ConnectionScope,
   effectivePermissions,
+  MCP_CONNECTION_SCOPES,
+  type McpConnectionScope,
   PERMISSIONS,
   ROLE_PERMISSIONS,
 } from './permissions.ts';
@@ -112,3 +114,46 @@ export {
   type OperationOutput,
 } from './registry.ts';
 export { normalizeSku } from './schemas.ts';
+export {
+  announceStockChanged,
+  attemptWebhookDelivery,
+  type DeliveryResult,
+  fanOutWebhookEvent,
+  handleWebhookOutbox,
+  publishWebhookEvent,
+  QUEUE_MAX_DELAY_SECONDS,
+  recoverWebhookDeliveries,
+  sendWebhookDisabledEmail,
+  sweepWebhookHistory,
+  WEBHOOK_AUTO_DISABLE_MS,
+  WEBHOOK_MAX_ATTEMPTS,
+  WEBHOOK_RETRY_SCHEDULE_SECONDS,
+  type WebhookDeliveryMessage,
+  type WebhookDeps,
+  webhookEnvelope,
+  webhooksCaller,
+} from './webhooks/delivery.ts';
+export {
+  catalogChangeEmit,
+  insertWebhookEvents,
+  sampleEnvelope,
+  WEBHOOK_ALERT_KINDS,
+  WEBHOOK_API_VERSION,
+  WEBHOOK_DELIVER_TOPIC,
+  WEBHOOK_EVENT_TOPIC,
+  WEBHOOK_EVENT_TYPES,
+  type WebhookEmit,
+  type WebhookEventType,
+  webhookEvent,
+  webhookEventTypes,
+} from './webhooks/events.ts';
+export {
+  generateWebhookSecret,
+  type SignatureCheck,
+  signWebhookBody,
+  verifyWebhookSignature,
+  WebhookSecretCipher,
+  webhookSecretContext,
+  webhookSignatureHeader,
+} from './webhooks/signing.ts';
+export { checkWebhookUrl, type WebhookUrlCheck } from './webhooks/urls.ts';

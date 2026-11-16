@@ -1,23 +1,32 @@
 import {
   type AuditEvent,
   type AuditSink,
+  announceStockChanged,
+  attemptWebhookDelivery,
   auditEvent,
   drainOutbox,
   ensureAuditPartitions,
+  handleWebhookOutbox,
   ingestAuditEvents,
   type JobDeps,
   type Logger,
   type OutboxMessage,
+  recoverWebhookDeliveries,
   runExportJob,
   runImportJob,
   sendInvitationEmail,
+  sendWebhookDisabledEmail,
   sweepExpiredReservations,
   sweepExportFiles,
   sweepMediaUploads,
   sweepShortages,
   sweepUnboundConnectionGrants,
+  sweepWebhookHistory,
   systemCaller,
   uuidv7,
+  type WebhookDeliveryMessage,
+  type WebhookDeps,
+  WebhookSecretCipher,
 } from '@airstock/core';
 import { type Database, type DatabaseHooks, PgDatabase } from '@airstock/db';
 import {
@@ -113,6 +122,31 @@ function shopifyConfigFromEnv(env: Env): Promise<ShopifyAppConfig | null> {
     };
   })();
   return shopifyConfig;
+}
+
+/** Webhook signing secrets are encrypted with WEBHOOK_SECRET_KEY; webhooks are off without it. */
+let webhookCipher: Promise<WebhookSecretCipher | null> | null = null;
+function webhookCipherFromEnv(env: Env): Promise<WebhookSecretCipher | null> {
+  webhookCipher ??= env.WEBHOOK_SECRET_KEY
+    ? WebhookSecretCipher.fromBase64(env.WEBHOOK_SECRET_KEY_ID ?? 'w1', env.WEBHOOK_SECRET_KEY)
+    : Promise.resolve(null);
+  return webhookCipher;
+}
+
+/**
+ * Webhook deliveries POST from here with the global fetch (no redirects, 10-second timeout, set
+ * per request). A failed delivery comes back through the jobs queue with its retry delay.
+ */
+async function webhookDeps(env: Env, db: Database): Promise<WebhookDeps> {
+  return {
+    db,
+    cipher: await webhookCipherFromEnv(env),
+    fetch: (url, init) => fetch(url, init),
+    async schedule(message, delaySeconds) {
+      await env.JOBS_QUEUE.send(message, { contentType: 'json', delaySeconds });
+    },
+    logger,
+  };
 }
 
 function database(env: Env, hooks?: DatabaseHooks) {
@@ -226,6 +260,7 @@ export default {
         signingKey: env.MEDIA_SIGNING_KEY ?? null,
         publicUrl: env.PUBLIC_URL ?? '',
       },
+      webhookSecrets: await webhookCipherFromEnv(env),
       logger,
     });
     return app.fetch(request, env, ctx);
@@ -249,7 +284,7 @@ export default {
       const items = batch.messages.map((m) => ({
         id: m.id,
         attempts: m.attempts,
-        body: m.body as OutboxMessage | JobMessage,
+        body: m.body as JobsBody,
       }));
       let outcomes: JobsOutcome[] | null = null;
       if (env.SELF && env.INTERNAL_SECRET) {
@@ -291,6 +326,13 @@ export default {
           stale.map((body) => ({ body, contentType: 'json' as const })),
         );
       }
+      // Webhook retries whose queue message was lost, or whose sender stopped mid-attempt.
+      const deliveries = await recoverWebhookDeliveries(db);
+      if (deliveries.length > 0) {
+        await env.JOBS_QUEUE.sendBatch(
+          deliveries.map((body) => ({ body, contentType: 'json' as const })),
+        );
+      }
       await sweepExpiredReservations(db);
       // Shortages a receipt could not reach in its own transaction (D6).
       await sweepShortages(db);
@@ -321,6 +363,8 @@ export default {
       if (controller.cron === '0 3 * * *') {
         await ensureAuditPartitions(db);
         await sweepExportFiles(db, jobDeps(env, db).files);
+        // The webhook delivery log is kept 30 days (plan Section 5.13).
+        await sweepWebhookHistory(db);
       }
     } finally {
       await db.close();
@@ -390,10 +434,12 @@ async function smoke(request: Request, env: Env): Promise<Response> {
   });
 }
 
+type JobsBody = OutboxMessage | JobMessage | WebhookDeliveryMessage;
+
 interface JobsItem {
   id: string;
   attempts: number;
-  body: OutboxMessage | JobMessage;
+  body: JobsBody;
 }
 
 /** Null retryAfter means acknowledge; a number means retry after that many seconds. */
@@ -462,6 +508,29 @@ async function runJobsMessage(
       const outcome = await runJob(deps, body.job.shopId, body.job.jobId);
       return outcome.status === 'retry' ? outcome.delaySeconds : null;
     }
+    if ('webhookDelivery' in body) {
+      // One delivery attempt; the next retry, if any, is queued by the attempt itself.
+      const { shopId, deliveryId } = body.webhookDelivery;
+      await attemptWebhookDelivery(await webhookDeps(env, db), shopId, deliveryId);
+      return null;
+    }
+    if (await handleWebhookOutbox(await webhookDeps(env, db), body)) return null;
+    if (body.topic === 'email.webhook_disabled') {
+      if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
+        logger.error('email_not_configured', { topic: body.topic });
+        return 600;
+      }
+      await sendWebhookDisabledEmail(
+        {
+          db,
+          email: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
+          publicUrl: env.PUBLIC_URL,
+        },
+        body.shopId,
+        (body.payload as { subscriptionId: string }).subscriptionId,
+      );
+      return null;
+    }
     if (body.topic === 'email.member_invitation') {
       if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_URL) {
         logger.error('email_not_configured', { topic: body.topic });
@@ -496,8 +565,14 @@ async function runJobsMessage(
       return null;
     }
     if (body.topic === 'inventory.availability_changed') {
-      // The Shopify availability push (plan Section 8.2, step 5).
+      // stock.changed for webhook subscribers, then the Shopify availability push (plan Section
+      // 8.2, step 5). Both are safe to repeat, so a failure in either retries the message.
+      let webhookError: unknown = null;
+      await announceStockChanged(await webhookDeps(env, db), body).catch((error) => {
+        webhookError = error;
+      });
       if (deps) await pushAvailability(deps, body.shopId, body.payload as AvailabilityChanged);
+      if (webhookError) throw webhookError;
       return null;
     }
     logger.error('outbox_event_unhandled', { topic: body.topic, id: body.id });

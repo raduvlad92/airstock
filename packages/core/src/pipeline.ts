@@ -7,6 +7,8 @@ import { UUID_PATTERN, uuidv7 } from './ids.ts';
 import type { MediaDelivery } from './media/signing.ts';
 import { effectivePermissions, isRole } from './permissions.ts';
 import type { AnyOperation, FileAccess, HandlerContext, HandlerResult } from './registry.ts';
+import { catalogChangeEmit, INSERT_WEBHOOK_OUTBOX_SQL } from './webhooks/events.ts';
+import type { WebhookSecretCipher } from './webhooks/signing.ts';
 
 export interface Logger {
   error(message: string, data?: Record<string, unknown>): void;
@@ -21,6 +23,8 @@ export interface PipelineDeps {
   files?: FileAccess;
   /** Signs media links in results; without it they are null and uploads are refused. */
   media?: MediaDelivery;
+  /** Encrypts webhook signing secrets; without it creating a webhook is refused. */
+  webhookSecrets?: WebhookSecretCipher;
 }
 
 export interface ExecuteRequest {
@@ -158,7 +162,7 @@ export async function execute(
   const resolvedShopId = shopId;
 
   type TxOutcome =
-    | { kind: 'done'; handled: HandlerResult<unknown> }
+    | { kind: 'done'; handled: HandlerResult<unknown>; webhookRows: number }
     | { kind: 'replay'; response: unknown };
 
   let outcome: TxOutcome;
@@ -184,13 +188,15 @@ export async function execute(
           locationScope,
           newId: () => uuidv7(),
           ...(deps.media ? { media: deps.media } : {}),
+          ...(deps.webhookSecrets ? { webhookSecrets: deps.webhookSecrets } : {}),
           event: (fields) => auditEvent(base(), { phase: 'outcome', ...fields }),
         };
         const handled = await op.handler(ctx, input);
+        let webhookRows = 0;
         if (op.kind === 'command') {
-          await finalizeCommand(tx, op, caller, idempotencyKey, handled, base());
+          webhookRows = await finalizeCommand(tx, op, caller, idempotencyKey, handled, base());
         }
-        return { kind: 'done', handled } as const;
+        return { kind: 'done', handled, webhookRows } as const;
       },
     );
   } catch (error) {
@@ -242,7 +248,7 @@ export async function execute(
     requestId,
     attemptId,
     shopId: resolvedShopId,
-    outbox: op.kind === 'command' ? (outcome.handled.outbox?.length ?? 0) : 0,
+    outbox: op.kind === 'command' ? (outcome.handled.outbox?.length ?? 0) + outcome.webhookRows : 0,
   };
 }
 
@@ -359,7 +365,7 @@ async function finalizeCommand(
   idempotencyKey: string | null,
   handled: HandlerResult<unknown>,
   base: Parameters<typeof auditEvent>[0],
-): Promise<void> {
+): Promise<number> {
   const { audit } = handled;
   const success: AuditEvent = auditEvent(base, {
     action: op.audit.action,
@@ -375,28 +381,41 @@ async function finalizeCommand(
     context: audit.context ?? null,
   });
   const outbox = (handled.outbox ?? []).map((o) => ({ id: uuidv7(), ...o }));
-  // One round trip: success event (plus any extra events), outbox rows, idempotency result.
-  await tx.query(
+  const events = [success, ...(handled.events ?? [])];
+  // Webhook events: the handler's, plus catalog.item.changed derived from a catalog command's
+  // events. Each becomes an outbox row only if the shop subscribes to its type (D14).
+  const catalog = catalogChangeEmit(op.id, events);
+  const webhooks = [...(handled.webhooks ?? []), ...(catalog ? [catalog] : [])].map((w) => ({
+    id: uuidv7(),
+    type: w.type,
+    input: w.input,
+  }));
+  // One round trip: success event (plus any extra events), outbox rows, webhook events,
+  // idempotency result.
+  const [written] = await tx.query<{ webhooks: number }>(
     `with audit as (${INSERT_AUDIT_EVENTS_SQL}),
      outbox as (
        insert into outbox_events (shop_id, id, topic, payload)
        select app_shop_id(), x.id, x.topic, x.payload
        from jsonb_to_recordset($2::jsonb) as x(id uuid, topic text, payload jsonb)),
+     webhooks as (${INSERT_WEBHOOK_OUTBOX_SQL.replace('$1::jsonb', '$8::jsonb')}),
      idem as (
        update idempotency_records
        set status = 'completed', response = $3::jsonb, completed_at = now(), result_operation_id = $4
        where shop_id = app_shop_id() and caller_id = $5 and operation_id = $6 and key = $7)
-     select 1`,
+     select (select count(*) from webhooks)::int as webhooks`,
     [
-      JSON.stringify([success, ...(handled.events ?? [])]),
+      JSON.stringify(events),
       JSON.stringify(outbox),
       JSON.stringify(handled.result ?? null),
       audit.operationId ?? null,
       callerKey(caller),
       op.id,
       idempotencyKey,
+      JSON.stringify(webhooks),
     ],
   );
+  return written?.webhooks ?? 0;
 }
 
 async function assertLocationsInScope(

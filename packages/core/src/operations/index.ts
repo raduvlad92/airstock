@@ -30,6 +30,7 @@ import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
 import { suppliersOperations } from './suppliers.ts';
+import { webhooksOperations } from './webhooks.ts';
 
 /** Every routed operation, module by module in file-name order. */
 export const operations: readonly AnyOperation[] = [
@@ -56,6 +57,7 @@ export const operations: readonly AnyOperation[] = [
   ...shopsOperations,
   ...storageOperations,
   ...suppliersOperations,
+  ...webhooksOperations,
 ];
 
 export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
@@ -91,3 +93,4 @@ export * from './shopify.ts';
 export * from './shops.ts';
 export * from './storage.ts';
 export * from './suppliers.ts';
+export * from './webhooks.ts';

@@ -1,0 +1,208 @@
+{
+  "/api/v1/shops/{shopId}/webhook-subscriptions/{subscriptionId}/test": {
+    "post": {
+      "operationId": "webhooks.subscriptions.test",
+      "summary": "Send a test event to a webhook",
+      "description": "Sends `webhook.test`, or the sample of any available event type, right after the request. The envelope has `\"test\": true` and the `Airstock-Test: 1` header; it is tried once and never counts toward failures. Works on a disabled subscription too.",
+      "x-permission": "webhooks.manage",
+      "x-connection-scope": "webhooks:manage",
+      "x-audit-action": "webhook.subscription.test_sent",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "subscriptionId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "eventType": {
+                  "default": "webhook.test",
+                  "description": "Send this type’s sample payload instead of webhook.test.",
+                  "type": "string",
+                  "maxLength": 100
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "delivery": {
+                    "type": "object",
+                    "properties": {
+                      "deliveryId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "subscriptionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "subscriptionName": {
+                        "type": "string"
+                      },
+                      "eventId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                        "description": "The envelope `id`: the same on every retry and replay."
+                      },
+                      "eventType": {
+                        "type": "string"
+                      },
+                      "test": {
+                        "type": "boolean"
+                      },
+                      "replayOf": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "pending",
+                          "sending",
+                          "retrying",
+                          "delivered",
+                          "failed",
+                          "cancelled"
+                        ]
+                      },
+                      "attempts": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "nextAttemptAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastAttemptAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastStatusCode": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "lastError": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastResponse": {
+                        "description": "At most the first 1 KB of the last response.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastDurationMs": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "deliveredAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "deliveryId",
+                      "subscriptionId",
+                      "subscriptionName",
+                      "eventId",
+                      "eventType",
+                      "test",
+                      "replayOf",
+                      "status",
+                      "attempts",
+                      "nextAttemptAt",
+                      "lastAttemptAt",
+                      "lastStatusCode",
+                      "lastError",
+                      "lastResponse",
+                      "lastDurationMs",
+                      "deliveredAt",
+                      "createdAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "eventId",
+                  "delivery"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

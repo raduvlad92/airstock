@@ -8,6 +8,7 @@ import {
   type Logger,
   sessionCaller,
   uuidv7,
+  type WebhookSecretCipher,
 } from '@airstock/core';
 import type { Database, DatabaseHooks } from '@airstock/db';
 import { Hono } from 'hono';
@@ -45,6 +46,8 @@ export interface AppDeps {
   media?: MediaConfig;
   /** Request rate limits per caller (ADR 0011); none when absent. */
   rateLimiter?: RateLimiter;
+  /** Encrypts webhook signing secrets (D14); creating a webhook is refused when absent. */
+  webhookSecrets?: WebhookSecretCipher | null;
   logger: Logger;
 }
 

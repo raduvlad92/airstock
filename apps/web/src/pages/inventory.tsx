@@ -19,6 +19,7 @@ import {
 import { can, useShopContext } from '../context.tsx';
 import { useMutation } from '../mutation.ts';
 import { QuickCountForm } from './counts.tsx';
+import { LotTrace } from './lot-trace.tsx';
 import { useLocations } from './warehouses.tsx';
 
 type Availability = Out<typeof ops.getAvailability>;
@@ -100,6 +101,7 @@ export function StockPanel({
     : [];
   const lots = a?.trackingMode === 'lot' || a?.trackingMode === 'lot_expiry';
   const serials = a?.trackingMode === 'serial';
+  const [traceLotId, setTraceLotId] = useState<string | null>(null);
   return (
     <Card title={title ?? 'Stock'}>
       <ErrorNotice error={availability.error} />
@@ -155,6 +157,16 @@ export function StockPanel({
                           {p.lotCode ?? '—'}
                           {p.expiresOn ? ` · ${p.expiresOn}` : ''}{' '}
                           {p.lotExpired ? <Badge tone="error">Expired</Badge> : null}
+                          {p.lotId ? (
+                            <button
+                              type="button"
+                              className="small ghost"
+                              aria-label={`Trace lot ${p.lotCode ?? ''}`}
+                              onClick={() => setTraceLotId(p.lotId)}
+                            >
+                              Trace
+                            </button>
+                          ) : null}
                         </td>
                       ) : null}
                       {serials ? <td>{p.serial ?? '—'}</td> : null}
@@ -169,6 +181,9 @@ export function StockPanel({
           ) : (
             <Empty>No stock recorded yet.</Empty>
           )}
+          {traceLotId ? (
+            <LotTrace shopId={shopId} lotId={traceLotId} onClose={() => setTraceLotId(null)} />
+          ) : null}
           <ReservationList shopId={shopId} variantId={variantId} />
         </>
       ) : null}

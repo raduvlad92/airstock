@@ -161,6 +161,11 @@
                     "only"
                   ]
                 },
+                "stockAt": {
+                  "description": "Variants mode: a location without sub-locations. Each row then carries stockAt: the sellable units on hand there and the position version, which a count typed for that location sends back as what it read.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
                 "limit": {
                   "default": 50,
                   "type": "integer",
@@ -344,6 +349,38 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "stockAt": {
+                          "description": "Only with stockAt.",
+                          "type": "object",
+                          "properties": {
+                            "locationId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "onHand": {
+                              "type": "string",
+                              "description": "Sellable units on hand at the location."
+                            },
+                            "version": {
+                              "description": "The version of the position a count sets; null when there is none yet.",
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "countable": {
+                              "type": "boolean",
+                              "description": "A quantity can be counted here as one number: not lot- or serial-tracked, not a bundle."
+                            }
+                          },
+                          "required": [
+                            "locationId",
+                            "onHand",
+                            "version",
+                            "countable"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [

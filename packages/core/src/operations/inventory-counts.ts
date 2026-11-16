@@ -53,6 +53,37 @@ const CountItem = z.object({
 });
 type CountItemInput = z.infer<typeof CountItem>;
 
+/**
+ * A quick count item, with what the count was based on (G5): a quantity typed in the grid or the
+ * stock panel sends the position's version and on hand as it read them.
+ */
+const QuickCountItem = CountItem.extend({
+  read: z
+    .object({
+      version: z
+        .number()
+        .int()
+        .min(0)
+        .nullable()
+        .describe('The position version read; null when there was no position.'),
+      onHand: NonNegativeDecimal.describe('The units on hand read, in base units.'),
+    })
+    .optional()
+    .describe(
+      'What the count was based on, for one position (give the lot for lot-tracked items). If units moved there since (the version and on hand both changed), the count is refused with moved_since_read for review; a version changed only by reservations passes.',
+    ),
+});
+
+/** A quick count based on a read whose position moved since: what was read and what is there now. */
+interface MovedSinceRead {
+  variantId: string;
+  locationId: string;
+  condition: string;
+  lotId: string | null;
+  read: { version: number | null; onHand: string };
+  now: { version: number | null; onHand: string };
+}
+
 interface Counted {
   key: PositionKey;
   counted: string;
@@ -215,12 +246,12 @@ export const quickCount = defineOperation({
   id: 'inventory.counts.quick',
   summary: 'Record what was counted on a shelf and correct stock now',
   description:
-    'Use this for "I counted shelf B2: 4 of SKU X and none of SKU Y", or a quantity typed for a location in the grid: sets each counted item to the number counted and posts the differences as adjustments with the reason count correction, in one step. Serial-tracked items list the serials present; lot-tracked items name the lot. If a count is below what is reserved, the error lists the claims: retry with reservationChoices. For a counting round over many shelves that is entered over time, start a count session instead.',
+    'Use this for "I counted shelf B2: 4 of SKU X and none of SKU Y", or a quantity typed for a location in the grid: sets each counted item to the number counted and posts the differences as adjustments with the reason count correction, in one step. Serial-tracked items list the serials present; lot-tracked items name the lot. If a count is below what is reserved, the error lists the claims: retry with reservationChoices. A count of a quantity read on screen sends read (the position version and on hand read); if units moved since, it fails with moved_since_read, and the person decides whether the count stands. For a counting round over many shelves that is entered over time, start a count session instead.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
     locationId: Id.describe('The shelf counted (a location without sub-locations).'),
-    counts: z.array(CountItem).min(1).max(500),
+    counts: z.array(QuickCountItem).min(1).max(500),
     note: Note.optional(),
     reservationChoices: ReservationChoices,
   }),
@@ -250,9 +281,21 @@ export const quickCount = defineOperation({
       [operationId, ...actorColumns(ctx), sessionId],
     );
     const counted: Counted[] = [];
+    const reads: Array<{ key: PositionKey; read: { version: number | null; onHand: string } }> = [];
     for (const item of [...input.counts].sort((a, b) => (a.variantId < b.variantId ? -1 : 1))) {
       const at = await itemLocation(ctx, item, input.locationId, null);
-      counted.push(...(await expandCount(ctx, item, at, operationId)));
+      const expanded = await expandCount(ctx, item, at, operationId);
+      if (item.read) {
+        if (expanded.length !== 1) {
+          throw errors.unprocessable(
+            'read_needs_one_position',
+            'A read version applies to one position: give the lot, and leave it out for serials.',
+            { variantId: item.variantId },
+          );
+        }
+        reads.push({ key: expanded[0]!.key, read: item.read });
+      }
+      counted.push(...expanded);
     }
     const seen = new Set<string>();
     for (const c of counted) {
@@ -267,10 +310,34 @@ export const quickCount = defineOperation({
       'count',
       counted.map((c) => c.key),
       async () => {
-        before = await onHandByKey(
+        // The positions are locked: compare what each count was based on with what is there now.
+        const positions = await findPositions(
           ctx.tx,
           counted.map((c) => c.key),
         );
+        before = new Map(positions.map((p) => [keyOf(p), p.onHand]));
+        const moved: MovedSinceRead[] = [];
+        for (const r of reads) {
+          const p = positions.find((x) => keyOf(x) === keyOf(r.key));
+          const now = { version: p?.version ?? null, onHand: normalize(p?.onHand ?? '0') };
+          if (now.version !== r.read.version && compare(now.onHand, r.read.onHand) !== 0) {
+            moved.push({
+              variantId: r.key.variantId,
+              locationId: r.key.locationId,
+              condition: r.key.condition,
+              lotId: r.key.lotId,
+              read: { version: r.read.version, onHand: normalize(r.read.onHand) },
+              now,
+            });
+          }
+        }
+        if (moved.length > 0) {
+          throw errors.conflict(
+            'moved_since_read',
+            'Units moved since this was read. Review the count: keep it as the number on the shelf now, or add the movements since.',
+            { positions: moved },
+          );
+        }
         return counted.map((c) => ({ key: c.key, target: c.counted, pack: c.pack }));
       },
       input.reservationChoices ?? [],
@@ -303,11 +370,6 @@ export const quickCount = defineOperation({
     };
   },
 });
-
-async function onHandByKey(tx: Tx, keys: PositionKey[]): Promise<Map<string, string>> {
-  const rows = await findPositions(tx, keys);
-  return new Map(rows.map((p) => [keyOf(p), p.onHand]));
-}
 
 async function insertLines(
   ctx: HandlerContext,

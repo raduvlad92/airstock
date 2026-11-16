@@ -180,7 +180,8 @@ function RecentExports({ shopId }: { shopId: string }) {
           <li key={e.exportId}>
             <span>
               <span className="muted">{formatDateTime(e.createdAt)}</span>{' '}
-              {e.kind === 'activity' ? <span>Activity history</span> : null}{' '}
+              {e.kind === 'activity' ? <span>Activity history</span> : null}
+              {e.kind === 'lot_trace' ? <span>Lot trace</span> : null}{' '}
               <Badge
                 tone={e.status === 'completed' ? 'ok' : e.status === 'failed' ? 'error' : 'muted'}
               >

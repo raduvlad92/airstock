@@ -200,7 +200,7 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
 // that check for conservation of in-transit stock).
 // ---------------------------------------------------------------------------------------------
 describe('F-RECON-SKIPS-DOCUMENTS: the scheduled check ignores transfer and return invariants', () => {
-  it.fails('reports a transfer whose in-transit stock no longer matches its line', async () => {
+  it('reports a transfer whose in-transit stock no longer matches its line', async () => {
     const own = await seedShop(db, sink, 'Review recon');
     const oh = harness(db, sink, own);
     const wh = await oh.run(ops.createWarehouse, { name: 'Other' });

@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.reconciliation.get",
       "summary": "Get the stock check result",
-      "description": "Use this for \"does my stock add up\" questions. Airstock checks every 30 minutes after stock changes, and daily, that history, balances, reservations, serials, and the quantity behind the average cost agree. Returns the latest scheduled checks, the reconciliation alert, and the problems found right now. Repairs are made by a person in the dashboard or over REST.",
+      "description": "Use this for \"does my stock add up\" questions. Airstock checks every 30 minutes after stock changes, and daily, that history, balances, reservations, serials, transfers, returns, and the quantity behind the average cost agree. Returns the latest scheduled checks, the reconciliation alert, and the problems found right now. Repairs are made by a person in the dashboard or over REST.",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.reconciliation.viewed",
@@ -166,7 +166,12 @@
                                 "reservation_status_mismatch",
                                 "bundle_component_mismatch",
                                 "serial_mismatch",
-                                "cost_quantity_mismatch"
+                                "cost_quantity_mismatch",
+                                "transfer_hold_mismatch",
+                                "transfer_in_transit_mismatch",
+                                "return_received_mismatch",
+                                "return_inspected_mismatch",
+                                "return_unit_inspected_mismatch"
                               ]
                             },
                             "title": {
@@ -178,7 +183,10 @@
                                 "position",
                                 "reservation",
                                 "serial_unit",
-                                "variant"
+                                "variant",
+                                "transfer_line",
+                                "return_line",
+                                "return_unit"
                               ]
                             },
                             "targetId": {

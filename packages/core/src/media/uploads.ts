@@ -11,6 +11,7 @@ import {
   MEDIA_LIMITS,
   type MediaKind,
   type MediaType,
+  originalLimitApplies,
   UPLOAD_PARTS,
   type UploadPart,
 } from './files.ts';
@@ -59,6 +60,21 @@ export interface OpenUpload {
   maxBytes: number;
   /** Longest side in pixels, for derivatives. */
   maxSide: number | null;
+  /**
+   * For an image original, the shop's limit on its longest side (D19). Null keeps full size, and
+   * for GIFs and documents. Checked when the header can be read; never a reason to refuse on its
+   * own when it cannot.
+   */
+  originalMaxSide: number | null;
+}
+
+/** An original larger than the shop keeps (D19). */
+export function originalTooLarge(maxSide: number, size: { width: number; height: number }) {
+  return uploadRejected(
+    'original_too_large',
+    `The picture is ${size.width} × ${size.height} px; this shop keeps originals up to ${maxSide} px on the longest side. Shrink it and upload it again.`,
+    { maxSide, width: size.width, height: size.height },
+  );
 }
 
 interface IntentRow {
@@ -72,6 +88,7 @@ interface IntentRow {
   status: string;
   created_by: string;
   expired: boolean;
+  original_max_side: number | null;
 }
 
 const UPLOAD_NEED = { permission: 'catalog.write', connectionScope: 'catalog:write' } as const;
@@ -92,9 +109,10 @@ export async function openUpload(
   if (!(UPLOAD_PARTS as readonly string[]).includes(part)) throw errors.notFound('Upload part');
   const [intent] = await db.transaction({ shopId, userId: caller.userId, readOnly: true }, (tx) =>
     tx.query<IntentRow>(
-      `select id, media_id, kind, file_name, content_type, size_bytes, sha256, status, created_by,
-           expires_at <= now() as expired
-         from media_upload_intents where id = $1`,
+      `select i.id, i.media_id, i.kind, i.file_name, i.content_type, i.size_bytes, i.sha256,
+           i.status, i.created_by, i.expires_at <= now() as expired,
+           s.media_original_max_side as original_max_side
+         from media_upload_intents i join shops s on s.id = i.shop_id where i.id = $1`,
       [intentId],
     ),
   );
@@ -120,6 +138,10 @@ export async function openUpload(
     accept: derivative ? DERIVATIVE_TYPES : [intent.content_type],
     maxBytes: derivative ? derivative.maxBytes : Number(intent.size_bytes),
     maxSide: derivative ? derivative.maxSide : null,
+    originalMaxSide:
+      p === 'original' && originalLimitApplies(intent.content_type)
+        ? intent.original_max_side
+        : null,
   };
 }
 

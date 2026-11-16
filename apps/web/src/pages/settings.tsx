@@ -59,7 +59,10 @@ export function ShopSettingsPage() {
   return (
     <>
       {can(context.data, 'shop.manage') ? (
-        <UnitsSetting shopId={shopId} current={shop.displayUnits} />
+        <>
+          <UnitsSetting shopId={shopId} current={shop.displayUnits} />
+          <PicturesSetting shopId={shopId} current={shop.mediaOriginalMaxSide} />
+        </>
       ) : null}
       <Card title="Shop">
         <dl className="facts">
@@ -99,6 +102,44 @@ export function ShopSettingsPage() {
         </table>
       </Card>
     </>
+  );
+}
+
+const ORIGINAL_SIZES = [
+  ['1024', '1,024 px'],
+  ['2048', '2,048 px (default)'],
+  ['4096', '4,096 px'],
+  ['full', 'Keep full size'],
+] as const;
+
+/** The longest side of the picture originals the shop keeps (D19). */
+function PicturesSetting({ shopId, current }: { shopId: string; current: number | null }) {
+  const queryClient = useQueryClient();
+  const set = useMutation({
+    mutationFn: (mediaOriginalMaxSide: number | null) =>
+      command(`/shops/${shopId}/settings`, { mediaOriginalMaxSide }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shop', shopId] }),
+  });
+  return (
+    <Card title="Pictures">
+      <Field
+        label="Largest original"
+        hint="Longer sides are shrunk before upload. Thumbnails and display images are unchanged."
+      >
+        <select
+          value={current === null ? 'full' : String(current)}
+          disabled={set.isPending}
+          onChange={(e) => set.mutate(e.target.value === 'full' ? null : Number(e.target.value))}
+        >
+          {ORIGINAL_SIZES.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <ErrorNotice error={set.error} />
+    </Card>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   type OpenUpload,
   objectKey,
   openUpload,
+  originalTooLarge,
   recordUploadPart,
   uploadRejected,
   verifyMediaLink,
@@ -160,9 +161,21 @@ export function isUploadRequest(method: string, path: string): boolean {
   return method === 'PUT' && UPLOAD_PATH.test(path);
 }
 
+/** The refusal for an image original whose header shows it is larger than the shop keeps (D19). */
+function oversizeOriginal(
+  upload: OpenUpload,
+  size: { width: number; height: number } | null,
+): AppError | null {
+  if (upload.originalMaxSide === null || !size) return null;
+  return Math.max(size.width, size.height) > upload.originalMaxSide
+    ? originalTooLarge(upload.originalMaxSide, size)
+    : null;
+}
+
 /**
- * Counts bytes, keeps the head, and checks the signature as the body passes. A failure errors the
- * stream, so storage never completes the object.
+ * Counts bytes, keeps the head, and checks the signature as the body passes. An original larger
+ * than the shop keeps is refused as soon as its header has passed. A failure errors the stream,
+ * so storage never completes the object.
  */
 function inspector(upload: OpenUpload, accept: readonly MediaType[], hasher: StreamHasher) {
   let size = 0;
@@ -171,6 +184,8 @@ function inspector(upload: OpenUpload, accept: readonly MediaType[], hasher: Str
   const chunks: Uint8Array[] = [];
   let type: MediaType | null = null;
   let failure: AppError | null = null;
+  /** Whether the original's pixel size is still to be checked while the bytes pass. */
+  let sizePending = upload.originalMaxSide !== null;
   const head = () => {
     const out = new Uint8Array(headLength);
     let at = 0;
@@ -221,6 +236,12 @@ function inspector(upload: OpenUpload, accept: readonly MediaType[], hasher: Str
         headLength += piece.byteLength;
       }
       if (type === null && headLength >= SIGNATURE_BYTES) check();
+      if (sizePending && type !== null) {
+        const pixels = imageSize(head(), type);
+        if (pixels || headLength >= HEAD_BYTES) sizePending = false;
+        const oversize = oversizeOriginal(upload, pixels);
+        if (oversize) fail(oversize);
+      }
       await hasher.write(chunk);
       controller.enqueue(chunk);
     },
@@ -406,6 +427,8 @@ async function receivePart(c: Context<AppEnv>, deps: AppDeps): Promise<Response>
     if (!put.ok) throw put.reason;
     const type = seen.type!;
     const pixels = upload.kind === 'image' ? imageSize(seen.head, type) : null;
+    const oversize = oversizeOriginal(upload, pixels);
+    if (oversize) throw oversize;
     if (upload.maxSide !== null) {
       if (!pixels) throw uploadRejected('unreadable_image', 'The image size could not be read.');
       if (Math.max(pixels.width, pixels.height) > upload.maxSide) {

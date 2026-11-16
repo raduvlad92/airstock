@@ -6,6 +6,7 @@ import {
   encodeDerivative,
   type Imaging,
   PrepareError,
+  planOriginal,
   prepareFile,
 } from '../src/components/media/derivatives.ts';
 import { MediaManager, mediaEntries } from '../src/components/media/MediaManager.tsx';
@@ -84,6 +85,77 @@ describe('derivatives made in the browser', () => {
     await expect(prepareFile(heic(), fakeImaging(1, 1, { decodes: false }))).rejects.toThrow(
       /cannot read HEIC/,
     );
+  });
+
+  it('decides which originals shrink to the shop’s limit, and to what (D19)', () => {
+    // Above the limit: the long side becomes the limit; JPEG, PNG, and WebP keep their type.
+    expect(planOriginal('image/jpeg', 4032, 3024, 2048)).toEqual({
+      width: 2048,
+      height: 1536,
+      type: 'image/jpeg',
+      quality: 0.9,
+    });
+    expect(planOriginal('image/png', 1000, 3000, 2048)).toMatchObject({
+      width: 683,
+      height: 2048,
+      type: 'image/png',
+    });
+    expect(planOriginal('image/webp', 5000, 5000, 1024)).toMatchObject({
+      width: 1024,
+      height: 1024,
+      type: 'image/webp',
+    });
+    // Canvases cannot encode AVIF, so a large one becomes WebP.
+    expect(planOriginal('image/avif', 4096, 3072, 2048)).toMatchObject({ type: 'image/webp' });
+    // Untouched: within the limit (inclusive), GIFs, documents, and shops keeping full size.
+    expect(planOriginal('image/jpeg', 2048, 1536, 2048)).toBeNull();
+    expect(planOriginal('image/gif', 4000, 4000, 2048)).toBeNull();
+    expect(planOriginal('application/pdf', 4000, 4000, 2048)).toBeNull();
+    expect(planOriginal('image/jpeg', 8000, 6000, null)).toBeNull();
+  });
+
+  it('shrinks a large original before hashing it, and makes derivatives no larger', async () => {
+    const imaging = fakeImaging(4032, 3024);
+    const file = new File([bytes(JPEG)], 'camera.jpg', { type: 'image/jpeg' });
+    const prepared = await prepareFile(file, imaging, { originalMaxSide: 1024 });
+    expect(imaging.calls).toEqual([
+      { width: 1024, height: 768, type: 'image/jpeg' },
+      { width: 320, height: 240, type: 'image/webp' },
+      // The display image never exceeds the shrunk original.
+      { width: 1024, height: 768, type: 'image/webp' },
+    ]);
+    expect(prepared).toMatchObject({ contentType: 'image/jpeg', fileName: 'camera.jpg' });
+    expect(prepared.original).not.toBe(file);
+    // The hash is the shrunk file's, which is what the server receives.
+    const digest = await crypto.subtle.digest('SHA-256', await prepared.original.arrayBuffer());
+    const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+    expect(prepared.sha256).toBe(hex);
+
+    // Within the limit, the file is sent as picked.
+    const small = new File([bytes(PNG)], 'small.png', { type: 'image/png' });
+    const untouched = await prepareFile(small, fakeImaging(800, 600), { originalMaxSide: 2048 });
+    expect(untouched.original).toBe(small);
+
+    // A browser without a WebP encoder sends a large WebP as JPEG.
+    const webp = new File(
+      [bytes([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])],
+      'shoe.webp',
+      { type: 'image/webp' },
+    );
+    const noWebp = await prepareFile(webp, fakeImaging(3000, 3000, { webp: false }), {
+      originalMaxSide: 2048,
+    });
+    expect(noWebp).toMatchObject({ contentType: 'image/jpeg', fileName: 'shoe.jpg' });
+
+    // HEIC converts straight to the limit.
+    const heic = new File(
+      [bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63])],
+      'IMG_2.HEIC',
+      { type: 'image/heic' },
+    );
+    const iphone = fakeImaging(3024, 4032);
+    await prepareFile(heic, iphone, { originalMaxSide: 2048 });
+    expect(iphone.calls[0]).toEqual({ width: 1536, height: 2048, type: 'image/jpeg' });
   });
 
   it('sends PDFs as they are and refuses other files', async () => {

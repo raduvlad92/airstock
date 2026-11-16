@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { errors } from '../errors.ts';
 import { RATE_LIMITS } from '../limits.ts';
+import { ORIGINAL_MAX_SIDES } from '../media/files.ts';
 import { effectivePermissions, PERMISSIONS, ROLES } from '../permissions.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, isTimeZone } from '../schemas.ts';
@@ -73,6 +74,13 @@ export const createShop = defineOperation({
   },
 });
 
+const OriginalMaxSide = z
+  .literal(ORIGINAL_MAX_SIDES)
+  .nullable()
+  .describe(
+    'Longest side in pixels of the picture originals the shop keeps; larger ones are shrunk before upload or refused. Null keeps full size.',
+  );
+
 export const getShopContext = defineOperation({
   id: 'shops.context.get',
   summary: 'Get the current shop and your access',
@@ -88,6 +96,7 @@ export const getShopContext = defineOperation({
       currency: z.string(),
       timezone: z.string(),
       displayUnits: z.enum(['metric', 'imperial']),
+      mediaOriginalMaxSide: OriginalMaxSide,
     }),
     role: z.string(),
     permissions: z.array(z.enum(PERMISSIONS)),
@@ -111,8 +120,11 @@ export const getShopContext = defineOperation({
       currency: string;
       timezone: string;
       displayUnits: 'metric' | 'imperial';
+      mediaOriginalMaxSide: (typeof ORIGINAL_MAX_SIDES)[number] | null;
     }>(
-      'select id, name, currency, timezone, display_units as "displayUnits" from shops where id = $1',
+      `select id, name, currency, timezone, display_units as "displayUnits",
+         media_original_max_side as "mediaOriginalMaxSide"
+       from shops where id = $1`,
       [ctx.shopId],
     );
     if (!shop || !ctx.membership) throw errors.notFound('Shop');
@@ -180,20 +192,22 @@ export const listShops = defineOperation({
 
 export const updateShopSettings = defineOperation({
   id: 'shops.settings.update',
-  summary: 'Change the shop name, time zone, or display units',
+  summary: 'Change the shop name, time zone, display units, or largest picture original',
   description:
-    'Display units choose metric or imperial in the dashboard (PRD 3.1). Stored values keep the unit they were entered in. The currency cannot change once set.',
+    'Display units choose metric or imperial in the dashboard (PRD 3.1). Stored values keep the unit they were entered in. The largest original is the longest side, in pixels, of the picture originals the shop keeps: 1,024, 2,048 (the default), or 4,096, or null for full size. The currency cannot change once set.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
     name: z.string().trim().min(1).max(200).optional(),
     timezone: z.string().min(1).max(64).refine(isTimeZone, 'Unknown IANA time zone.').optional(),
     displayUnits: z.enum(['metric', 'imperial']).optional(),
+    mediaOriginalMaxSide: OriginalMaxSide.optional(),
   }),
   output: z.object({
     name: z.string(),
     timezone: z.string(),
     displayUnits: z.string(),
+    mediaOriginalMaxSide: OriginalMaxSide,
     version: z.number(),
   }),
   permission: 'shop.manage',
@@ -203,27 +217,39 @@ export const updateShopSettings = defineOperation({
   http: { method: 'POST', path: '/shops/{shopId}/settings' },
   mcp: { exception: 'Shop settings are changed in the dashboard.' },
   async handler(ctx, input) {
-    const [before] = await ctx.tx.query<{ name: string; timezone: string; display_units: string }>(
-      'select name, timezone, display_units from shops where id = $1 for update',
-      [ctx.shopId],
-    );
-    if (!before) throw errors.notFound('Shop');
-    const [after] = await ctx.tx.query<{
+    type Settings = {
       name: string;
       timezone: string;
       display_units: string;
-      version: number;
-    }>(
+      media_original_max_side: (typeof ORIGINAL_MAX_SIDES)[number] | null;
+    };
+    const [before] = await ctx.tx.query<Settings>(
+      `select name, timezone, display_units, media_original_max_side
+       from shops where id = $1 for update`,
+      [ctx.shopId],
+    );
+    if (!before) throw errors.notFound('Shop');
+    const [after] = await ctx.tx.query<Settings & { version: number }>(
       `update shops set name = coalesce($2, name), timezone = coalesce($3, timezone),
-         display_units = coalesce($4, display_units), version = version + 1
-       where id = $1 returning name, timezone, display_units, version`,
-      [ctx.shopId, input.name ?? null, input.timezone ?? null, input.displayUnits ?? null],
+         display_units = coalesce($4, display_units),
+         media_original_max_side = case when $5 then $6::integer else media_original_max_side end,
+         version = version + 1
+       where id = $1 returning name, timezone, display_units, media_original_max_side, version`,
+      [
+        ctx.shopId,
+        input.name ?? null,
+        input.timezone ?? null,
+        input.displayUnits ?? null,
+        input.mediaOriginalMaxSide !== undefined,
+        input.mediaOriginalMaxSide ?? null,
+      ],
     );
     return {
       result: {
         name: after!.name,
         timezone: after!.timezone,
         displayUnits: after!.display_units,
+        mediaOriginalMaxSide: after!.media_original_max_side,
         version: after!.version,
       },
       audit: {
@@ -231,7 +257,7 @@ export const updateShopSettings = defineOperation({
         targetId: ctx.shopId,
         changes: {
           fields: Object.fromEntries(
-            (['name', 'timezone', 'display_units'] as const)
+            (['name', 'timezone', 'display_units', 'media_original_max_side'] as const)
               .filter((k) => before[k] !== after![k])
               .map((k) => [k, { from: before[k], to: after![k] }]),
           ),

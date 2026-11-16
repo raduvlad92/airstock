@@ -67,6 +67,14 @@ File field values are media IDs. Each must be a file in the shop of the kind the
 
 `manage_media` has eight actions: `list`, `find`, `primary_pictures`, `download_original`, `link`, `update_link` (role, alt text, primary), `reorder`, and `remove`. Upload and finalize are MCP exceptions, because they carry binary data. That makes 12 tools.
 
+## Update, 16 November 2026: originals shrink to the shop's limit (Phase 2, D19)
+
+Originals are the largest per-shop storage cost, and phone and camera pictures are often 4,000 px or more. The owner decided that originals larger than 2,048 px on the long side are shrunk before upload, as a shop setting.
+
+- **Setting.** `shops.media_original_max_side` (migration 0016): 1,024, 2,048 (the default, also for existing shops), or 4,096 px, or null to keep full size. It is changed in Settings → Shop → Pictures with `shops.settings.update` (permission `shop.manage`, recorded in `shop.settings.updated` like the other settings) and read from `shops.context.get`.
+- **Browser.** Before hashing, the dashboard re-encodes an original whose long side exceeds the limit: JPEG stays JPEG (quality 0.9), PNG stays PNG, WebP stays WebP. AVIF becomes WebP, because canvases cannot encode AVIF; a browser that cannot encode WebP sends JPEG. The bitmap is decoded with its EXIF orientation applied, and re-encoding drops the file's metadata, GPS included. HEIC is converted straight to the limit. The thumbnail and display image are made from the shrunk size, so neither is larger than the original. Pictures within the limit, GIFs (which may be animated), and PDFs are uploaded untouched, and the byte limit applies after shrinking.
+- **Server.** The intent gives the limit as the original's `maxSide`. While the original streams, the Worker reads its size from the header (JPEG start of frame, PNG IHDR, WebP VP8, VP8L, or VP8X, and AVIF's `ispe` property of the primary item) and refuses a larger one with `422 original_too_large` (with `maxSide`, `width`, and `height`), which fails the intent like any other rejection. A header it cannot read is not a reason to refuse. GIFs are not checked. The checksum and signature checks are unchanged.
+
 ## Why
 
 - **One path through the Worker.** Uploading through the Worker keeps a single authenticated path with the checksum and signature checks where the bytes pass, and no R2 credentials in the browser.

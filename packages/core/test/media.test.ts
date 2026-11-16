@@ -15,12 +15,21 @@ import {
   type SeededShop,
   seedShop,
 } from '../../../test/helpers.ts';
-import { fakeJpeg, fakePdf, fakePng, fakeWebp, sha256Hex } from '../../../test/media-fixtures.ts';
+import {
+  fakeAvif,
+  fakeCameraJpeg,
+  fakeJpeg,
+  fakePdf,
+  fakePng,
+  fakeWebp,
+  fakeWebpLossy,
+  sha256Hex,
+} from '../../../test/media-fixtures.ts';
 
 // Milestone N4: what files are accepted and how they are recognised, signed links, and tenant
 // isolation of the media tables at the SQL layer (plan Section 5.8, A13).
 
-const { fitWithin, imageSize, normalizeRole, sniffType } = mediaFiles;
+const { fitWithin, imageSize, normalizeRole, originalLimitApplies, sniffType } = mediaFiles;
 const ascii = (s: string) => Uint8Array.from([...s].map((c) => c.charCodeAt(0)));
 
 describe('file signatures and pixel sizes', () => {
@@ -94,6 +103,47 @@ describe('file signatures and pixel sizes', () => {
     // A truncated header gives no size rather than a wrong one.
     expect(imageSize(fakePng(10, 10).slice(0, 20), 'image/png')).toBeNull();
     expect(imageSize(fakeJpeg(10, 10).slice(0, 12), 'image/jpeg')).toBeNull();
+  });
+
+  it('reads each format the original limit checks (D19)', () => {
+    // JPEG: a camera's EXIF block comes before the progressive start of frame.
+    expect(imageSize(fakeCameraJpeg(4032, 3024), 'image/jpeg')).toEqual({
+      width: 4032,
+      height: 3024,
+    });
+    // PNG IHDR, and WebP in each of its three forms.
+    expect(imageSize(fakePng(5000, 4000), 'image/png')).toEqual({ width: 5000, height: 4000 });
+    expect(imageSize(fakeWebp(6000, 4000), 'image/webp')).toEqual({ width: 6000, height: 4000 });
+    expect(imageSize(fakeWebpLossy(3000, 2000), 'image/webp')).toEqual({
+      width: 3000,
+      height: 2000,
+    });
+    // AVIF: the primary item's ispe, not the tiles' ispe listed first.
+    const avif = fakeAvif(4096, 3072);
+    expect(sniffType(avif)).toBe('image/avif');
+    expect(imageSize(avif, 'image/avif')).toEqual({ width: 4096, height: 3072 });
+    // Without its meta box, or cut inside it, there is no size rather than a wrong one.
+    expect(imageSize(avif.slice(0, 40), 'image/avif')).toBeNull();
+    expect(imageSize(avif.slice(0, 28), 'image/avif')).toBeNull();
+    // GIFs may be animated, so the limit leaves them alone; documents have no pixels.
+    expect(originalLimitApplies('image/gif')).toBe(false);
+    expect(originalLimitApplies('application/pdf')).toBe(false);
+    expect(originalLimitApplies('image/avif')).toBe(true);
+  });
+
+  it('never fails on arbitrary bytes after a valid signature', () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ maxLength: 600 }), (tail) => {
+        for (const head of [fakeAvif(10, 10).slice(0, 28), fakeCameraJpeg(10, 10).slice(0, 4)]) {
+          const bytes = new Uint8Array(head.length + tail.length);
+          bytes.set(head);
+          bytes.set(tail, head.length);
+          const type = sniffType(bytes) ?? 'image/avif';
+          const size = imageSize(bytes, type);
+          if (size) expect(size.width * size.height).toBeGreaterThan(0);
+        }
+      }),
+    );
   });
 
   it('fits derivatives inside their longest side and never enlarges', () => {

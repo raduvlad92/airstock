@@ -60,6 +60,7 @@ export {
   objectKey,
   objectKeys,
   openUpload,
+  originalTooLarge,
   recordUploadPart,
   sweepMediaUploads,
   type UploadedPart,

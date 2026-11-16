@@ -19,6 +19,7 @@ import {
   skuKey,
 } from '../shopify/listing.ts';
 import { createItem, updateItem } from './catalog-items.ts';
+import { adjustStock } from './inventory-adjustments.ts';
 import { applyVariantMaps } from './shopify-mapping.ts';
 import { type Acc, inner } from './shopify-orders.ts';
 import { SYNC_TOOL } from './shopify-sync.ts';
@@ -333,7 +334,19 @@ export const syncShopifyProduct = defineOperation({
   summary: 'Apply a product created or changed in Shopify',
   kind: 'command',
   scope: 'shop',
-  input: z.object({ connectionId: Id, product: ShopifyProductState }),
+  input: z.object({
+    connectionId: Id,
+    product: ShopifyProductState,
+    /**
+     * Shopify's available for a new product's variant, keyed `item@location`, as read at
+     * `availableAt`: brought in as opening stock when the product is created here.
+     */
+    available: z.record(z.string(), z.number().int()).optional(),
+    availableAt: z
+      .string()
+      .refine((v) => !Number.isNaN(Date.parse(v)), 'A timestamp.')
+      .optional(),
+  }),
   output: z.object({
     outcome: z.enum(['created', 'matched', 'updated', 'unchanged', 'unmatched', 'own_echo']),
     productId: Id.nullable(),
@@ -502,9 +515,23 @@ export const syncShopifyProduct = defineOperation({
             JSON.stringify(now),
           ],
         );
-        matches.set(v.variantId, { variantId: made.variantId, productId: made.productId });
         out.outcome = 'created';
         out.productId = made.productId;
+        // Shopify's quantity comes in as opening stock (as with the onboarding import), so the
+        // push that follows the map finds nothing to change instead of writing 0 over it (L1).
+        if (v.inventoryItemId && v.tracked && input.available && input.availableAt) {
+          const opened = await openingStock(ctx, acc, connectionId, made.variantId, {
+            item: v.inventoryItemId,
+            available: input.available,
+            at: input.availableAt,
+          });
+          // Shopify holds units where Airstock cannot receive them: left unmapped for a person.
+          if (opened) {
+            matches.set(v.variantId, { variantId: made.variantId, productId: made.productId });
+          }
+        } else if (!v.tracked || !v.inventoryItemId) {
+          matches.set(v.variantId, { variantId: made.variantId, productId: made.productId });
+        }
       } else {
         // Several products match, or a new product with several variants: left unmapped in sync
         // health, for a person to map or import with the onboarding import.
@@ -616,6 +643,54 @@ export const syncShopifyProduct = defineOperation({
     }
   },
 });
+
+/**
+ * Receives Shopify's available of a new item at each mapped Shopify location (at its receiving
+ * location, as a count correction) and records it as Airstock's record of Shopify, as of the
+ * read. Returns false, and changes nothing, when a location with units has no receiving location.
+ */
+async function openingStock(
+  ctx: HandlerContext,
+  acc: Acc,
+  connectionId: string,
+  variantId: string,
+  shopify: { item: string; available: Record<string, number>; at: string },
+): Promise<boolean> {
+  const maps = await ctx.tx.query<{
+    shopify_location_id: string;
+    receive_location_id: string | null;
+  }>(
+    `select shopify_location_id, receive_location_id from shopify_location_maps
+     where connection_id = $1 order by position`,
+    [connectionId],
+  );
+  const levels = maps.flatMap((m) => {
+    const quantity = shopify.available[`${shopify.item}@${m.shopify_location_id}`];
+    return quantity === undefined ? [] : [{ ...m, quantity }];
+  });
+  if (levels.some((l) => l.quantity > 0 && !l.receive_location_id)) return false;
+  for (const l of levels) {
+    if (l.quantity > 0) {
+      await inner(ctx, acc, adjustStock, {
+        locationId: l.receive_location_id,
+        adjustmentReason: 'count_correction',
+        adjustments: [{ variantId, direction: 'add', quantity: String(l.quantity) }],
+        note: 'Opening stock: Shopify’s quantity when the product was created in Shopify.',
+      });
+    }
+    await ctx.tx.query(
+      `insert into shopify_inventory_levels (shop_id, connection_id, shopify_inventory_item_id,
+         shopify_location_id, expected_available, expected_as_of)
+       values (app_shop_id(), $1, $2, $3, $4, $5::timestamptz)
+       on conflict (shop_id, connection_id, shopify_inventory_item_id, shopify_location_id)
+       do update set expected_available = excluded.expected_available,
+         expected_as_of = excluded.expected_as_of, updated_at = now()
+       where shopify_inventory_levels.expected_available is null`,
+      [connectionId, shopify.item, l.shopify_location_id, l.quantity, shopify.at],
+    );
+  }
+  return true;
+}
 
 async function recordDifference(
   tx: Tx,

@@ -357,10 +357,30 @@ export async function syncProductFromShopify(
   const store = await connectedStore(deps, shopId, connectionId);
   const product = await store.admin.product(shopifyProductId);
   if (!product) return 'deleted';
+  // A new product with one variant may be created here: its quantities in Shopify come in as
+  // opening stock, so they are read first (once, while the variant is not mapped).
+  let available: Record<string, number> | undefined;
+  let availableAt: string | undefined;
+  const [only] = product.variants;
+  if (product.variants.length === 1 && only?.inventoryItemId && only.tracked) {
+    const [known] = await deps.db.transaction({ shopId, userId: null, readOnly: true }, (tx) =>
+      tx.query(
+        `select 1 from shopify_variant_maps where connection_id = $1 and shopify_variant_id = $2
+         union all
+         select 1 from shopify_listings where connection_id = $1 and shopify_product_id = $3
+         limit 1`,
+        [connectionId, only.variantId, product.productId],
+      ),
+    );
+    if (!known) {
+      availableAt = new Date().toISOString();
+      available = Object.fromEntries(await store.admin.getAvailable([only.inventoryItemId]));
+    }
+  }
   const done = await execute(deps, ops.syncShopifyProduct, {
     caller: store.caller,
     shopId,
-    input: { connectionId, product },
+    input: { connectionId, product, available, availableAt },
   });
   return (done.result as { outcome: string }).outcome;
 }

@@ -259,4 +259,45 @@ describe('Shopify connector fixes', () => {
     ).toBe(200);
     expect(await status(second)).toBe('uninstalled');
   });
+
+  it('L1: a product created in Shopify comes in with its quantity as opening stock', async () => {
+    const m = await h.merchant('Opening stock');
+    const store = h.newStore('fixes');
+    const connectionId = await h.install(m, store);
+    await h.command(m.cookie, `/shops/${m.shopId}/shopify/connections/${connectionId}/locations`, {
+      connectionId,
+      locations: [{ shopifyLocationId: '1001', locationId: m.locationId }],
+    });
+    await h.flushTogether(m.shopId);
+    const [v] = store.addProduct({
+      title: 'Promo tin',
+      variants: [
+        { sku: `TIN-${uuidv7().slice(-6)}`, price: '9.00', quantities: { '1001': 10, '1002': 4 } },
+      ],
+    });
+    const res = await h.deliver(
+      store.domain,
+      'products/create',
+      store.productBody(store.products.at(-1)!.productId),
+    );
+    expect(res.status).toBe(200);
+    await h.runJobs(m.shopId);
+    const outcomes = await h.flushTogether(m.shopId);
+    expect(outcomes.map((o) => o.outcome)).not.toContain('pushed');
+    const [mapped] = await ownerQuery<{ variant_id: string }>(
+      'select variant_id from shopify_variant_maps where shop_id = $1',
+      [m.shopId],
+    );
+    expect(await h.available(m, mapped!.variant_id)).toBe('10.000000');
+    expect(store.available(v!)).toBe(10);
+    // The unmapped warehouse is not Airstock's.
+    expect(store.available(v!, '1002')).toBe(4);
+    // A later sale lowers both.
+    const order = store.placeOrder([{ variant: v!, quantity: 3 }]);
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(order));
+    await h.runJobs(m.shopId);
+    await h.flushTogether(m.shopId);
+    expect(await h.available(m, mapped!.variant_id)).toBe('7.000000');
+    expect(store.available(v!)).toBe(7);
+  });
 });

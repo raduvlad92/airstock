@@ -80,7 +80,7 @@ describe('Shopify connector review findings (listings, from PR #79)', () => {
   // stock sees it sold out seconds later. PRD 8.5: a Shopify-side quantity no order explains is
   // shown as a conflict, not silently replaced (or it should come in as opening stock, as the
   // onboarding import does).
-  it.fails('L1: a product created in Shopify with stock keeps its quantity', async () => {
+  it('L1: a product created in Shopify with stock keeps its quantity', async () => {
     const s = await setup('Created stock');
     const code = sku('NEWQ');
     const [v] = s.store.addProduct({

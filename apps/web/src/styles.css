@@ -1848,6 +1848,31 @@ button.danger {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: var(--accent);
+
+/* Purchasing (I3) */
+.table tr.clickable {
+  cursor: pointer;
+}
+
+.table tr.clickable:hover td,
+.table tr.selected td {
+  background: var(--surface-2);
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.num-input {
+  width: 7rem;
+  text-align: right;
+}
+
+.plain-list li.alert-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 .scan-results,

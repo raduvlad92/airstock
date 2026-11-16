@@ -327,3 +327,35 @@ describe('F-SCOPE-ENGINE-EVENTS: expiry events carry no locations and reach ever
     expect(leaked).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-ONE-OF-A-KIND-COUNT (stock rule bypass). ADR 0024 limits a one-of-a-kind variant to one owned
+// unit across the shop. Receipts (inventory.ts), adjustments (inventory-adjustments.ts) and return
+// receipts (returns.ts) check it; counts do not (operations/inventory-counts.ts and
+// stock/adjust.ts never read oneOfAKind). A count that finds the item on a second shelf, or "3" on
+// its shelf, gives it several units, so it can be reserved and sold more than once.
+// ---------------------------------------------------------------------------------------------
+describe('F-ONE-OF-A-KIND-COUNT: a count can give a one-of-a-kind item more than one unit', () => {
+  it.fails('refuses a count that would make a one-of-a-kind item own two units', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId, oneOfAKind: true });
+    await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '1' });
+    const outcomes: string[] = [];
+    for (const [locationId, counted] of [
+      [store, '1'],
+      [shop.locationId, '3'],
+    ] as const) {
+      outcomes.push(
+        await h.run(ops.quickCount, { locationId, counts: [{ variantId, counted }] }).then(
+          () => 'succeeded',
+          (e: { code?: string }) => e.code ?? String(e),
+        ),
+      );
+    }
+    const view = await h.run(ops.getAvailability, { variantId });
+    expect({ outcomes, owned: view.totals.ownedTotal }).toEqual({
+      outcomes: ['one_of_a_kind', 'one_of_a_kind'],
+      owned: '1.000000',
+    });
+  });
+});

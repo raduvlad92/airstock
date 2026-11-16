@@ -14,7 +14,6 @@ import {
   formatDecimal,
   Loading,
   Notice,
-  PageHeader,
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
@@ -35,10 +34,6 @@ export function InventoryPage() {
   const variant = found.data?.variants[0];
   return (
     <>
-      <PageHeader
-        title="Inventory"
-        subtitle="Stock by location, lot, and serial, with receiving, reservations, and fulfillment."
-      />
       <Card>
         <form
           className="inline-form"

@@ -11,6 +11,7 @@ import {
   ShopifyPage,
 } from './pages/integrations.tsx';
 import { InventoryPage } from './pages/inventory.tsx';
+import { InventoryLayout } from './pages/inventory-layout.tsx';
 import { LabelsPage } from './pages/labels.tsx';
 import { PickingPage } from './pages/picking.tsx';
 import { ProductsPage } from './pages/products.tsx';
@@ -19,6 +20,7 @@ import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.
 import { ShopsPage } from './pages/shops.tsx';
 import { StockCheckPage } from './pages/stock-check.tsx';
 import { SuppliersPage } from './pages/suppliers.tsx';
+import { TransfersPage } from './pages/transfers.tsx';
 import { WarehousesPage } from './pages/warehouses.tsx';
 import { WebhooksPage } from './pages/webhooks.tsx';
 import { parseScanSearch, ScanPage } from './scan/page.tsx';
@@ -76,7 +78,21 @@ const importsRoute = createRoute({
 const inventoryRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/inventory',
+  component: InventoryLayout,
+});
+const inventoryIndexRoute = createRoute({
+  getParentRoute: () => inventoryRoute,
+  path: '/',
   component: InventoryPage,
+});
+const transfersRoute = createRoute({
+  getParentRoute: () => inventoryRoute,
+  path: '/transfers',
+  component: TransfersPage,
+  validateSearch: (search: Record<string, unknown>): { transfer?: string } =>
+    typeof search.transfer === 'string' && /^[0-9a-f-]{36}$/.test(search.transfer)
+      ? { transfer: search.transfer }
+      : {},
 });
 const warehousesRoute = createRoute({
   getParentRoute: () => shopRoute,
@@ -196,7 +212,7 @@ export const routeTree = rootRoute.addChildren([
     shopIndexRoute,
     productsRoute,
     importsRoute,
-    inventoryRoute,
+    inventoryRoute.addChildren([inventoryIndexRoute, transfersRoute]),
     warehousesRoute,
     suppliersRoute,
     purchasingRoute,

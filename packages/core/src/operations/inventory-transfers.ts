@@ -1051,7 +1051,7 @@ export const listTransfers = defineOperation({
     variantId: Id.optional(),
     kind: z.enum(['transfer', 'move']).optional(),
     before: Id.optional().describe('Transfers created before this one (paging).'),
-    limit: z.number().int().min(1).max(100).default(50),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
   }),
   output: z.object({ transfers: z.array(TransferOut), next: Id.nullable() }),
   permission: 'inventory.read',

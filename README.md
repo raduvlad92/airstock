@@ -28,7 +28,7 @@ Requires Node 22, pnpm 9, and Docker (for PostgreSQL 17).
 pnpm install
 pnpm db:up          # PostgreSQL 17 on localhost:54329
 pnpm test           # creates a fresh test database and runs every test
-pnpm verify         # what CI runs: lint, typecheck, parity, OpenAPI, tests, dashboard and Worker build
+pnpm verify         # what CI runs: lint, typecheck, parity, OpenAPI, ADR index, tests, dashboard and Worker build
 pnpm e2e            # Chromium smoke test against the built dashboard (after pnpm build)
 ```
 
@@ -38,6 +38,12 @@ Try the API locally:
 pnpm dev:setup                       # creates airstock_dev and prints a shop, item, and API token
 pnpm --filter @airstock/worker dev   # Worker on http://localhost:8787 with local queues
 ```
+
+Adding to the API (details in [ADR 0005](docs/adr/0005-operation-registry.md)):
+
+- **Operation:** define and export it in its module in `packages/core/src/operations`, append it to the list at the end of that module, and run `pnpm openapi` to write its `docs/api/operations/<id>.json`. A new module also adds one sorted line to each group in `operations/index.ts`.
+- **MCP tool action:** set the operation's `mcp` field. Test it with the area's other tests, using `apps/worker/test/mcp-client.ts`. A new tool also adds one line to `mcp-tools.test.ts`.
+- **ADR:** see [Adding an ADR](docs/adr/README.md#adding-an-adr); number it when its PR merges and run `pnpm adr`.
 
 The repository is public. Never commit credentials: local secrets go in `apps/worker/.dev.vars`, staging secrets in `wrangler secret` and the GitHub `staging` environment.
 

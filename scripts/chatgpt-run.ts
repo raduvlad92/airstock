@@ -14,9 +14,11 @@
  *   changes, or the problem a refused call was told about. A call refused before it reached an
  *   operation (an unknown action, say) leaves no event and is not listed.
  * - `--expect` reads `{ "prompts": [{ "prompt": 1, "text": "…", "expect": [{ "tool": "get_stock",
- *   "action": "lot_trace" }] }] }`. An expected step may name an `outcome` (such as `denied`);
+ *   "action": "lot_trace" }] }] }`. An expected step may name an `outcome` (such as `denied`), and
+ *   `or` lists other calls that also do (a report instead of a per-item read, say);
  *   `ordered: true` needs the steps in that order; `orNoCall: true` also counts a prompt right when
- *   none of its expected tools was called (a refusal before any call). Prompts take the calls in
+ *   none of its expected tools was called (a refusal before any call); `optional: true` marks a
+ *   prompt the owner may skip: with no call it is listed as skipped and not counted. Prompts take the calls in
  *   time order, split only where `--gap` seconds or more passed between two calls (default 8): the
  *   split that makes the most prompts right wins, then the one that gives the most calls to a
  *   prompt expecting their tool, then the one that cuts at the longest pauses.
@@ -56,10 +58,15 @@ export interface Call {
   grantId: string | null;
 }
 
-export interface ExpectedStep {
+export interface ExpectedCall {
   tool: string;
   action?: string | string[];
   outcome?: string;
+}
+
+export interface ExpectedStep extends ExpectedCall {
+  /** Other calls that satisfy this step as well. */
+  or?: ExpectedCall[];
 }
 
 export interface ExpectedPrompt {
@@ -68,6 +75,8 @@ export interface ExpectedPrompt {
   expect: ExpectedStep[];
   ordered?: boolean;
   orNoCall?: boolean;
+  /** A prompt the owner may skip; with no call of its own it is skipped, not wrong. */
+  optional?: boolean;
   at?: string;
 }
 
@@ -181,11 +190,18 @@ export function shorten(value: unknown, width = 90): string {
   return text.length > width ? `${text.slice(0, width - 1)}…` : text;
 }
 
-const actionMatches = (step: ExpectedStep, call: Call) =>
+const callMatches = (step: ExpectedCall, call: Call) =>
   step.tool === call.tool &&
   (step.action === undefined ||
     (Array.isArray(step.action) ? step.action : [step.action]).includes(call.action ?? '')) &&
   (step.outcome === undefined || step.outcome === call.outcome);
+
+const actionMatches = (step: ExpectedStep, call: Call) =>
+  callMatches(step, call) || (step.or ?? []).some((alt) => callMatches(alt, call));
+
+/** Every tool a prompt expects, alternatives included. */
+const toolsOf = (prompt: ExpectedPrompt) =>
+  new Set(prompt.expect.flatMap((s) => [s.tool, ...(s.or ?? []).map((a) => a.tool)]));
 
 /**
  * Whether these calls satisfy a prompt: each expected step needs its own call, in order when the
@@ -193,7 +209,7 @@ const actionMatches = (step: ExpectedStep, call: Call) =>
  * a specific one needs.
  */
 export function promptRight(prompt: ExpectedPrompt, calls: Call[]): boolean {
-  const tools = new Set(prompt.expect.map((s) => s.tool));
+  const tools = toolsOf(prompt);
   if (prompt.orNoCall && !calls.some((c) => tools.has(c.tool))) return true;
   if (prompt.ordered) {
     let at = 0;
@@ -249,7 +265,7 @@ export function assignPrompts(prompts: ExpectedPrompt[], calls: Call[], gapSecon
   const OWN_TOOL = 1e3;
   const EARLY = 1e-3;
   const ownTools = (p: number, i: number, j: number) => {
-    const tools = new Set(prompts[p]!.expect.map((s) => s.tool));
+    const tools = toolsOf(prompts[p]!);
     let count = 0;
     for (let k = i; k < j; k++) if (tools.has(calls[k]!.tool)) count++;
     return count;
@@ -303,6 +319,12 @@ const code = (text: string) => (text ? `\`${cell(text)}\`` : '');
 function toolLabel(tool: string, action: string | string[] | null | undefined): string {
   const actions = action === null || action === undefined ? '' : [action].flat().join(' or ');
   return actions ? `${code(tool)} ${actions}` : code(tool);
+}
+
+function stepLabel(step: ExpectedStep): string {
+  const one = (c: ExpectedCall) =>
+    `${toolLabel(c.tool, c.action)}${c.outcome ? ` (${c.outcome})` : ''}`;
+  return [step, ...(step.or ?? [])].map(one).join(' or ');
 }
 
 function outcomeLabel(call: Call): string {
@@ -376,15 +398,17 @@ export function renderRun(input: RenderInput): string {
   });
   if (prompts && starts) {
     let right = 0;
+    let skipped = 0;
     lines.push('', '| Prompt | Expected | Called | Result |', '| --- | --- | --- | --- |');
     prompts.forEach((prompt, p) => {
       const own = calls.slice(starts[p], p + 1 < starts.length ? starts[p + 1] : calls.length);
-      const ok = promptRight(prompt, own);
+      const skip = prompt.optional === true && own.length === 0;
+      const ok = !skip && promptRight(prompt, own);
       if (ok) right++;
+      if (skip) skipped++;
       const expected =
-        prompt.expect
-          .map((s) => `${toolLabel(s.tool, s.action)}${s.outcome ? ` (${s.outcome})` : ''}`)
-          .join(prompt.ordered ? ', then ' : ', ') + (prompt.orNoCall ? ', or no call' : '');
+        prompt.expect.map(stepLabel).join(prompt.ordered ? ', then ' : ', ') +
+        (prompt.orNoCall ? ', or no call' : '');
       const called =
         own
           .map(
@@ -393,11 +417,13 @@ export function renderRun(input: RenderInput): string {
           )
           .join(', ') || 'no call';
       const label = prompt.text ? `${prompt.prompt}. ${cell(prompt.text)}` : String(prompt.prompt);
-      lines.push(`| ${label} | ${expected} | ${called} | ${ok ? 'Right' : '**Wrong**'} |`);
+      const result = skip ? 'Skipped (optional)' : ok ? 'Right' : '**Wrong**';
+      lines.push(`| ${label} | ${expected} | ${called} | ${result} |`);
     });
+    const skippedNote = skipped > 0 ? ` (${skipped} optional skipped)` : '';
     lines.push(
       '',
-      `**${right} of ${prompts.length} prompts right.** Calls were matched to prompts in time order; check the Prompt column above, and give a prompt an \`at\` time in the expected file if a split is off.`,
+      `**${right} of ${prompts.length - skipped} prompts right${skippedNote}.** Calls were matched to prompts in time order; check the Prompt column above, and give a prompt an \`at\` time in the expected file if a split is off.`,
     );
   }
   return `${lines.join('\n')}\n`;

@@ -26,6 +26,7 @@ import { effectivePermissions, isRole } from '../permissions.ts';
 import type { Logger } from '../pipeline.ts';
 import { defineOperation, type FileAccess, type HandlerContext } from '../registry.ts';
 import { Id, iso, normalizeSku } from '../schemas.ts';
+import { type LotTraceQuery, runLotTraceExport } from '../stock/lot-trace.ts';
 import { insertWebhookEvents, webhookEvent } from '../webhooks/events.ts';
 import { QueryInput, runQuery } from './catalog-query.ts';
 
@@ -1689,8 +1690,10 @@ async function receiveOpeningStock(
 export const ExportOut = z.object({
   exportId: Id,
   kind: z
-    .enum(['catalog', 'activity'])
-    .describe('catalog: products or variants; activity: the activity history.'),
+    .enum(['catalog', 'activity', 'lot_trace'])
+    .describe(
+      'catalog: products or variants; activity: the activity history; lot_trace: one lot’s trace.',
+    ),
   status: z.string(),
   rowCount: z.number().nullable(),
   error: z.string().nullable(),
@@ -1727,7 +1730,7 @@ export function exportOut(shopId: string, r: ExportRow) {
     new Date(r.download_until) > new Date();
   return {
     exportId: r.id,
-    kind: (r.query.mode as string) === 'activity' ? ('activity' as const) : ('catalog' as const),
+    kind: exportKind(r),
     status: r.status,
     rowCount: r.row_count,
     error: r.error,
@@ -1736,6 +1739,33 @@ export function exportOut(shopId: string, r: ExportRow) {
     downloadUntil: iso(r.download_until),
     downloadPath: downloadable ? `/api/v1/shops/${shopId}/exports/${r.id}/file` : null,
   };
+}
+
+/** What an export of the shared export jobs holds, from its query's mode. */
+function exportKind(r: Pick<ExportRow, 'query'>): 'catalog' | 'activity' | 'lot_trace' {
+  const mode = r.query.mode as string;
+  return mode === 'activity' || mode === 'lot_trace' ? mode : 'catalog';
+}
+
+/** The audit action prefix of an export's job events. */
+const EXPORT_ACTION_PREFIX = {
+  catalog: 'catalog.export',
+  activity: 'activity.export',
+  lot_trace: 'inventory.lot_trace_export',
+} as const;
+
+/** The download's file name: what it holds, and the end of the export ID. */
+function exportFileName(r: ExportRow, exportId: string): string {
+  const tail = exportId.slice(-8);
+  if (r.kind === 'report')
+    return `airstock-report-${(r.query as { report?: string }).report}-${tail}.csv`;
+  if (exportKind(r) === 'lot_trace') {
+    const code = String((r.query as unknown as LotTraceQuery).lotCode ?? '')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .slice(0, 40);
+    return `airstock-lot-trace-${code || 'lot'}-${tail}.csv`;
+  }
+  return `airstock-${r.query.mode}-${tail}.csv`;
 }
 
 const ExportQuery = QueryInput.pick({
@@ -1866,7 +1896,7 @@ export const downloadExport = defineOperation({
     return {
       result: {
         fileKey: exportFileKey(ctx.shopId, input.exportId),
-        fileName: `airstock-${row.kind === 'report' ? `report-${(row.query as { report?: string }).report}` : row.query.mode}-${input.exportId.slice(-8)}.csv`,
+        fileName: exportFileName(row, input.exportId),
       },
       audit: { targetType: 'export', targetId: input.exportId, context: { rows: row.row_count } },
     };
@@ -1895,6 +1925,17 @@ export async function runExportJob(
   try {
     const caller = await jobCaller(deps.db, shopId, job.caller);
     const activity = job.query as unknown as { mode: string; filters?: ActivityFiltersInput };
+    if (activity.mode === 'lot_trace') {
+      await runLotTraceExport(
+        deps,
+        shopId,
+        exportId,
+        exportFileKey(shopId, exportId),
+        caller,
+        job.query as unknown as LotTraceQuery,
+      );
+      return 'done';
+    }
     if (activity.mode === 'activity') {
       await runActivityExport(
         deps,
@@ -2175,7 +2216,7 @@ export async function runExportJob(
             idempotencyKey: null,
           },
           {
-            action: `${(job.query.mode as string) === 'activity' ? 'activity' : 'catalog'}.export.failed`,
+            action: `${EXPORT_ACTION_PREFIX[exportKind(job)]}.failed`,
             phase: 'outcome',
             outcome: error.outcome,
             target_type: 'export',

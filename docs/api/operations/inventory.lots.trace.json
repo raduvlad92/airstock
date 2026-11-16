@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.lots.trace",
       "summary": "Trace a lot from receipt to every order",
-      "description": "Use this for recalls and \"which orders got lot X\": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode. Movements and totals cover only the locations you can access (partial).",
+      "description": "Use this for recalls and \"which orders got lot X\": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode. Movements and totals cover only the locations you can access (partial). For the trace as a file, use import_export export_lot_trace.",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.lot.traced",

@@ -1,4 +1,4 @@
-# 0033. Reports: reads over the stock tables, keyset pages with full totals, exports through the export jobs
+# 0034. Reports: reads over the stock tables, keyset pages with full totals, exports through the export jobs
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D15 (reports half), Section 5.15, goal G13, and PRD 3.5 (milestone I5).
 

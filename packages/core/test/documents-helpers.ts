@@ -1,6 +1,5 @@
-import pg from 'pg';
 import { inject } from 'vitest';
-import { reconcile } from '../../../test/helpers.ts';
+import { connectClient, reconcile } from '../../../test/helpers.ts';
 
 /**
  * Every stock invariant (A21) plus the document checks of milestone I2: transfer holds and
@@ -8,8 +7,7 @@ import { reconcile } from '../../../test/helpers.ts';
  */
 export async function reconcileAll(shopId: string): Promise<string[]> {
   const problems = await reconcile(shopId);
-  const client = new pg.Client({ connectionString: inject('databases').appUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').appUrl);
   try {
     await client.query('begin read only');
     await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);

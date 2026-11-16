@@ -1,9 +1,10 @@
 import type { ops } from '@airstock/core';
 import { DEFAULT_ORIGINAL_MAX_SIDE, roleLabel } from '@airstock/core/media';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type DragEvent, useId, useRef, useState } from 'react';
 import { api, command, errorMessage, type Out } from '../../api.ts';
 import { can, useShopContext } from '../../context.tsx';
+import { useMutation } from '../../mutation.ts';
 import { Badge, Card, Empty, ErrorNotice, Loading } from '../ui.tsx';
 import { ACCEPT, prepareFile } from './derivatives.ts';
 import { uploadToProduct } from './upload.ts';

@@ -10,7 +10,7 @@ import {
   type ReportGroup,
   type ReportType,
 } from '@airstock/core/reports';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -29,6 +29,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { downloadExport } from './imports.tsx';
 import { useLocations, useWarehouses } from './warehouses.tsx';
 

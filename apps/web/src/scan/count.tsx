@@ -1,9 +1,10 @@
 import type { ops } from '@airstock/core';
 import { compare } from '@airstock/core/catalog/decimal';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { formatDecimal } from '../components/ui.tsx';
+import { useMutation } from '../mutation.ts';
 import { belowReserved, type ClaimChoice, ClaimChooser, type ClaimProblem } from './claims.tsx';
 import { type ScanEnv, useScanHandler } from './flows.ts';
 import {

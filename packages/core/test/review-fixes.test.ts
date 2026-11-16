@@ -1,9 +1,10 @@
 import { ops, uuidv7 } from '@airstock/core';
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   addMember,
   appDatabase,
+  connectClient,
   createLeafLocation,
   createVariant,
   type Harness,
@@ -13,6 +14,7 @@ import {
   reconcile,
   type SeededShop,
   seedShop,
+  waitUntilBlockedBy,
 } from '../../../test/helpers.ts';
 
 // Regression tests for the inventory review fixes (review-findings.test.ts holds one test per
@@ -43,23 +45,8 @@ async function outcomeOf(p: Promise<unknown>): Promise<string> {
 
 /** An owner-role connection outside the app, for holding locks like a concurrent command. */
 async function rawClient(): Promise<pg.Client> {
-  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').ownerUrl);
   return client;
-}
-
-/** Waits until some backend is blocked on a lock while running SQL that matches `like`. */
-async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    const rows = await ownerQuery(
-      `select 1 from pg_stat_activity where wait_event_type = 'Lock' and query like $1`,
-      [like],
-    );
-    if (rows.length > 0) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`no backend waited on a lock for ${like}`);
 }
 
 /** A position inserted outside the app (on hand without history), as an uncommitted receipt. */
@@ -300,7 +287,7 @@ describe('suspected: new destination positions are created in one order', () => 
       await other.query(`set local deadlock_timeout = '100ms'`);
       await insertPosition(other, own.shopId, low, dest, '0');
       const receipt = outcomeOf(oh.run(ops.receiveTransfer, { transferId: transfer.transferId }));
-      await waitForLockWait('%inventory_positions_identity%');
+      await waitUntilBlockedBy(other, '%inventory_positions_identity%');
       const second = await insertPosition(other, own.shopId, high, dest, '0').then(
         () => 'ok',
         (e: { code?: string }) => e.code ?? String(e),
@@ -331,7 +318,7 @@ describe('suspected: a count posted while a receipt creates the counted position
       const count = outcomeOf(
         oh.run(ops.quickCount, { locationId: shelf, counts: [{ variantId, counted: '5' }] }),
       );
-      await waitForLockWait('%inventory_positions_identity%');
+      await waitUntilBlockedBy(receipt, '%inventory_positions_identity%');
       await receipt.query('commit');
       outcome = await count;
     } finally {
@@ -553,7 +540,7 @@ describe('suspected: reallocating an allocation emptied meanwhile', () => {
           locationId: other,
         }),
       );
-      await waitForLockWait('%for update%');
+      await waitUntilBlockedBy(release, '%for update%');
       await release.query(
         'update reservation_allocations set released = released + 1 where id = $1',
         [allocationId],

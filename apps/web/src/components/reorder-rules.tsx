@@ -1,9 +1,10 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { useLocations, useWarehouses } from '../pages/warehouses.tsx';
 import { Badge, Card, Empty, ErrorNotice, Field, formatDecimal, Loading } from './ui.tsx';
 

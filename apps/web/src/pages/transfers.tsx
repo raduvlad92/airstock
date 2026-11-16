@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { useLocations } from './warehouses.tsx';
 
 // Transfers between locations and warehouses, and moves inside one (plan D8, PRD 6.4). Each

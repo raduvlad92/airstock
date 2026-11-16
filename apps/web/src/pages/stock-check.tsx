@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -14,6 +14,7 @@ import {
   Notice,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 
 // The stock check (D18): the scheduled reconciliation's last results, the problems found now, and
 // the reviewed repair of one problem. Nothing is repaired without a person confirming it.

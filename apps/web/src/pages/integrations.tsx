@@ -1,6 +1,6 @@
 import type { ops } from '@airstock/core';
 import { CONNECTION_SCOPES } from '@airstock/core/permissions';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { ApiError, api, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   PageHeader,
 } from '../components/ui.tsx';
 import { can, useAppInfo, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { ShopifyCard } from './shopify.tsx';
 
 type Connections = Out<typeof ops.listConnections>;

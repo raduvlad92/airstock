@@ -6,11 +6,12 @@ import {
   sweepShortages,
   uuidv7,
 } from '@airstock/core';
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   addMember,
   appDatabase,
+  connectClient,
   createLeafLocation,
   createVariant,
   type Harness,
@@ -20,6 +21,7 @@ import {
   reconcile,
   type SeededShop,
   seedShop,
+  waitUntilBlockedBy,
 } from '../../../test/helpers.ts';
 
 // Review findings for the inventory engine (review/inventory-findings). Each test demonstrates one
@@ -67,15 +69,13 @@ async function connector(s: SeededShop = shop): Promise<Caller> {
 
 /** An owner-role connection outside the app, for holding row locks like a concurrent command. */
 async function rawClient(): Promise<pg.Client> {
-  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').ownerUrl);
   return client;
 }
 
 /** transfer_ and return_reconciliation_problems() in one shop, as the runtime role (RLS on). */
 async function documentProblems(shopId: string): Promise<string[]> {
-  const client = new pg.Client({ connectionString: inject('databases').appUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').appUrl);
   try {
     await client.query('begin read only');
     await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);
@@ -91,21 +91,6 @@ async function documentProblems(shopId: string): Promise<string[]> {
   } finally {
     await client.end();
   }
-}
-
-/** Waits until some backend is blocked on a row lock while running SQL that matches `like`. */
-async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    const rows = await ownerQuery(
-      `select 1 from pg_stat_activity
-       where wait_event_type = 'Lock' and query like $1`,
-      [like],
-    );
-    if (rows.length > 0) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`no backend waited on a lock for ${like}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -167,7 +152,7 @@ describe('F-SWEEP-LOCK-ORDER: sweepShortages locks positions out of ascending id
         (e: { code?: string }) => e.code ?? String(e),
       );
       // The sweep has locked pA (variant A) and now waits for pB (variant B).
-      await waitForLockWait('%p.on_hand > 0 or $9%');
+      await waitUntilBlockedBy(command, '%p.on_hand > 0 or $9%');
       const second = command
         .query('select id from inventory_positions where id = $1 for update', [pA!.id])
         .then(

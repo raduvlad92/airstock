@@ -1,9 +1,10 @@
 import type { ops } from '@airstock/core';
 import { inferSymbology } from '@airstock/core/barcodes';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
 import { can } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import type { ScanEnv } from './flows.ts';
 import { type Resolved, resolveScan } from './resolve.ts';
 

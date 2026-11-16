@@ -1,6 +1,6 @@
-import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { command } from '../../api.ts';
+import { useMutation } from '../../mutation.ts';
 import { ErrorNotice, Field, Loading } from '../ui.tsx';
 import {
   ConflictNotice,

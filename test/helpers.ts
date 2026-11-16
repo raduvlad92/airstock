@@ -10,30 +10,68 @@ import {
   sessionCaller,
   uuidv7,
 } from '@airstock/core';
-import { type Database, type DatabaseHooks, PgDatabase, poolSource } from '@airstock/db';
-import pg from 'pg';
+import { type Database, type DatabaseHooks, PgDatabase } from '@airstock/db';
+import type pg from 'pg';
 import { inject } from 'vitest';
+import { connectClient, testConnectionSource, testPool, whenSlotFree } from './connections.ts';
+
+export { connectClient } from './connections.ts';
 
 /**
- * The runtime role's pool. Test files run in parallel against one server (100 connections), so
- * files that race many commands keep their pool small; the races still overlap on it.
+ * The runtime role's pool. Test files run in parallel against one server that other worktrees'
+ * runs share (test/connections.ts), so pools stay small; races of 50 callers still overlap on
+ * 16 connections.
  */
-export function appDatabase(hooks: DatabaseHooks = {}, max = 60): Database {
-  return new PgDatabase(poolSource(inject('databases').appUrl, max), hooks);
+export function appDatabase(hooks: DatabaseHooks = {}, max = 16): Database {
+  return new PgDatabase(testConnectionSource(inject('databases').appUrl, max), hooks);
 }
+
+let ownerPool: pg.Pool | null = null;
 
 /** Owner connection for test assertions that must see every shop. Never used by the app. */
 export async function ownerQuery<R = Record<string, unknown>>(
   sql: string,
   params: unknown[] = [],
 ): Promise<R[]> {
-  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
-  await client.connect();
+  ownerPool ??= testPool(inject('databases').ownerUrl, 4);
+  const pool = ownerPool;
+  const client = await whenSlotFree(() => pool.connect());
+  let failed = false;
   try {
     return (await client.query(sql, params)).rows as R[];
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await client.end();
+    // A failed statement may have left the session broken; never hand it to the next caller.
+    client.release(failed);
   }
+}
+
+/**
+ * Waits until a backend is blocked by a lock that `holder` (a test's own connection) holds,
+ * while running SQL that matches `like`. pg_stat_activity lists every database on the server,
+ * and other test files and other worktrees' runs wait on locks too, so the waiter is found by
+ * its blocker rather than by its SQL alone.
+ */
+export async function waitUntilBlockedBy(
+  holder: pg.ClientBase,
+  like: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const [{ pid }] = (await holder.query<{ pid: number }>('select pg_backend_pid() as pid'))
+    .rows as [{ pid: number }];
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const rows = await ownerQuery(
+      `select 1 from pg_stat_activity
+       where $1 = any(pg_blocking_pids(pid)) and wait_event_type = 'Lock' and query like $2`,
+      [pid, like],
+    );
+    if (rows.length > 0) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`no backend waited on a lock held by ${pid} for ${like}`);
 }
 
 /** In-memory stand-in for the audit queue, with failure injection. */
@@ -190,8 +228,7 @@ export async function addMember(
  */
 export async function reconcile(shopId: string): Promise<string[]> {
   // As the runtime role, so row-level security limits the check to this shop like the job.
-  const client = new pg.Client({ connectionString: inject('databases').appUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').appUrl);
   try {
     await client.query('begin read only');
     await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);

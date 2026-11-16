@@ -1,5 +1,5 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage } from '../api.ts';
 import { ErrorNotice, Loading } from '../components/ui.tsx';
 import { can, type ShopContext, useShopContext, useShops } from '../context.tsx';
@@ -221,35 +221,72 @@ function ScanWorkspace({
     };
   }, []);
 
+  // Scans are applied one at a time, in the order they were read, each once the page shows the
+  // one before it; their lookups still start at once. A flow's handler works from the state it
+  // last rendered, so a scan applied before the previous one had rendered was lost: two quick
+  // scans of a case counted one, and an item whose lookup answered before its shelf label's was
+  // refused for want of a shelf.
+  const turns = useRef<Promise<void>>(Promise.resolve());
+  const queued = useRef(0);
+  const [applied, setApplied] = useState(0);
+  const requested = useRef(0);
+  const onApplied = useRef<Array<{ at: number; resolve: () => void }>>([]);
+  useLayoutEffect(() => {
+    onApplied.current = onApplied.current.filter((waiting) => {
+      if (waiting.at > applied) return true;
+      waiting.resolve();
+      return false;
+    });
+  });
+  /** Resolves once a commit includes every state change made before the call. */
+  const rendered = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        requested.current += 1;
+        onApplied.current.push({ at: requested.current, resolve });
+        setApplied((n) => n + 1);
+      }),
+    [],
+  );
+
   const handle = useCallback(
-    async (code: string) => {
+    (code: string) => {
+      const lookup = resolveScan(shopId, code);
+      lookup.catch(() => {}); // Reported in its turn, below.
+      queued.current += 1;
       setBusy(true);
-      try {
-        const resolved = await resolveScan(shopId, code);
-        if (resolved.kind === 'location') {
-          if (!resolved.location.holdsStock) {
-            feedback('error', `${resolved.location.path} has sub-locations; scan one of those.`);
-            return;
+      const turn = turns.current.then(async () => {
+        try {
+          const resolved = await lookup;
+          if (resolved.kind === 'location') {
+            if (!resolved.location.holdsStock) {
+              feedback('error', `${resolved.location.path} has sub-locations; scan one of those.`);
+              return;
+            }
+            setLocation({
+              locationId: resolved.location.locationId,
+              path: resolved.location.path,
+              warehouseId: resolved.location.warehouseId,
+            });
           }
-          setLocation({
-            locationId: resolved.location.locationId,
-            path: resolved.location.path,
-            warehouseId: resolved.location.warehouseId,
-          });
+          const used = await bus.current.dispatch(resolved);
+          if (!used) {
+            if (resolved.kind === 'location') feedback('ok', `Location: ${resolved.location.path}`);
+            else if (resolved.kind === 'item') feedback('notice', `${resolved.item.productName}`);
+            else feedback('error', `Unknown code ${resolved.code}`);
+          }
+        } catch (error) {
+          feedback('error', errorMessage(error));
+        } finally {
+          await rendered();
+          queued.current -= 1;
+          if (queued.current === 0) setBusy(false);
         }
-        const used = await bus.current.dispatch(resolved);
-        if (!used) {
-          if (resolved.kind === 'location') feedback('ok', `Location: ${resolved.location.path}`);
-          else if (resolved.kind === 'item') feedback('notice', `${resolved.item.productName}`);
-          else feedback('error', `Unknown code ${resolved.code}`);
-        }
-      } catch (error) {
-        feedback('error', errorMessage(error));
-      } finally {
-        setBusy(false);
-      }
+      });
+      turns.current = turn;
+      return turn;
     },
-    [shopId, feedback, setLocation],
+    [shopId, feedback, setLocation, rendered],
   );
 
   const onCamera = useCallback(

@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
@@ -18,6 +18,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { useLocations, useWarehouses } from './warehouses.tsx';
 
 type PurchaseOrders = Out<typeof ops.listPurchaseOrders>;

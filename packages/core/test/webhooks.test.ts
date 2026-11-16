@@ -392,8 +392,11 @@ describe('subscriptions, fan-out, and delivery', () => {
     );
     expect(row!.secret_ciphertext).not.toContain(created.secret);
     await sink.drain(db);
+    // The drain adds the command's attempt event (no changes) under the same action, and rows
+    // come back in whatever order the table holds them: ask for the outcome.
     const [event] = await ownerQuery<{ changes: Any }>(
-      `select changes from audit_events where shop_id = $1 and action = 'webhook.subscription.created'`,
+      `select changes from audit_events
+       where shop_id = $1 and action = 'webhook.subscription.created' and phase = 'outcome'`,
       [r.shop.shopId],
     );
     expect(event!.changes.url).toBe('https://hooks.example.com/all/…');

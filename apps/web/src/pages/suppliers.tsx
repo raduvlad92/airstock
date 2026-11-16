@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, Fragment, useEffect, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   PageHeader,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 
 type Suppliers = Out<typeof ops.listSuppliers>;
 type Supplier = Suppliers['suppliers'][number];

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { bootstrap, migrate } from '@airstock/db/migrate';
+import { migrate } from '@airstock/db/migrate';
 import pg from 'pg';
 import type { TestProject } from 'vitest/node';
+import { prepareAppRole } from './cluster-roles.ts';
 
 /**
  * Creates a fresh test database, applies the roles and migrations, and installs a test-only
@@ -26,12 +27,11 @@ export default async function setup(project: TestProject) {
 
   const ownerUrl = new URL(admin);
   ownerUrl.pathname = `/${dbName}`;
-  await bootstrap(ownerUrl.toString());
+  await prepareAppRole(admin, ownerUrl.toString());
   await migrate(ownerUrl.toString());
 
   const owner = new pg.Client({ connectionString: ownerUrl.toString() });
   await owner.connect();
-  await owner.query(`alter role airstock_app password 'airstock_app'`);
   await owner.query(`
     create function test_fail_audit() returns trigger language plpgsql as $$
     begin

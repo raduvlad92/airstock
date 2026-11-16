@@ -129,7 +129,8 @@ export function mockApi(routes: Record<string, unknown | Handler>) {
       };
       calls.push(call);
       const route = routes[`${call.method} ${path}`] ?? routes[path];
-      const body = typeof route === 'function' ? (route as Handler)(call) : route;
+      // A handler may answer later (a promise), to stage lookups that come back out of order.
+      const body = typeof route === 'function' ? await (route as Handler)(call) : route;
       if (body === undefined) {
         return new Response(JSON.stringify({ code: 'not_found', title: 'Not found' }), {
           status: 404,

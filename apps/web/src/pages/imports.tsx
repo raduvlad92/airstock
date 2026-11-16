@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
@@ -16,6 +16,7 @@ import {
   PageHeader,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { useLocations } from './warehouses.tsx';
 
 type ImportOut = Out<typeof ops.getImport>['import'];

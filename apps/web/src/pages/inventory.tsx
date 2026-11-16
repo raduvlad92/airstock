@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { type FormEvent, Fragment, useState } from 'react';
 import { api, command, type Out } from '../api.ts';
@@ -17,6 +17,7 @@ import {
   titleCase,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
+import { useMutation } from '../mutation.ts';
 import { QuickCountForm } from './counts.tsx';
 import { useLocations } from './warehouses.tsx';
 

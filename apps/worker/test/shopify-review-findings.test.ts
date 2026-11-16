@@ -245,4 +245,22 @@ describe('Shopify connector review findings', () => {
     await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
     expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
   });
+  // FINDING 5 (stock drift; main). The orders/create job applies its webhook payload (lines with
+  // their original quantity, no currentQuantity, no refunds) as the order's whole state. When it
+  // runs after a sync that read the order from the Admin API (orders/edited or refunds/create
+  // delivered first, the reconciler, or the create job's own retries running late), step 3 takes
+  // the original quantity as what is still to ship and reserves again the units an edit removed
+  // or a refund took back. Nothing corrects it until the order changes again in Shopify.
+  it.fails('F5: a late orders/create does not undo an edit already applied', async () => {
+    const s = await setup('Late payload', 10);
+    const order = s.store.placeOrder([{ variant: s.item, quantity: 3 }]);
+    const createBody = s.store.webhookBody(order);
+    s.store.editLine(order, order.lines[0]!.lineId, 1);
+    // orders/edited is delivered first, then the orders/create Shopify sent at checkout.
+    await event(s, 'orders/edited', s.store.topicBody('orders/edited', order));
+    expect(await h.available(s.m, s.variantId)).toBe('9.000000');
+    await event(s, 'orders/create', createBody);
+    expect(await h.available(s.m, s.variantId)).toBe('9.000000');
+    expect(s.store.available(s.item)).toBe(9);
+  });
 });

@@ -14,6 +14,29 @@ beforeAll(async () => {
 afterAll(() => t.close());
 
 describe('MCP tools', () => {
+  it('gives clients server instructions that route by task and name only real tools', async () => {
+    const shop = await seedShop(t.db, t.sink, 'MCP instructions shop');
+    const mcp = await mcpSession(t, shop, ['shop:read']);
+    const instructions = mcp.client.getInstructions() ?? '';
+    const { tools } = await mcp.client.listTools();
+    const names = new Set(tools.map((x) => x.name));
+    // OpenAI asks for the first 512 characters to stand alone: the routing paragraph fits.
+    const opening = instructions.split('\n\n')[0] ?? '';
+    expect(opening.length).toBeLessThanOrEqual(512);
+    expect(opening).toContain('get_stock');
+    expect(opening).toContain('search_catalog');
+    for (const word of instructions.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []) {
+      if (
+        word.includes('_') &&
+        /^(get|search|edit|manage|receive|transfer|adjust|import|run|stock|shopify|describe|warehouse)_/.test(
+          word,
+        )
+      ) {
+        expect(names, word).toContain(word);
+      }
+    }
+  });
+
   it('lists exactly these task-shaped tools, whatever the grant allows', async () => {
     const shop = await seedShop(t.db, t.sink, 'MCP tools shop');
     const mcp = await mcpSession(t, shop, ['shop:read']);

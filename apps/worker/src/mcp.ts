@@ -5,6 +5,7 @@ import {
   type Caller,
   errors,
   execute,
+  mcpInstructions,
   operations,
   resolveConnectionGrant,
   resolveToolCall,
@@ -53,6 +54,7 @@ export function mcpConfigFromEnv(env: {
 }
 
 const TOOLS = buildMcpTools(operations);
+const INSTRUCTIONS = mcpInstructions(TOOLS.map((t) => t.name));
 /**
  * OAuth scopes the authorization server issues. What a connection may do is not an OAuth scope:
  * it is the access chosen at the consent step and stored in the grant, checked on every call.
@@ -114,7 +116,10 @@ function buildServer(
   requestId: string,
   onOutbox: () => void,
 ): McpServer {
-  const server = new McpServer({ name: 'airstock', version: '0.1.0' });
+  const server = new McpServer(
+    { name: 'airstock', version: '0.1.0' },
+    { instructions: INSTRUCTIONS },
+  );
   for (const tool of TOOLS) {
     server.registerTool(
       tool.name,

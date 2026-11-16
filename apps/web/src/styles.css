@@ -621,11 +621,12 @@ button.danger {
   color: var(--error);
 }
 
+/* Cells line up at the top, so a hint under one field never shifts its neighbours' inputs. */
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 0.75rem;
-  align-items: end;
+  align-items: start;
 }
 
 .form-actions {
@@ -682,6 +683,13 @@ button.danger {
   display: flex;
   gap: 0.45rem;
   align-items: center;
+}
+
+/* In a form grid, checkboxes, actions, and notices take a row of their own. */
+.form-grid > .check,
+.form-grid > .form-actions,
+.form-grid > .notice {
+  grid-column: 1 / -1;
 }
 
 .loading {

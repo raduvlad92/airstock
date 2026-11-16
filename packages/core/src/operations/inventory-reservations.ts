@@ -523,14 +523,19 @@ function assertOpen(root: ReservationRow): void {
   }
 }
 
-/** Bundles fully covered by every component's quantity (open or allocated). */
+/**
+ * Bundles fully covered by every component's quantity (open or allocated). With `scale`, cut to
+ * the bundle variant's quantity precision: only whole bundles (at that precision) ship.
+ */
 async function bundlesCovered(
   tx: Tx,
   components: ReservationRow[],
   field: 'open' | 'allocated',
+  scale: number | null = null,
 ): Promise<string> {
   const [row] = await tx.query<{ bundles: string }>(
-    `select coalesce(min(x.qty / x.per), 0)::text as bundles
+    `select (case when $2::integer is null then coalesce(min(x.qty / x.per), 0)
+       else trunc(coalesce(min(x.qty / x.per), 0), $2::integer) end)::text as bundles
      from jsonb_to_recordset($1::jsonb) as x(qty numeric, per numeric)`,
     [
       JSON.stringify(
@@ -539,9 +544,30 @@ async function bundlesCovered(
           per: c.per,
         })),
       ),
+      scale,
     ],
   );
   return normalize(row?.bundles ?? '0');
+}
+
+/** A variant's quantity precision (decimal places), read without a lock. */
+async function quantityScale(tx: Tx, variantId: string): Promise<number> {
+  const [row] = await tx.query<{ quantity_scale: number }>(
+    'select quantity_scale from variants where id = $1',
+    [variantId],
+  );
+  if (!row) throw errors.notFound('Variant');
+  return row.quantity_scale;
+}
+
+/** Refuses a quantity finer than the variant's precision (a bundle counts in bundles). */
+async function assertQuantityScale(
+  tx: Tx,
+  variantId: string,
+  quantity: string | undefined,
+): Promise<void> {
+  if (quantity === undefined) return;
+  assertScale(quantity, await quantityScale(tx, variantId));
 }
 
 // Release ----------------------------------------------------------------------------------
@@ -650,6 +676,7 @@ export const releaseReservation = defineOperation({
   async handler(ctx, input) {
     const { root, components } = await lockTree(ctx, input.reservationId);
     assertOpen(root);
+    await assertQuantityScale(ctx.tx, root.variant_id, input.quantity);
     const operationId = ctx.newId();
     await ctx.tx.query(
       `insert into inventory_operations (shop_id, id, kind, actor_type, actor_id, source, attempt_id,
@@ -861,6 +888,8 @@ export const fulfillReservation = defineOperation({
   async handler(ctx, input) {
     const { root, components } = await lockTree(ctx, input.reservationId);
     assertOpen(root);
+    const scale = await quantityScale(ctx.tx, root.variant_id);
+    if (input.quantity !== undefined) assertScale(input.quantity, scale);
     let quantity: string;
     const plan: Array<{ r: ReservationRow; quantity: string }> = [];
     if (components.length > 0) {
@@ -870,7 +899,7 @@ export const fulfillReservation = defineOperation({
           'A bundle reservation is fulfilled by quantity of bundles, not by allocation.',
         );
       }
-      const covered = await bundlesCovered(ctx.tx, components, 'allocated');
+      const covered = await bundlesCovered(ctx.tx, components, 'allocated', scale);
       quantity = normalize(input.quantity ?? covered);
       if (compare(quantity, covered) > 0 || compare(quantity, '0') <= 0) {
         throw errors.unprocessable(
@@ -1054,7 +1083,7 @@ export const reallocateReservation = defineOperation({
   id: 'inventory.reservations.reallocate',
   summary: 'Move a reservation’s allocation to another position',
   description:
-    'Use this when the units for a reservation should come from somewhere else, for example a picker scanned a different lot or serial, or the order ships from another location. Name the target as positionId, or as locationId, lotCode, or serial. Without allocationId the reservation must have exactly one open allocation.',
+    'Use this when the units for a reservation should come from somewhere else, for example a picker scanned a different lot or serial, or the order ships from another location. Name the target as positionId, or as locationId, lotCode, or serial. The new units stay within the reservation’s own lot, location, and channel allocation rule. Without allocationId the reservation must have exactly one open allocation.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -1122,7 +1151,40 @@ export const reallocateReservation = defineOperation({
     }
     const source = open[0]!;
     const variant = await loadStockVariant(ctx.tx, source.variant_id);
+    if (input.quantity !== undefined) assertScale(input.quantity, variant.quantityScale);
+    // The reservation's own limits hold for its new allocation too, as when a shortage is filled:
+    // its lot, its location, and its channel's allocation rule.
+    const [limits] = await ctx.tx.query<{
+      lot_id: string | null;
+      location_id: string | null;
+      channel: string;
+    }>('select lot_id, location_id, channel from reservations where id = $1', [
+      source.reservation_id,
+    ]);
+    if (!limits) throw errors.notFound('Reservation');
     const lotId = input.lotCode ? await findLot(ctx.tx, variant.id, input.lotCode) : null;
+    if (limits.lot_id && lotId && lotId !== limits.lot_id) {
+      throw errors.unprocessable(
+        'outside_reservation_limits',
+        'This reservation is limited to another lot; release it and reserve this lot instead.',
+        { lotId: limits.lot_id },
+      );
+    }
+    if (limits.location_id && input.locationId) {
+      const [overlap] = await ctx.tx.query<{ ok: boolean }>(
+        `select (a.path_ids @> array[b.id] or b.path_ids @> array[a.id]) as ok
+         from locations a, locations b where a.id = $1 and b.id = $2`,
+        [input.locationId, limits.location_id],
+      );
+      if (!overlap?.ok) {
+        throw errors.unprocessable(
+          'outside_reservation_limits',
+          'This reservation is limited to another location; release it and reserve there instead.',
+          { locationId: limits.location_id },
+        );
+      }
+    }
+    const ruleScopes = await loadRuleScopes(ctx.tx, limits.channel);
     let serialId: string | null = null;
     if (input.serial) {
       const [s] = await ctx.tx.query<{ id: string }>(
@@ -1135,9 +1197,10 @@ export const reallocateReservation = defineOperation({
     const spec = {
       variantIds: [variant.id],
       locationId: input.locationId ?? null,
-      lotId,
+      within: limits.location_id,
+      lotId: lotId ?? limits.lot_id,
       serialId,
-      ruleScopes: null,
+      ruleScopes,
       scope: ctx.locationScope,
       exclude: [source.position_id],
       only: input.positionId ? [input.positionId] : null,
@@ -1152,6 +1215,14 @@ export const reallocateReservation = defineOperation({
       [source.id],
     );
     const outstanding = current?.outstanding ?? '0';
+    // The allocation may have been fulfilled, released, or moved while the locks were taken.
+    if (compare(outstanding, '0') <= 0) {
+      throw errors.conflict(
+        'nothing_allocated',
+        'This allocation no longer holds units; it was fulfilled, released, or moved meanwhile.',
+        { allocationId: source.id },
+      );
+    }
     const quantity = normalize(input.quantity ?? outstanding);
     if (compare(quantity, outstanding) > 0) {
       throw errors.unprocessable(
@@ -1162,7 +1233,6 @@ export const reallocateReservation = defineOperation({
     }
     const held = new Set(positions);
     const usable = targets.filter((t) => held.has(t));
-    const ruleScopes = await loadRuleScopes(ctx.tx, root.channel);
     const { picks, available } = await choosePositions(
       ctx.tx,
       [{ variantId: variant.id, quantity }],

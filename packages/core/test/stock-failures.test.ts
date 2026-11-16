@@ -129,7 +129,8 @@ const cases: Case[] = [
           lotCode: code,
         });
       }
-      const r = await h.run(ops.reserveStock, { variantId, quantity: '2', lotCode: 'A' });
+      // Lot A is the oldest, so it is allocated first (no lot limit: the claim may move).
+      const r = await h.run(ops.reserveStock, { variantId, quantity: '2' });
       return {
         op: ops.reallocateReservation,
         input: { reservationId: r.reservationId, lotCode: 'B' },

@@ -614,7 +614,7 @@ describe('F-SCOPE-PO-RECEIVE: a scoped member can receive an order for another w
 // Fulfilling 0.5 of a whole-unit variant leaves 4.5 units on hand.
 // ---------------------------------------------------------------------------------------------
 describe('F-FRACTIONAL-FULFILL: fulfillment ignores the variant’s quantity precision', () => {
-  it.fails('refuses to fulfill half a unit of a whole-unit variant', async () => {
+  it('refuses to fulfill half a unit of a whole-unit variant', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '5' });
     const r = await h.run(ops.reserveStock, { variantId, quantity: '2' });
@@ -636,7 +636,7 @@ describe('F-FRACTIONAL-FULFILL: fulfillment ignores the variant’s quantity pre
 // reservation limited to lot K can be moved to lot L (a picker rescan, or the API).
 // ---------------------------------------------------------------------------------------------
 describe('F-REALLOCATE-IGNORES-LIMITS: reallocation leaves the reservation’s own lot', () => {
-  it.fails('refuses to move a lot-limited reservation to another lot', async () => {
+  it('refuses to move a lot-limited reservation to another lot', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
     for (const lotCode of ['K', 'L']) {

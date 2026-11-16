@@ -127,6 +127,8 @@ const EXPECTED = new Set([
   'quantity_exceeds_allocated',
   'allocation_required',
   'nothing_allocated',
+  // A reservation limited to a location is not moved outside it (review finding 14).
+  'outside_reservation_limits',
   'quantity_precision',
 ]);
 

@@ -6,11 +6,12 @@ import {
   sweepShortages,
   uuidv7,
 } from '@airstock/core';
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   addMember,
   appDatabase,
+  connectClient,
   createLeafLocation,
   createVariant,
   type Harness,
@@ -67,15 +68,13 @@ async function connector(s: SeededShop = shop): Promise<Caller> {
 
 /** An owner-role connection outside the app, for holding row locks like a concurrent command. */
 async function rawClient(): Promise<pg.Client> {
-  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').ownerUrl);
   return client;
 }
 
 /** transfer_ and return_reconciliation_problems() in one shop, as the runtime role (RLS on). */
 async function documentProblems(shopId: string): Promise<string[]> {
-  const client = new pg.Client({ connectionString: inject('databases').appUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').appUrl);
   try {
     await client.query('begin read only');
     await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);

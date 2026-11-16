@@ -1,9 +1,10 @@
 import { type Caller, ops, uuidv7 } from '@airstock/core';
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   addMember,
   appDatabase,
+  connectClient,
   createLeafLocation,
   createVariant,
   type Harness,
@@ -457,8 +458,7 @@ async function outcomeOf(p: Promise<unknown>): Promise<string> {
 
 /** An owner-role connection outside the app, for holding row locks like a concurrent command. */
 async function rawClient(): Promise<pg.Client> {
-  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').ownerUrl);
   return client;
 }
 

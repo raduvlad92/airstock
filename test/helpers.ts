@@ -10,29 +10,41 @@ import {
   sessionCaller,
   uuidv7,
 } from '@airstock/core';
-import { type Database, type DatabaseHooks, PgDatabase, poolSource } from '@airstock/db';
-import pg from 'pg';
+import { type Database, type DatabaseHooks, PgDatabase } from '@airstock/db';
+import type pg from 'pg';
 import { inject } from 'vitest';
+import { connectClient, testConnectionSource, testPool, whenSlotFree } from './connections.ts';
+
+export { connectClient } from './connections.ts';
 
 /**
- * The runtime role's pool. Test files run in parallel against one server (100 connections), so
- * files that race many commands keep their pool small; the races still overlap on it.
+ * The runtime role's pool. Test files run in parallel against one server that other worktrees'
+ * runs share (test/connections.ts), so pools stay small; races of 50 callers still overlap on
+ * 16 connections.
  */
-export function appDatabase(hooks: DatabaseHooks = {}, max = 60): Database {
-  return new PgDatabase(poolSource(inject('databases').appUrl, max), hooks);
+export function appDatabase(hooks: DatabaseHooks = {}, max = 16): Database {
+  return new PgDatabase(testConnectionSource(inject('databases').appUrl, max), hooks);
 }
+
+let ownerPool: pg.Pool | null = null;
 
 /** Owner connection for test assertions that must see every shop. Never used by the app. */
 export async function ownerQuery<R = Record<string, unknown>>(
   sql: string,
   params: unknown[] = [],
 ): Promise<R[]> {
-  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
-  await client.connect();
+  ownerPool ??= testPool(inject('databases').ownerUrl, 4);
+  const pool = ownerPool;
+  const client = await whenSlotFree(() => pool.connect());
+  let failed = false;
   try {
     return (await client.query(sql, params)).rows as R[];
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await client.end();
+    // A failed statement may have left the session broken; never hand it to the next caller.
+    client.release(failed);
   }
 }
 
@@ -190,8 +202,7 @@ export async function addMember(
  */
 export async function reconcile(shopId: string): Promise<string[]> {
   // As the runtime role, so row-level security limits the check to this shop like the job.
-  const client = new pg.Client({ connectionString: inject('databases').appUrl });
-  await client.connect();
+  const client = await connectClient(inject('databases').appUrl);
   try {
     await client.query('begin read only');
     await client.query(`select set_config('app.shop_id', $1, true)`, [shopId]);

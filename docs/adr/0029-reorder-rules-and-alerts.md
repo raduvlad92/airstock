@@ -1,4 +1,4 @@
-# 0028. Reorder rules and alerts
+# 0029. Reorder rules and alerts
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D12, Section 5.9, and PRD 6.8 (draft from low stock) and 6.9 (milestone I3).
 

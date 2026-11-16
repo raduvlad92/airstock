@@ -26,6 +26,36 @@ The Phase 2 commands keep this lock order ([ADR 0020](0020-stock-model.md)): rec
 - **A replay after the window is a new request.** Within 7 days a retry with the same key replays the original result, as before. After that the key is forgotten: the same key and request run again as a new command, and `get_operation_outcome` (`GET /operation-outcomes`) answers `not_found`. Callers retry lost responses within minutes, so the window covers them with a wide margin. The API reference (`Idempotency-Key`), the outcome lookup, and the MCP `idempotency_key` field say so.
 - **Imports are unaffected.** Opening stock claims a key per import row and location in the same transaction as the chunk's checkpoint, so a resumed import starts after the checkpoint; the key is a second guard, and an import resumes within minutes (`stale_imports`).
 
+## Update, 16 November 2026 (Phase 2, milestone I7): reservations of one variant at once
+
+The I7 volume run measured ten simultaneous reservations of one variant with 200 lots at a staging p95 of 851–1,062 ms. That is the release-day case: many orders for one new booster box in the same second. Each reservation locked every candidate position (`lockCandidates`) and kept the locks for about 8 of its 13 statements, so the reservations ran one after another.
+
+- **A per-variant advisory lock first.** A new reservation takes a transaction-level advisory lock per variant, in key order (`lockReservationVariants`), before any row lock. Reservations of one variant now queue there. Reservations of different variants never wait for each other, as before. Only reservation creation takes this lock. Fulfillment, release, reallocation, receipts, transfers, counts, and the shortage sweep lock positions as before, so no cycle can form. The lock order is now: new reservations' variant advisory locks, then positions by id, then reservations by id, then the rest.
+- **Then one statement does the work** (`CLAIM_RESERVATION_SQL`, on a snapshot taken after the advisory lock):
+  - it chooses positions by the allocation rule, exactly as before;
+  - it locks only the chosen positions, in id order;
+  - it checks them on the locked rows: on hand less allocated must cover what is taken there, because a command that is not a reservation may have changed them;
+  - only then does it write the operation, the reservations, the allocations, and the positions' allocated totals.
+  
+  After it, the reservation holds its locks only for the pipeline's final write and the COMMIT: 3 statements instead of 8.
+- **Before any lock**, one unlocked statement runs:
+  - the alert probe, which the pipeline then skips (`alertProbe`);
+  - a check for claims of expired reservations still on the variant.
+  
+  A reorder rule created in those milliseconds is checked at the next stock change or the daily run.
+- **The previous path stays as the fallback.** It is used when expired claims must be released first, when the claim statement finds too little stock or a changed position, or when the reservation needs more than 32 positions. The claim statement then writes nothing, the transaction rolls back to its savepoint (releasing the position locks), and the old path locks every candidate in id order, releases expired claims, chooses, and either allocates, records a shortage (connectors), or fails with `insufficient_stock`.
+- **The guarantees are unchanged:**
+  - allocations change only under their position's lock;
+  - `allocated <= on_hand` stays a check constraint;
+  - availability never goes below zero;
+  - a reservation is never partial unless it records a shortage;
+  - earliest expiry, then oldest stock, under contention too: twelve simultaneous one-unit reservations take exactly the twelve earliest-expiring units.
+- **Evidence:**
+  - the existing concurrency, property, and idempotency suites (A04, A05, A08, A21, A36) pass unchanged;
+  - `stock-concurrency.test.ts` adds the release-day race: thirty callers, with an expired claim on the earliest lot, reserve exactly the free units, and reconciliation is clean;
+  - `scripts/bench/reserve-contention.ts` reproduces the race locally with a simulated Worker round trip. Ten callers on a 200-lot variant went from a p95 of 650–860 ms to 330 ms, and from 14 to 32 reservations a second (`docs/phase-2-measurements.md`, "I7 fixes").
+
 ## Revisit when
 
-Transfers arrive in milestone I2: dispatch and receipt must follow the same lock order.
+- Transfers arrive in milestone I2: dispatch and receipt must follow the same lock order.
+- Release-day reservations still miss the 500 ms target with the per-variant lock: the next step is fewer statements per command (folding the reads before the lock into one), or a bigger compute.

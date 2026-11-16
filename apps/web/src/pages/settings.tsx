@@ -26,6 +26,7 @@ const SETTINGS_TABS = [
   ['/shops/$shopId/settings/fields', 'Fields'],
   ['/shops/$shopId/settings/families', 'Families'],
   ['/shops/$shopId/settings/members', 'Members'],
+  ['/shops/$shopId/settings/stock-check', 'Stock check'],
 ] as const;
 
 export function SettingsLayout() {

@@ -236,11 +236,16 @@
                           "additionalProperties": false
                         },
                         "description": "At most 100."
+                      },
+                      "partial": {
+                        "type": "boolean",
+                        "description": "True for members limited to some locations: only problems there are listed."
                       }
                     },
                     "required": [
                       "problemCount",
-                      "problems"
+                      "problems",
+                      "partial"
                     ],
                     "additionalProperties": false
                   }

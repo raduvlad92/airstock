@@ -15,6 +15,7 @@ import { LabelsPage } from './pages/labels.tsx';
 import { ProductsPage } from './pages/products.tsx';
 import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.tsx';
 import { ShopsPage } from './pages/shops.tsx';
+import { StockCheckPage } from './pages/stock-check.tsx';
 import { SuppliersPage } from './pages/suppliers.tsx';
 import { WarehousesPage } from './pages/warehouses.tsx';
 import { WebhooksPage } from './pages/webhooks.tsx';
@@ -149,6 +150,11 @@ const membersRoute = createRoute({
   path: '/members',
   component: MembersPage,
 });
+const stockCheckRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/stock-check',
+  component: StockCheckPage,
+});
 const fieldsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/fields',
@@ -184,6 +190,7 @@ export const routeTree = rootRoute.addChildren([
       fieldsRoute,
       familiesRoute,
       membersRoute,
+      stockCheckRoute,
     ]),
   ]),
 ]);

@@ -67,17 +67,26 @@ function figure(value: string): string {
   return isDecimal(value) ? normalize(value) : value;
 }
 
-/** Adds the SKU and location a person needs to find each problem. */
-async function describeProblems(tx: Tx, problems: StockProblem[]): Promise<ProblemOut[]> {
+/**
+ * Adds the SKU and location a person needs to find each problem. With a location scope, keeps
+ * only problems at positions inside it: the others concern stock or records the caller cannot see.
+ */
+async function describeProblems(
+  tx: Tx,
+  problems: StockProblem[],
+  scope: string[] | null = null,
+): Promise<ProblemOut[]> {
   if (problems.length === 0) return [];
   const rows = await tx.query<{
     target_id: string;
     variant_id: string | null;
     sku: string | null;
     location_path: string | null;
+    in_scope: boolean;
   }>(
     `with t as (select * from jsonb_to_recordset($1::jsonb) as x("targetType" text, "targetId" uuid))
-     select t."targetId" as target_id, v.id as variant_id, v.sku, l.path as location_path
+     select t."targetId" as target_id, v.id as variant_id, v.sku, l.path as location_path,
+       ($2::uuid[] is null or coalesce(l.path_ids && $2::uuid[], false)) as in_scope
      from t
      left join inventory_positions p on t."targetType" = 'position' and p.id = t."targetId"
      left join reservations r on t."targetType" = 'reservation' and r.id = t."targetId"
@@ -85,25 +94,30 @@ async function describeProblems(tx: Tx, problems: StockProblem[]): Promise<Probl
      left join variants v on v.id = coalesce(p.variant_id, r.variant_id, s.variant_id,
        case when t."targetType" = 'variant' then t."targetId" end)
      left join locations l on l.id = p.location_id`,
-    [JSON.stringify(problems.map((p) => ({ targetType: p.targetType, targetId: p.targetId })))],
+    [
+      JSON.stringify(problems.map((p) => ({ targetType: p.targetType, targetId: p.targetId }))),
+      scope,
+    ],
   );
   const byTarget = new Map(rows.map((r) => [r.target_id, r]));
-  return problems.map((p) => {
-    const kind = p.problem as ProblemKind;
-    const label = byTarget.get(p.targetId);
-    return {
-      problem: kind,
-      title: PROBLEM_TITLES[kind] ?? p.problem,
-      targetType: p.targetType as ProblemOut['targetType'],
-      targetId: p.targetId,
-      expected: figure(p.expected),
-      actual: figure(p.actual),
-      variantId: label?.variant_id ?? null,
-      sku: label?.sku ?? null,
-      locationPath: label?.location_path ?? null,
-      repairable: REPAIRABLE.has(kind),
-    };
-  });
+  return problems
+    .filter((p) => byTarget.get(p.targetId)?.in_scope ?? scope === null)
+    .map((p) => {
+      const kind = p.problem as ProblemKind;
+      const label = byTarget.get(p.targetId);
+      return {
+        problem: kind,
+        title: PROBLEM_TITLES[kind] ?? p.problem,
+        targetType: p.targetType as ProblemOut['targetType'],
+        targetId: p.targetId,
+        expected: figure(p.expected),
+        actual: figure(p.actual),
+        variantId: label?.variant_id ?? null,
+        sku: label?.sku ?? null,
+        locationPath: label?.location_path ?? null,
+        repairable: REPAIRABLE.has(kind),
+      };
+    });
 }
 
 const CheckSummary = z.object({
@@ -138,6 +152,9 @@ export const getStockCheck = defineOperation({
     current: z.object({
       problemCount: z.number(),
       problems: z.array(Problem).describe(`At most ${MAX_STORED_PROBLEMS}.`),
+      partial: z
+        .boolean()
+        .describe('True for members limited to some locations: only problems there are listed.'),
     }),
   }),
   permission: 'inventory.read',
@@ -168,7 +185,13 @@ export const getStockCheck = defineOperation({
        where dedupe_key = 'reconciliation'
        order by (status <> 'resolved') desc, opened_at desc, id desc limit 1`,
     );
-    const problems = await readStockProblems(ctx.tx);
+    const found = await readStockProblems(ctx.tx);
+    const problems =
+      ctx.locationScope === null
+        ? found
+        : await describeProblems(ctx.tx, found, ctx.locationScope).then((visible) =>
+            found.filter((f) => visible.some((v) => v.targetId === f.targetId)),
+          );
     const summaries = recent.map((r) => ({
       id: r.id,
       trigger: r.trigger,
@@ -192,6 +215,7 @@ export const getStockCheck = defineOperation({
         current: {
           problemCount: problems.length,
           problems: await describeProblems(ctx.tx, problems.slice(0, MAX_STORED_PROBLEMS)),
+          partial: ctx.locationScope !== null,
         },
       },
       audit: { targetType: 'shop', targetId: ctx.shopId, context: { problems: problems.length } },
@@ -396,6 +420,11 @@ export const previewStockRepair = defineOperation({
   locations: repairLocations,
   async handler(ctx, input) {
     if (!REPAIRABLE.has(input.problem)) {
+      if (ctx.locationScope !== null) {
+        throw errors.forbidden(
+          'This problem concerns records across locations; your access is limited to locations.',
+        );
+      }
       const [current] = await readStockProblems(ctx.tx, input);
       return {
         result: {

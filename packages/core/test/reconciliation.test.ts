@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   addMember,
   appDatabase,
+  createLeafLocation,
   createVariant,
   type Harness,
   harness,
@@ -324,7 +325,7 @@ describe('scheduled stock reconciliation (D18)', () => {
     });
     expect(await alerts(clean.shop.shopId)).toEqual([]);
     const cleanStatus = await clean.h.run(ops.getStockCheck, {});
-    expect(cleanStatus.current).toEqual({ problemCount: 0, problems: [] });
+    expect(cleanStatus.current).toEqual({ problemCount: 0, problems: [], partial: false });
 
     // Shop B cannot see or repair shop A's position.
     await expect(
@@ -362,6 +363,38 @@ describe('scheduled stock reconciliation (D18)', () => {
       { caller: operator.caller },
     );
     expect(preview.repair).toMatchObject({ delta: '1' });
+
+    // A member limited to locations sees only problems there; shop-wide ones stay hidden.
+    const inWarehouse = await addMember(corrupted.shop.shopId, 'inventory_operator', [
+      corrupted.shop.warehouseId,
+    ]);
+    const scoped = await corrupted.h.run(ops.getStockCheck, {}, { caller: inWarehouse.caller });
+    expect(scoped.current).toMatchObject({ problemCount: 1, partial: true });
+    expect(scoped.current.problems).toEqual([
+      expect.objectContaining({ problem: 'on_hand_mismatch', targetId: corrupted.positionId }),
+    ]);
+    await expect(
+      corrupted.h.run(
+        ops.previewStockRepair,
+        { problem: 'cost_quantity_mismatch', targetId: corrupted.variantId },
+        { caller: inWarehouse.caller },
+      ),
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    const elsewhere = await createLeafLocation(
+      corrupted.h,
+      corrupted.shop.warehouseId,
+      'Elsewhere',
+    );
+    const outside = await addMember(corrupted.shop.shopId, 'inventory_operator', [elsewhere]);
+    const hidden = await corrupted.h.run(ops.getStockCheck, {}, { caller: outside.caller });
+    expect(hidden.current).toEqual({ problemCount: 0, problems: [], partial: true });
+    await expect(
+      corrupted.h.run(
+        ops.previewStockRepair,
+        { problem: 'on_hand_mismatch', targetId: corrupted.positionId },
+        { caller: outside.caller },
+      ),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
   });
 
   it('checks due shops from the cron in bounded runs', async () => {

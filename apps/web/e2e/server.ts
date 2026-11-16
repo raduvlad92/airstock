@@ -14,10 +14,14 @@ import {
   type AuditEvent,
   dispatchOutbox,
   ensureUser,
+  execute,
   handleWebhookOutbox,
   ingestAuditEvents,
+  ops,
+  reconcileShop,
   runExportJob,
   runImportJob,
+  sessionCaller,
   uuidv7,
   WebhookSecretCipher,
 } from '@airstock/core';
@@ -163,6 +167,31 @@ const app = createApp({
   logger: { error: (message, data) => console.error(message, data), info: () => {} },
 });
 
+async function stockDrift(shopId: string): Promise<void> {
+  const owner = new pg.Client({ connectionString: ownerUrl.toString() });
+  await owner.connect();
+  try {
+    const { rows } = await owner.query<{ user_id: string; location_id: string }>(
+      `select m.user_id, (select l.id from locations l where l.shop_id = m.shop_id
+         and l.kind = 'storage' order by l.created_at limit 1) as location_id
+       from memberships m where m.shop_id = $1 and m.role = 'owner' limit 1`,
+      [shopId],
+    );
+    const caller = sessionCaller(rows[0]!.user_id);
+    const run = (op: Parameters<typeof execute>[1], input: unknown) =>
+      execute({ db, audit }, op, { caller, shopId, input, idempotencyKey: uuidv7() });
+    const created = await run(ops.createItem, { name: 'Drifted lamp', sku: 'DRIFT-1' });
+    const { variantId } = created.result as { variantId: string };
+    await run(ops.receiveStock, { variantId, locationId: rows[0]!.location_id, quantity: '10' });
+    await owner.query(
+      'update inventory_positions set on_hand = on_hand + 3 where shop_id = $1 and variant_id = $2',
+      [shopId, variantId],
+    );
+  } finally {
+    await owner.end();
+  }
+}
+
 const TYPES: Record<string, string> = {
   '.js': 'text/javascript',
   '.css': 'text/css',
@@ -195,6 +224,16 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/__e2e/webhooks') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(webhookRequests));
+      return;
+    }
+    // The stock check (D18): `drift` adds an item with stock and corrupts its balance through the
+    // owner connection, as a bug would; both actions then run the scheduled check for the shop.
+    if (url.pathname === '/__e2e/stock-check') {
+      const shopId = url.searchParams.get('shopId') ?? '';
+      if (url.searchParams.get('action') === 'drift') await stockDrift(shopId);
+      const result = await reconcileShop(db, shopId, 'scheduled');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(result));
       return;
     }
     if (url.pathname === '/__e2e/login') {

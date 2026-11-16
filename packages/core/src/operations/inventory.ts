@@ -626,6 +626,9 @@ export const getAvailability = defineOperation({
         onHand: z.string(),
         reserved: z.string(),
         available: z.string(),
+        version: z
+          .number()
+          .describe('The position version; a count of what was read here sends it back.'),
       }),
     ),
     onOrder: z
@@ -689,12 +692,14 @@ export const getAvailability = defineOperation({
         onHand: string;
         reserved: string;
         available: string;
+        version: number;
       }>;
     }>(
       `with rows as (${POSITION_STOCK_SQL}),
        stocked as (
-         select rows.*, lt.code as lot_code, su.serial
+         select rows.*, lt.code as lot_code, su.serial, ip.version
          from rows
+         join inventory_positions ip on ip.shop_id = app_shop_id() and ip.id = rows.id
          left join lots lt on lt.shop_id = app_shop_id() and lt.id = rows.lot_id
          left join serial_units su on su.shop_id = app_shop_id() and su.id = rows.serial_id
          where rows.on_hand > 0 or rows.reserved > 0)
@@ -721,7 +726,7 @@ export const getAvailability = defineOperation({
             'lotCode', lot_code, 'expiresOn', to_char(expires_on, 'YYYY-MM-DD'),
             'lotExpired', lot_expired, 'serial', serial, 'inTransit', transfer_id is not null,
             'sellable', sellable, 'onHand', on_hand::text, 'reserved', reserved::text,
-            'available', available::text)
+            'available', available::text, 'version', version)
             order by path, condition, expires_on nulls last, lot_code, serial)
           from stocked), '[]'::json) as positions`,
       [[input.variantId], input.locationId ?? null, ctx.locationScope, input.warehouseId ?? null],

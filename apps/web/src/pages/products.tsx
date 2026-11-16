@@ -16,12 +16,13 @@ import {
   type Mode,
   useCatalogSchema,
 } from '../catalog/schema.ts';
-import { type CellValue, type Row, requestedFields } from '../catalog/values.ts';
+import { type CellValue, type Row, requestedFields, STOCK_AT } from '../catalog/values.ts';
 import { ErrorNotice, Field, Notice } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
 import { useMutation } from '../mutation.ts';
 import { telemetry } from '../telemetry.ts';
 import { ExportButton } from './imports.tsx';
+import { useLocations } from './warehouses.tsx';
 
 type QueryResult = Out<typeof ops.queryItems>;
 type SavedViews = Out<typeof ops.listSavedViews>;
@@ -37,6 +38,8 @@ interface Prefs {
   viewType: 'grid' | 'gallery';
   density: 'compact' | 'comfortable';
   layouts: Record<Mode, Layout>;
+  /** The shelf whose stock the grid shows as an On hand column, typed as counts (G5). */
+  stockAt?: string;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -98,14 +101,39 @@ export function ProductsPage() {
     () => columnsFor(mode, schema.data, canWrite),
     [mode, schema.data, canWrite],
   );
+  // Stock at one shelf: a column whose cells are typed as counts of that shelf.
+  const locations = useLocations(shopId);
+  const shelves = (locations.data?.locations ?? []).filter(
+    (l) => l.status === 'active' && l.holdsStockAllowed,
+  );
+  const shelf =
+    mode === 'variants' ? shelves.find((l) => l.locationId === prefs.stockAt) : undefined;
+  const canCount = can(context.data, 'inventory.count');
   const visible = useMemo(() => {
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
     const ordered = layout.columns.map((k) => byKey.get(k)).filter((c): c is Column => Boolean(c));
     const shown = ordered.filter((c) => !layout.hidden.includes(c.key));
     // The name column is always first and frozen.
     const name = byKey.get('name')!;
-    return [name, ...shown.filter((c) => c.key !== 'name')];
-  }, [allColumns, layout]);
+    const columns = [name, ...shown.filter((c) => c.key !== 'name')];
+    if (!shelf) return columns;
+    const stock: Column = {
+      key: STOCK_AT,
+      label: `On hand · ${shelf.path}`,
+      kind: 'number',
+      level: 'variant',
+      editable: canCount,
+      sortable: false,
+      defaultWidth: 150,
+      builtin: true,
+    };
+    const after = Math.max(
+      columns.findIndex((c) => c.key === 'available'),
+      columns.findIndex((c) => c.key === 'sku'),
+      0,
+    );
+    return [...columns.slice(0, after + 1), stock, ...columns.slice(after + 1)];
+  }, [allColumns, layout, shelf, canCount]);
   const fields = useMemo(() => requestedFields(visible), [visible]);
 
   const body = {
@@ -114,6 +142,7 @@ export function ProductsPage() {
     filter,
     sort: sort ?? undefined,
     fields: [...new Set([...fields, ...(mode === 'variants' ? ['available'] : [])])],
+    ...(shelf ? { stockAt: shelf.locationId } : {}),
     limit: 50,
   };
   const bodyKey = JSON.stringify(body);
@@ -252,6 +281,26 @@ export function ProductsPage() {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+          {mode === 'variants' && prefs.viewType === 'grid' && shelves.length > 0 ? (
+            <select
+              className="small"
+              aria-label="Stock at"
+              value={shelf?.locationId ?? ''}
+              onChange={(e) => update({ stockAt: e.target.value || undefined })}
+              title={
+                canCount
+                  ? 'Show on hand at one shelf; a number typed there is counted.'
+                  : 'Show on hand at one shelf.'
+              }
+            >
+              <option value="">Stock: all locations</option>
+              {shelves.map((l) => (
+                <option key={l.locationId} value={l.locationId}>
+                  On hand at {l.path}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <button
             type="button"
             className={`ghost small${filter.length ? ' active-filter' : ''}`}
@@ -423,6 +472,7 @@ export function ProductsPage() {
                 telemetry.track(shopId, 'grid.column_resized', { column: key, width, mode });
             }}
             onReorder={(from, to) => {
+              if (from === STOCK_AT || to === STOCK_AT) return;
               const order = layout.columns.filter((k) => k !== from);
               order.splice(order.indexOf(to), 0, from);
               updateLayout({ columns: order });

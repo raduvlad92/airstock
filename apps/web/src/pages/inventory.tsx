@@ -201,7 +201,12 @@ export function StockPanel({
             <ReserveForm shopId={shopId} variantId={variantId} lots={lots} />
           ) : null}
           {can(context.data, 'inventory.count') && !serials ? (
-            <QuickCountForm shopId={shopId} variantId={variantId} lots={lots} />
+            <QuickCountForm
+              shopId={shopId}
+              variantId={variantId}
+              lots={lots}
+              positions={a.positions}
+            />
           ) : null}
         </div>
       ) : null}

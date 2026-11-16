@@ -9,6 +9,17 @@ import {
   useState,
 } from 'react';
 import { ApiError, command, errorMessage } from '../api.ts';
+import {
+  belowReserved,
+  type Choice,
+  ClaimChoices,
+  type ClaimProblem,
+  type MovedProblem,
+  MovedSinceReadReview,
+  movedSinceRead,
+  type PositionRead,
+} from '../components/count-review.tsx';
+import { formatDecimal } from '../components/ui.tsx';
 import { useMutation } from '../mutation.ts';
 import { parseTsv, toTsv } from './clipboard.ts';
 import {
@@ -29,6 +40,7 @@ import {
   parseInput,
   type Row,
   rowId,
+  STOCK_AT,
 } from './values.ts';
 
 export interface BulkEdit {
@@ -41,11 +53,16 @@ export interface BulkEdit {
 }
 
 interface CellState {
-  state: 'pending' | 'error' | 'conflict';
+  /** review: the shelf moved since the count's number was read; claims: below reserved. */
+  state: 'pending' | 'error' | 'conflict' | 'review' | 'claims';
   draft: string;
   message?: string;
   theirs?: unknown;
   changedBy?: { actorType: string; source: string; clientId: string | null; at: string } | null;
+  /** A count's attempt: what it was based on, and what the server asked about. */
+  count?: { counted: string; read: PositionRead };
+  moved?: MovedProblem;
+  claims?: ClaimProblem[];
 }
 
 export interface GridProps {
@@ -72,6 +89,8 @@ export interface GridProps {
 }
 
 const ROW_HEIGHT = { compact: 32, comfortable: 42 } as const;
+const NOT_COUNTABLE =
+  'Lots, serials, and bundles are counted in the product’s stock panel. Shift+Enter opens the product.';
 const HEADER_HEIGHT = 34;
 
 type UpdateResult = {
@@ -203,6 +222,16 @@ export function Grid(props: GridProps) {
     },
   });
 
+  // A quantity typed in the stock column is a one-line count of that shelf (G5).
+  const count = useMutation({
+    mutationFn: (input: { row: Row; counted: string; read: PositionRead; choices: Choice[] }) =>
+      command<{ changes: Array<{ delta: string }> }>(`/shops/${props.shopId}/counts/quick`, {
+        locationId: input.row.stockAt!.locationId,
+        counts: [{ variantId: input.row.variantId, counted: input.counted, read: input.read }],
+        ...(input.choices.length > 0 ? { reservationChoices: input.choices } : {}),
+      }),
+  });
+
   const setCellState = (key: string, state: CellState | null) =>
     setStates((prev) => {
       const next = new Map(prev);
@@ -210,6 +239,45 @@ export function Grid(props: GridProps) {
       else next.delete(key);
       return next;
     });
+
+  /**
+   * Counts one shelf from the stock column, based on what the cell showed. If the shelf moved
+   * since, or the count leaves fewer units than are reserved, nothing changes and the cell asks.
+   */
+  const saveCount = useCallback(
+    async (row: Row, column: Column, counted: string, read: PositionRead, choices: Choice[]) => {
+      const key = `${rowId(row)}:${column.key}`;
+      setCellState(key, { state: 'pending', draft: counted, count: { counted, read } });
+      try {
+        await count.mutateAsync({ row, counted, read, choices });
+        props.onSaved(key, { raw: counted, display: formatDecimal(counted), source: 'own' });
+        setCellState(key, null);
+      } catch (error) {
+        const moved = movedSinceRead(error)?.[0];
+        const claims = belowReserved(error);
+        if (moved) {
+          setCellState(key, {
+            state: 'review',
+            draft: counted,
+            count: { counted, read },
+            moved,
+            message: 'Stock moved on this shelf since you read it.',
+          });
+        } else if (claims) {
+          setCellState(key, {
+            state: 'claims',
+            draft: counted,
+            count: { counted, read },
+            claims,
+            message: 'This leaves fewer units than are reserved.',
+          });
+        } else {
+          setCellState(key, { state: 'error', draft: counted, message: errorMessage(error) });
+        }
+      }
+    },
+    [count, props],
+  );
 
   /** Saves one cell; on a conflict the draft stays with the other person's value next to it. */
   const save = useCallback(
@@ -226,6 +294,20 @@ export function Grid(props: GridProps) {
         : parseInput(column, draft, schema);
       if (!parsed.ok) {
         setCellState(key, { state: 'error', draft, message: parsed.message });
+        return;
+      }
+      if (column.key === STOCK_AT) {
+        if (!row.stockAt?.countable || !row.variantId) {
+          setCellState(key, { state: 'error', draft, message: NOT_COUNTABLE });
+          return;
+        }
+        // Based on what the cell shows: the version read, and on hand (or this page's own count);
+        // after a review, what the review showed is there now.
+        const prior = states.get(key);
+        const read = prior?.moved
+          ? prior.moved.now
+          : { version: row.stockAt.version, onHand: String(expected ?? '0') };
+        await saveCount(row, column, String(parsed.value), read, []);
         return;
       }
       setCellState(key, { state: 'pending', draft });
@@ -260,7 +342,7 @@ export function Grid(props: GridProps) {
         }
       }
     },
-    [schema, mode, update, props],
+    [schema, mode, update, props, saveCount, states],
   );
 
   const activeRow = rows[selection.active.row];
@@ -274,6 +356,10 @@ export function Grid(props: GridProps) {
     if (!row) return;
     if (!column.editable) {
       setNotice(`${column.label} is not edited here. Shift+Enter opens the product.`);
+      return;
+    }
+    if (column.key === STOCK_AT && !row.stockAt?.countable) {
+      setNotice(NOT_COUNTABLE);
       return;
     }
     const state = states.get(`${rowId(row)}:${column.key}`);
@@ -328,8 +414,12 @@ export function Grid(props: GridProps) {
   const applyToCells = (
     cells: Array<{ row: Row; column: Column; text: string | null; raw?: unknown }>,
   ) => {
-    const editable = cells.filter((c) => c.column.editable);
-    if (editable.length < cells.length) setNotice('Read-only columns were skipped.');
+    // Counts are typed one shelf at a time: a range or a paste leaves the stock column alone.
+    const counts = cells.length > 1 ? cells.filter((c) => c.column.key === STOCK_AT) : [];
+    const editable = cells.filter((c) => c.column.editable && !counts.includes(c));
+    if (counts.length > 0)
+      setNotice('Counts are typed one cell at a time; the stock column was skipped.');
+    else if (editable.length < cells.length) setNotice('Read-only columns were skipped.');
     if (editable.length === 0) return;
     if (editable.length === 1) {
       const c = editable[0]!;
@@ -583,6 +673,11 @@ export function Grid(props: GridProps) {
             ⚠
           </span>
         ) : null}
+        {state?.state === 'review' || state?.state === 'claims' ? (
+          <span className="cell-flag warn" role="img" aria-label="Count needs a decision">
+            ⚠
+          </span>
+        ) : null}
         {colIndex === 0 && row ? (
           <button
             type="button"
@@ -674,6 +769,11 @@ export function Grid(props: GridProps) {
               Take theirs
             </button>
           </span>
+        ) : activeState?.state === 'review' || activeState?.state === 'claims' ? (
+          <span className="conflict-bar">
+            <strong>{activeColumn.label}:</strong> {activeState.message} Choose below; nothing
+            changed yet.
+          </span>
         ) : activeState?.state === 'error' ? (
           <span className="error-text">
             <strong>{activeColumn.label}:</strong> {activeState.message} Press Enter to fix it.
@@ -689,6 +789,32 @@ export function Grid(props: GridProps) {
           </span>
         )}
       </div>
+      {activeRow && activeState?.count && activeState.moved ? (
+        <div className="grid-review">
+          <MovedSinceReadReview
+            problem={activeState.moved}
+            counted={activeState.count.counted}
+            pending={count.isPending}
+            onRetry={(counted, read) => void saveCount(activeRow, activeColumn, counted, read, [])}
+          />
+        </div>
+      ) : activeRow && activeState?.count && activeState.claims ? (
+        <div className="grid-review">
+          <ClaimChoices
+            problems={activeState.claims}
+            pending={count.isPending}
+            onRetry={(choices) =>
+              void saveCount(
+                activeRow,
+                activeColumn,
+                activeState.count!.counted,
+                activeState.count!.read,
+                choices,
+              )
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

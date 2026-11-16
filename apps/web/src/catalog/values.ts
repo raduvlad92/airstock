@@ -7,6 +7,9 @@ import { asDefinition, type CatalogSchema, type Column, type Mode } from './sche
 export type QueryResult = Out<typeof ops.queryItems>;
 export type Row = QueryResult['rows'][number];
 
+/** The stock column: on hand at the shelf the grid shows stock for, typed as a count (G5). */
+export const STOCK_AT = 'stock_at';
+
 /** A row's identity in the grid: the variant in variants mode, the product in products mode. */
 export const rowId = (row: Row) => row.variantId ?? row.productId;
 
@@ -59,6 +62,8 @@ export function cellValue(
       return own(row.price, row.price ? formatDecimal(row.price, 2) : '');
     case 'available':
       return own(row.available, row.available === null ? '' : formatDecimal(row.available));
+    case STOCK_AT:
+      return own(row.stockAt?.onHand ?? null, row.stockAt ? formatDecimal(row.stockAt.onHand) : '');
     case 'status':
       return own(row.productStatus, row.productStatus);
     case 'family': {
@@ -85,6 +90,7 @@ export function cellValue(
 /** Text shown in the cell editor for a stored value. */
 export function editText(column: Column, raw: unknown, schema: CatalogSchema | undefined): string {
   if (raw === null || raw === undefined) return '';
+  if (column.key === STOCK_AT) return formatDecimal(String(raw));
   const field = column.field;
   switch (column.kind) {
     case 'measurement':
@@ -158,6 +164,13 @@ export function parseInput(
       );
       return family ? { ok: true, value: family.id } : { ok: false, message: `No family "${t}".` };
     }
+    case STOCK_AT:
+      return /^\d+(\.\d{1,6})?$/.test(t)
+        ? { ok: true, value: t }
+        : {
+            ok: false,
+            message: 'Type the units on the shelf, such as 12 (0 when there are none).',
+          };
     case 'weight':
       if (t === '') return { ok: true, value: null };
       return /^\d+(\.\d+)?\s*(g|kg|oz|lb)$/i.test(t)

@@ -1043,6 +1043,13 @@ button.danger {
   align-items: center;
 }
 
+/* A count typed in the grid that needs a decision: the review or the claim choices. */
+.grid-review {
+  border-top: 1px solid var(--line);
+  padding: 0.6rem;
+  font-size: 0.85rem;
+}
+
 .conflict-bar {
   display: flex;
   flex-wrap: wrap;

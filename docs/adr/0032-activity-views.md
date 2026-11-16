@@ -16,6 +16,16 @@
 - **Storage (amends ADR 0004).** History is keyed `UNIQUE NULLS NOT DISTINCT (shop_id, occurred_at, event_id)` instead of the primary key `(occurred_at, event_id)`, which had no shop: whenever the planner expected a filter to match often, it walked that key through every shop's events. The new key also replaces the shop/time index. There is no default partition: with one, PostgreSQL cannot read the months in order and starts every month at once. Redelivery is still ignored, because an event's shop, time, and ID are fixed when it is created.
 - **Indexes.** Each filter that can be rare has an index whose key leaves out the time, so B-tree deduplication stores each value once per shop with a list of rows (about 8 bytes per event): actor, action (in collation "C"), source, problems (partial, failures, denials, and conflicts), locations (GIN), operation, and attempt (now partial). Common filters walk the shop key newest first and stop at a page.
 
+## Update, 16 November 2026: location scope in reads and commands after the inventory review
+
+PRD 2.4 says a command is allowed only if every location it touches is in scope, and that out-of-scope stock figures and history are hidden. The review found reads and hooks that missed locations; each now names them, so the history's `location_ids` follow too.
+
+- **Counts.** A count's `locations` hook (record, submit, cancel) names the count's location and every line's shelf; get and list show a count to a limited member only when all of them are in scope. A count started from positions has no location of its own and used to pass every check.
+- **Lot trace and serial history** show only movements at locations in scope, the lot's totals cover only those locations, a serial's current position is hidden when it is outside the scope, and both results carry `partial`.
+- **Stock view costs.** `get_stock` returns no cost block to a member limited to some locations: the moving average and owned value are shop-wide, which the valuation report already refuses such members for.
+- **Shortages.** A shortage is at no position, so it is about the reservation's location limit, if it has one. Releasing a reservation names the location limit of any part with a shortage; the shortage list and, for reservations without allocations, the reservation list hide those limited to locations out of scope. A shortage without a location limit stays about no location, like other events without locations.
+- **Purchase order receipts** check the order's destination (ADR 0027), and **allocation rules** the rule they replace (ADR 0020).
+
 ## Consequences
 
 - On the 1-million-event bench, two-filter searches have a p95 of about 12 ms warm and under 1 s cold; history costs fewer bytes per event than before (docs/phase-2-measurements.md, "I5 activity search").

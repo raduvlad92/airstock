@@ -923,17 +923,20 @@ export const receivePurchaseOrderLine = defineOperation({
       status: PoStatus;
       number: number;
       supplier_id: string;
+      warehouse_id: string;
       location_id: string | null;
       variant_id: string;
       pack_id: string | null;
       pack_factor: string | null;
+      pack_version: number | null;
       ordered: string;
       received: string;
       cancelled: string;
       unit_cost_base: string | null;
     }>(
-      `select l.purchase_order_id, o.status, o.number, o.supplier_id, o.location_id, l.variant_id,
-         l.pack_id, l.pack_factor::text, l.ordered::text, l.received::text, l.cancelled::text,
+      `select l.purchase_order_id, o.status, o.number, o.supplier_id, o.warehouse_id, o.location_id,
+         l.variant_id, l.pack_id, l.pack_factor::text, l.pack_version, l.ordered::text,
+         l.received::text, l.cancelled::text,
          round_half_even(l.unit_cost / coalesce(l.pack_factor, 1), 6)::text as unit_cost_base
        from purchase_order_lines l
        join purchase_orders o on o.shop_id = l.shop_id and o.id = l.purchase_order_id
@@ -941,6 +944,9 @@ export const receivePurchaseOrderLine = defineOperation({
       [input.lineId, input.purchaseOrderId],
     );
     if (!line) throw errors.notFound('Purchase order line');
+    // Receiving changes the order, so it needs the order's destination in scope like every other
+    // command on it (ADR 0027); the pipeline only checked the receiving location.
+    await assertDestinationInScope(ctx, line.warehouse_id, line.location_id);
     if (!OPEN_PO_STATUSES.includes(line.status)) {
       throw errors.conflict(
         'purchase_order_not_open',
@@ -954,6 +960,17 @@ export const receivePurchaseOrderLine = defineOperation({
       throw errors.validation([
         { path: 'locationId', message: 'Give the location the units go to.' },
       ]);
+    }
+    const [where] = await ctx.tx.query<{ warehouse_id: string | null }>(
+      'select warehouse_id from locations where id = $1',
+      [locationId],
+    );
+    if (!where) throw errors.notFound('Location');
+    if (where.warehouse_id !== line.warehouse_id) {
+      throw errors.unprocessable(
+        'location_not_in_warehouse',
+        'The receiving location must be inside the order’s destination warehouse.',
+      );
     }
     const inPacks = Boolean(line.pack_id) && !input.inBaseUnits;
     const receipt = await receiveIntoStock(
@@ -974,7 +991,14 @@ export const receivePurchaseOrderLine = defineOperation({
         supplierId: line.supplier_id,
         reference: poNumber(line.number),
       },
-      { costFromPurchaseOrder: true, purchaseOrderLineId: input.lineId },
+      {
+        costFromPurchaseOrder: true,
+        purchaseOrderLineId: input.lineId,
+        // Packs convert at the size the line was ordered in, not the pack's current size.
+        ...(inPacks && line.pack_factor !== null && line.pack_version !== null
+          ? { orderedPack: { factor: line.pack_factor, version: line.pack_version } }
+          : {}),
+      },
     );
     const base = receipt.result.quantity;
 
@@ -1072,6 +1096,9 @@ export const receivePurchaseOrderLine = defineOperation({
         },
       },
       outbox: receipt.outbox ?? [],
+      // On order went down: check the low-stock rule even when the units arrived unsellable,
+      // which announces no availability change (PRD 6.9: available plus on order).
+      alertCheck: { variantIds: [line.variant_id] },
       events: [receiptEvent, ...(receipt.events ?? [])],
       webhooks:
         to !== order.status

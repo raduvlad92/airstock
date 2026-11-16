@@ -631,3 +631,95 @@ describe('permissions, costs, and scope', () => {
     expect(onOrder).toEqual([]);
   });
 });
+
+describe('receiving after the order was sent (review fixes)', () => {
+  async function sentOrder(supplierId: string, variantId: string, packId?: string) {
+    const po = await h.run(ops.draftPurchaseOrder, {
+      supplierId,
+      warehouseId: shop.warehouseId,
+      lines: [{ variantId, ...(packId ? { packId } : {}), quantity: '2', unitCost: '48' }],
+    });
+    await h.run(ops.sendPurchaseOrder, { purchaseOrderId: po.id, email: false });
+    return po;
+  }
+
+  it('receives an order sent before its supplier and pack were archived', async () => {
+    const supplierId = await supplier();
+    const variantId = await createVariant(h);
+    const packs = await h.run(ops.setPacks, {
+      variantId,
+      packsVersion: 0,
+      packs: [{ name: 'Case', quantity: '24' }],
+    });
+    const po = await sentOrder(supplierId, variantId, packs.packaging.packs[0].id);
+    // The case is archived (left out of the list) and the supplier archived after sending.
+    await h.run(ops.setPacks, { variantId, packsVersion: 1, packs: [] });
+    const current = await h.run(ops.getSupplier, { supplierId });
+    await h.run(ops.updateSupplier, {
+      supplierId,
+      expectedVersion: current.supplier.version,
+      status: 'archived',
+    });
+    const res = await h.run(ops.receivePurchaseOrderLine, {
+      purchaseOrderId: po.id,
+      lineId: po.lines[0].id,
+      quantity: '2',
+      locationId: shop.locationId,
+    });
+    expect(res.receipt.quantity).toBe('48');
+    expect(res.purchaseOrder.status).toBe('received');
+    expect((await stock(variantId)).totals.onHand).toBe('48.000000');
+    expect(await reconcile(shop.shopId)).toEqual([]);
+  });
+
+  it('refuses to archive a variant that is still on order', async () => {
+    const supplierId = await supplier();
+    const variantId = await createVariant(h);
+    await sentOrder(supplierId, variantId);
+    await expect(h.run(ops.archiveVariant, { variantId })).rejects.toMatchObject({
+      code: 'open_purchase_orders',
+    });
+  });
+
+  it('refuses a receiving location outside the order’s warehouse', async () => {
+    const supplierId = await supplier();
+    const variantId = await createVariant(h);
+    const po = await sentOrder(supplierId, variantId);
+    const other = await h.run(ops.createWarehouse, { name: `Other ${uuidv7().slice(-4)}` });
+    const elsewhere = await createLeafLocation(h, other.warehouseId, 'Dock');
+    await expect(
+      h.run(ops.receivePurchaseOrderLine, {
+        purchaseOrderId: po.id,
+        lineId: po.lines[0].id,
+        quantity: '2',
+        locationId: elsewhere,
+      }),
+    ).rejects.toMatchObject({ code: 'location_not_in_warehouse' });
+  });
+
+  it('opens the low-stock alert when an order arrives unsellable', async () => {
+    const supplierId = await supplier();
+    const variantId = await createVariant(h);
+    await h.run(ops.setReorderRule, {
+      variantId,
+      warehouseId: shop.warehouseId,
+      reorderPoint: '1',
+      reorderQuantity: '5',
+    });
+    const po = await sentOrder(supplierId, variantId);
+    // Two on order keep available plus on order above the point; damaged goods take that away.
+    const lowStock = async () =>
+      (await h.run(ops.listAlerts, { status: 'all', variantId })).alerts.filter(
+        (a: { kind: string; status: string }) => a.kind === 'low_stock' && a.status === 'open',
+      ).length;
+    expect(await lowStock()).toBe(0);
+    await h.run(ops.receivePurchaseOrderLine, {
+      purchaseOrderId: po.id,
+      lineId: po.lines[0].id,
+      quantity: '2',
+      locationId: shop.locationId,
+      condition: 'damaged',
+    });
+    expect(await lowStock()).toBe(1);
+  });
+});

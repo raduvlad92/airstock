@@ -138,6 +138,12 @@ export interface ReceiptOptions {
   costFromPurchaseOrder?: boolean;
   /** Links a lot created or first received here to its purchase order line (G6). */
   purchaseOrderLineId?: string;
+  /**
+   * The pack size and version a purchase order line was ordered in (ADR 0027). Packs then convert
+   * with this factor, not the pack's current size, and an archived pack still receives: the
+   * supplier ships what was ordered.
+   */
+  orderedPack?: { factor: string; version: number };
 }
 
 /**
@@ -178,9 +184,22 @@ export async function receiveIntoStock(
     );
   }
 
-  // Packs convert exactly with the pack's current version (ADR 0019).
+  // Packs convert exactly with the pack's current version (ADR 0019), or with the size a purchase
+  // order line was ordered in (ADR 0027).
   let pack: { id: string; name: string; version: number; factor: string } | null = null;
-  if (input.packId) {
+  if (input.packId && options.orderedPack) {
+    const [row] = await ctx.tx.query<{ id: string; name: string }>(
+      'select id, name from packs where id = $1 and variant_id = $2',
+      [input.packId, input.variantId],
+    );
+    if (!row) throw errors.notFound('Pack');
+    pack = {
+      id: row.id,
+      name: row.name,
+      version: options.orderedPack.version,
+      factor: normalize(options.orderedPack.factor),
+    };
+  } else if (input.packId) {
     const [row] = await ctx.tx.query<{
       id: string;
       name: string;
@@ -244,7 +263,8 @@ export async function receiveIntoStock(
       [input.supplierId],
     );
     if (!supplier) throw errors.notFound('Supplier');
-    if (supplier.status !== 'active')
+    // Archiving a supplier stops new work; goods on an order already sent still arrive.
+    if (supplier.status !== 'active' && !options.purchaseOrderLineId)
       throw errors.conflict('supplier_archived', 'The supplier is archived.');
   }
   let unitCostBase: string | null = null;
@@ -579,7 +599,7 @@ export const getAvailability = defineOperation({
   id: 'inventory.availability.get',
   summary: 'Get stock and availability for a variant',
   description:
-    'Use this for "how many do I have" questions: on hand, reserved, available, in transit, quarantined, damaged, expired, and shortage for one variant, per location, condition, lot, and serial, with totals. Filter by locationId (with its sub-locations) or warehouseId. Totals cover only the locations you can access; `partial` says when that is a subset. The average cost and value are included with costs.read.',
+    'Use this for "how many do I have" questions: on hand, reserved, available, in transit, quarantined, damaged, expired, and shortage for one variant, per location, condition, lot, and serial, with totals. Filter by locationId (with its sub-locations) or warehouseId. Totals cover only the locations you can access; `partial` says when that is a subset. The average cost and value are included with costs.read for members with access to every location.',
   kind: 'read',
   scope: 'shop',
   input: z.object({ variantId: Id, locationId: Id.optional(), warehouseId: Id.optional() }),
@@ -628,7 +648,9 @@ export const getAvailability = defineOperation({
         value: z.string().nullable(),
       })
       .nullable()
-      .describe('Shop-wide moving average and value of owned stock; needs costs.read.'),
+      .describe(
+        'Shop-wide moving average and value of owned stock; needs costs.read and access to every location.',
+      ),
   }),
   permission: 'inventory.read',
   connectionScope: 'inventory:read',
@@ -726,7 +748,9 @@ export const getAvailability = defineOperation({
       [input.variantId, input.warehouseId ?? null, ctx.locationScope, input.locationId ?? null],
     );
     view.totals.onOrder = normalize(onOrder.reduce((sum, r) => exactSum(sum, r.quantity), '0'));
-    const visible = canSeeCosts(ctx);
+    // The cost row is shop-wide: a member limited to some locations would learn the units and
+    // value held everywhere else, so it is hidden from them, as the valuation report is (PRD 2.4).
+    const visible = canSeeCosts(ctx) && ctx.locationScope === null;
     let cost = null;
     if (visible) {
       const [row] = await ctx.tx.query<{

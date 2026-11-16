@@ -309,6 +309,45 @@ describe('lots and expiry (A37, D4)', () => {
       h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' }),
     ).rejects.toMatchObject({ code: 'variant_has_stock' });
   });
+
+  it('traces a lot and a serial within a scoped member’s locations only (PRD 2.4)', async () => {
+    const wh = await h.run(ops.createWarehouse, { name: `Trace ${uuidv7().slice(-4)}` });
+    const own = await createLeafLocation(h, wh.warehouseId, 'Shelf');
+    const scoped = await addMember(shop.shopId, 'viewer', [wh.warehouseId]);
+    const as = { caller: scoped.caller };
+    const lotted = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId: lotted, trackingMode: 'lot' });
+    for (const [locationId, quantity] of [
+      [shop.locationId, '5'],
+      [own, '2'],
+    ] as const) {
+      await h.run(ops.receiveStock, { variantId: lotted, locationId, quantity, lotCode: 'TR-1' });
+    }
+    const trace = await h.run(ops.traceLot, { variantId: lotted, lotCode: 'TR-1' }, as);
+    expect({
+      partial: trace.partial,
+      locations: trace.movements.map((m: { locationId: string }) => m.locationId),
+      onHand: trace.totals.onHand,
+    }).toEqual({ partial: true, locations: [own], onHand: '2.000000' });
+    const full = await h.run(ops.traceLot, { variantId: lotted, lotCode: 'TR-1' });
+    expect({ partial: full.partial, onHand: full.totals.onHand }).toEqual({
+      partial: false,
+      onHand: '7.000000',
+    });
+    const serialized = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId: serialized, trackingMode: 'serial' });
+    await h.run(ops.receiveStock, {
+      variantId: serialized,
+      locationId: own,
+      quantity: '1',
+      serials: ['TR-S1'],
+    });
+    const history = await h.run(ops.serialHistory, { variantId: serialized, serial: 'TR-S1' }, as);
+    expect({ at: history.current?.locationId, moves: history.movements.length }).toEqual({
+      at: own,
+      moves: 1,
+    });
+  });
 });
 
 describe('serials (A38, receive and fulfill)', () => {
@@ -549,6 +588,31 @@ describe('allocation rules per channel (D3)', () => {
       },
     ]);
   });
+
+  it('lets a scoped manager change only a rule that stays within their locations', async () => {
+    const own = await h.run(ops.createWarehouse, { name: 'Rule own' });
+    const ownLoc = await createLeafLocation(h, own.warehouseId, 'Shelf');
+    const scoped = await addMember(shop.shopId, 'manager', [own.warehouseId]);
+    const as = { caller: scoped.caller };
+    const channel = `scoped:${uuidv7().slice(-8)}`;
+    // No rule yet means every location: not theirs to replace.
+    await expect(
+      h.run(ops.setAllocationRule, { channel, locationIds: [ownLoc] }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    await h.run(ops.setAllocationRule, { channel, locationIds: [own.warehouseId] });
+    // Within their warehouse: allowed, both ways.
+    await h.run(ops.setAllocationRule, { channel, locationIds: [ownLoc] }, as);
+    await h.run(ops.setAllocationRule, { channel, locationIds: [own.warehouseId] }, as);
+    // Widening to every location is not.
+    await expect(
+      h.run(ops.setAllocationRule, { channel, locationIds: [] }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    // Nor replacing a rule that names a warehouse outside their scope.
+    await h.run(ops.setAllocationRule, { channel, locationIds: [shop.warehouseId] });
+    await expect(
+      h.run(ops.setAllocationRule, { channel, locationIds: [own.warehouseId] }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+  });
 });
 
 describe('bundles (A36, engine half; G7)', () => {
@@ -695,6 +759,44 @@ describe('bundles (A36, engine half; G7)', () => {
 });
 
 describe('shortages (D6)', () => {
+  it('keeps a shortage limited to a location within that location’s scope (PRD 2.4)', async () => {
+    const variantId = await createVariant(h);
+    const wh = await h.run(ops.createWarehouse, { name: `Short scope ${uuidv7().slice(-4)}` });
+    const own = await createLeafLocation(h, wh.warehouseId, 'Shelf');
+    const scoped = await addMember(shop.shopId, 'manager', [wh.warehouseId]);
+    const as = { caller: scoped.caller };
+    // A channel order limited to the main shelf, with nothing there: all of it is short.
+    const order = await h.run(
+      ops.reserveStock,
+      {
+        variantId,
+        quantity: '2',
+        locationId: shop.locationId,
+        allowShortage: true,
+        purpose: 'external_order',
+      },
+      { caller: await connector(shop) },
+    );
+    const mine = await h.run(
+      ops.reserveStock,
+      { variantId, quantity: '1', locationId: own, allowShortage: true, purpose: 'external_order' },
+      { caller: await connector(shop) },
+    );
+    const listed = await h.run(ops.listShortages, { variantId }, as);
+    expect(listed.shortages.map((r: { reservationId: string }) => r.reservationId)).toEqual([
+      mine.reservationId,
+    ]);
+    const seen = await h.run(ops.listReservations, { variantId }, as);
+    expect(seen.reservations.map((r: { reservationId: string }) => r.reservationId)).toEqual([
+      mine.reservationId,
+    ]);
+    await expect(
+      h.run(ops.releaseReservation, { reservationId: order.reservationId }, as),
+    ).rejects.toMatchObject({ code: 'location_out_of_scope' });
+    await h.run(ops.releaseReservation, { reservationId: mine.reservationId }, as);
+    await h.run(ops.releaseReservation, { reservationId: order.reservationId });
+  });
+
   it('lets only a connector record a shortage; receipts fill them oldest first; availability stays at zero', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '2' });

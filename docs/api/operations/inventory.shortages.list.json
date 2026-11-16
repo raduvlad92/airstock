@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.shortages.list",
       "summary": "List open shortages",
-      "description": "Use this to see demand from accepted orders (such as Shopify) that no stock covers yet, per reservation and per variant. A receipt at an eligible location fills shortages oldest first.",
+      "description": "Use this to see demand from accepted orders (such as Shopify) that no stock covers yet, per reservation and per variant. A receipt at an eligible location fills shortages oldest first. A shortage limited to a location outside your access is left out.",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.shortages.listed",

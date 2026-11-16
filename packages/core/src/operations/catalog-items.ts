@@ -1158,6 +1158,23 @@ function statusHandler(record: RecordType, archived: boolean) {
       if (open)
         throw errors.conflict('open_reservations', `Release the ${record}'s reservations first.`);
       if (record === 'variant') {
+        // Goods on a sent order still arrive, and an archived variant cannot receive them.
+        const [ordered] = await ctx.tx.query(
+          `select 1 from purchase_order_lines l
+           join purchase_orders o on o.shop_id = l.shop_id and o.id = l.purchase_order_id
+           where l.variant_id = $1 and o.status in ('sent', 'partially_received')
+             and l.ordered > l.received + l.cancelled
+           limit 1`,
+          [id],
+        );
+        if (ordered) {
+          throw errors.conflict(
+            'open_purchase_orders',
+            'This variant is still on order. Receive or close its purchase orders first.',
+          );
+        }
+      }
+      if (record === 'variant') {
         const [others] = await ctx.tx.query<{ n: number }>(
           `select count(*)::int as n from variants where product_id = $1 and status = 'active' and id <> $2`,
           [row.product_id, id],
@@ -1202,7 +1219,7 @@ const StatusOut = z.object({ id: Id, status: z.string(), version: z.number() });
 const ARCHIVE_PRODUCT =
   'Hides the product and its variants from new work. Its history and stock stay; nothing is deleted. A product with open reservations cannot be archived.';
 const ARCHIVE_VARIANT =
-  'Hides one variant. The last active variant cannot be archived (archive the product). A variant with open reservations cannot be archived.';
+  'Hides one variant. The last active variant cannot be archived (archive the product). A variant with open reservations, or still on order from a sent purchase order, cannot be archived.';
 
 export const archiveProduct = defineOperation({
   id: 'catalog.products.archive',

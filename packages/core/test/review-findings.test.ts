@@ -234,7 +234,7 @@ describe('F-RECON-SKIPS-DOCUMENTS: the scheduled check ignores transfer and retu
 // history entries about those locations; out-of-scope stock figures and history are hidden.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore location scope', () => {
-  it.fails('hides out-of-scope lot movements from a member limited to another warehouse', async () => {
+  it('hides out-of-scope lot movements from a member limited to another warehouse', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
     const received = await h.run(ops.receiveStock, {
@@ -259,7 +259,7 @@ describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore locati
     });
   });
 
-  it.fails('hides an out-of-scope serial’s position and movements', async () => {
+  it('hides an out-of-scope serial’s position and movements', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'serial' });
     const serial = `SN-${uuidv7().slice(-6)}`;
@@ -290,7 +290,7 @@ describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore locati
 // stock they may not touch. The hook's own comment says this must not be possible.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-ALLOCATION-RULE: a scoped member can widen or rewrite a channel rule', () => {
-  it.fails('refuses to replace a rule naming an out-of-scope warehouse with "every location"', async () => {
+  it('refuses to replace a rule naming an out-of-scope warehouse with "every location"', async () => {
     const channel = `shopify:${uuidv7().slice(-8)}`;
     await h.run(ops.setAllocationRule, { channel, locationIds: [shop.warehouseId] });
     const scoped = await addMember(shop.shopId, 'manager', [store]);
@@ -426,7 +426,7 @@ describe('F-SERIAL-TWO-PLACES: one serial can end up on hand at two locations', 
 // position nobody picked from.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-COMPLETE-WHOLE-BUNDLE: completing a list ships bundle components it never listed', () => {
-  it.fails('leaves the other warehouse’s component in stock when only this warehouse was picked', async () => {
+  it('leaves the other warehouse’s component in stock when only this warehouse was picked', async () => {
     const a = await createVariant(h);
     const b = await createVariant(h);
     await h.run(ops.receiveStock, { variantId: a, locationId: shop.locationId, quantity: '1' });
@@ -548,7 +548,7 @@ async function outcomeOf(p: Promise<unknown>): Promise<string> {
 // posts stock changes at positions outside the member's scope.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-COUNT-POSITIONS: a positions-based count escapes location scope', () => {
-  it.fails('refuses an out-of-scope member reading and submitting a positions-based count', async () => {
+  it('refuses an out-of-scope member reading and submitting a positions-based count', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '6' });
     const [pos] = await ownerQuery<{ id: string }>(
@@ -583,7 +583,7 @@ describe('F-SCOPE-COUNT-POSITIONS: a positions-based count escapes location scop
 // order destined for warehouse A, which ADR 0027 forbids, and the response returns the full order.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-PO-RECEIVE: a scoped member can receive an order for another warehouse', () => {
-  it.fails('refuses a receipt by a member whose scope does not cover the order’s destination', async () => {
+  it('refuses a receipt by a member whose scope does not cover the order’s destination', async () => {
     const supplier = await h.run(ops.createSupplier, { name: `Sup ${uuidv7().slice(-6)}` });
     const variantId = await createVariant(h);
     const po = await h.run(ops.draftPurchaseOrder, {
@@ -662,7 +662,7 @@ describe('F-REALLOCATE-IGNORES-LIMITS: reallocation leaves the reservation’s o
 // case to 12, receive the 10 cases that arrived: 120 units are recorded and 120 stay on order.
 // ---------------------------------------------------------------------------------------------
 describe('F-PO-PACK-RESIZED: a PO receipt in packs uses the pack’s current size', () => {
-  it.fails('records 240 units for 10 cases ordered at 24 per case', async () => {
+  it('records 240 units for 10 cases ordered at 24 per case', async () => {
     const supplier = await h.run(ops.createSupplier, { name: `Sup ${uuidv7().slice(-6)}` });
     const variantId = await createVariant(h);
     const packs = await h.run(ops.setPacks, {
@@ -705,7 +705,7 @@ describe('F-PO-PACK-RESIZED: a PO receipt in packs uses the pack’s current siz
 // the picker never touched while the bin they picked from keeps its count.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-RESCAN-ELSEWHERE: a rescanned lot is reallocated away from where the picker stands', () => {
-  it.fails('keeps the new allocation at the line’s location when only a lot is scanned', async () => {
+  it('keeps the new allocation at the line’s location when only a lot is scanned', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
     const binZ = await createLeafLocation(h, shop.warehouseId, `Bin Z ${uuidv7().slice(-4)}`);
@@ -749,7 +749,7 @@ describe('F-PICK-RESCAN-ELSEWHERE: a rescanned lot is reallocated away from wher
 // (every other order on the list) rolls back. picking.ts says expiry is tolerated.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-COMPLETE-EXPIRED: one expired reservation blocks completing the whole list', () => {
-  it.fails('completes the list and fulfills the other orders when one reservation expired', async () => {
+  it('completes the list and fulfills the other orders when one reservation expired', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '4' });
     const keep = await h.run(ops.reserveStock, { variantId, quantity: '1' });
@@ -814,7 +814,7 @@ describe('F-RETURN-SKIPS-INSPECTION: a return’s quarantined units can be made 
 // bundle stays reserved, so the stock is never decremented and stays promised.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-BUNDLE-SPLIT-LINE: a bundle whose line was split by a lot rescan is never fulfilled', () => {
-  it.fails('fulfills the bundle when its picks cover every component', async () => {
+  it('fulfills the bundle when its picks cover every component', async () => {
     const a = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId: a, trackingMode: 'lot' });
     await h.run(ops.receiveStock, {
@@ -926,7 +926,7 @@ describe('F-TRANSFER-DEST-UNLOCKED: a transfer receipt can land stock at a locat
 // manager limited to one warehouse learns the units and value held everywhere else.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-COST-TOTALS: get_stock shows shop-wide owned quantity and value to scoped members', () => {
-  it.fails('shows a scoped member no cost figures beyond their own locations', async () => {
+  it('shows a scoped member no cost figures beyond their own locations', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, {
       variantId,

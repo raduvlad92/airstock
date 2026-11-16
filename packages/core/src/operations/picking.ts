@@ -7,7 +7,7 @@ import { errors } from '../errors.ts';
 import { effectivePermissions } from '../permissions.ts';
 import { defineOperation, type HandlerContext, type HandlerResult } from '../registry.ts';
 import { Id } from '../schemas.ts';
-import { normalizeCode, OPEN_STATUSES } from '../stock/engine.ts';
+import { assertScale, lockPositions, normalizeCode, OPEN_STATUSES } from '../stock/engine.ts';
 import { DateOnly, LotCode } from './inventory.ts';
 import { fulfillReservation, reallocateReservation } from './inventory-reservations.ts';
 import { WAREHOUSE_TOOL } from './warehouse-scan.ts';
@@ -19,9 +19,11 @@ import { WAREHOUSE_TOOL } from './warehouse-scan.ts';
 // line for a count. Completing the list fulfills manual and API reservations through the fulfill
 // command; Shopify orders are fulfilled from Shopify, so their picks are only recorded.
 //
-// Lock order: a pick list's lines are locked before anything else, like a session row. Stock
-// commands never wait on pick lines, so the order of ADR 0006 (positions, then reservations)
-// still holds inside the reallocate and fulfill commands these call.
+// Lock order: a pick list's row, then its lines, are locked before anything else, like a session
+// row. Stock commands never wait on pick lists or lines, so the order of ADR 0006 (positions,
+// then reservations) still holds inside the reallocate and fulfill commands these call.
+// Completion locks every position and reservation it will fulfill up front, in that order, so
+// fulfilling line after line never takes a position or reservation out of id order.
 
 const Reference = z.string().trim().min(1).max(200);
 
@@ -296,8 +298,13 @@ async function listLocations(tx: Tx, pickListId: string, lineId?: string): Promi
   ).map((r) => r.location_id);
 }
 
-/** Locks a line (and reads its list), the first lock any picking command takes. */
+/**
+ * Locks the list row, then the line: the first locks any picking command takes. Completing and
+ * cancelling lock the list and then its lines, and a pick updates the list row too, so the list
+ * row always comes first; the other way round a pick and a completion deadlock.
+ */
 async function lockLine(tx: Tx, pickListId: string, lineId: string): Promise<LineRow> {
+  await tx.query('select 1 from pick_lists where id = $1 for update', [pickListId]);
   const [row] = await tx.query<LineRow>(
     `select pl.id, pl.pick_list_id, l.status as list_status, l.number as list_number, pl.sequence,
        pl.reservation_id, pl.root_reservation_id, pl.allocation_id, pl.variant_id, pl.position_id,
@@ -313,6 +320,15 @@ async function lockLine(tx: Tx, pickListId: string, lineId: string): Promise<Lin
     throw errors.conflict('pick_list_closed', `The pick list is ${row.list_status}.`);
   }
   return row;
+}
+
+/** The decimal places a variant allows in quantities (whole units: 0). */
+async function quantityScale(tx: Tx, variantId: string): Promise<number> {
+  const [v] = await tx.query<{ quantity_scale: number }>(
+    'select quantity_scale from variants where id = $1',
+    [variantId],
+  );
+  return v?.quantity_scale ?? 0;
 }
 
 async function updateLine(
@@ -700,6 +716,7 @@ export const recordPick = defineOperation({
         { remaining },
       );
     }
+    assertScale(quantity, await quantityScale(ctx.tx, line.variant_id));
     // Does the scan name the line's own position?
     const [current] = await ctx.tx.query<{ lot_code: string | null; serial: string | null }>(
       `select lt.code_normalized as lot_code, su.serial_normalized as serial
@@ -720,6 +737,12 @@ export const recordPick = defineOperation({
     const newLineIds: string[] = [];
     let reallocated: z.infer<typeof PickResult>['reallocated'] = null;
     if (differs) {
+      // A scan of another lot or serial alone was taken where the picker stands: the line's
+      // location. Without it, the allocation rule could move the reservation to another bin
+      // that nobody picked from.
+      const locationId = input.positionId
+        ? input.locationId
+        : (input.locationId ?? line.location_id);
       const moved = await reallocateReservation.handler(
         ctx,
         reallocateReservation.input.parse({
@@ -727,7 +750,7 @@ export const recordPick = defineOperation({
           allocationId: line.allocation_id,
           quantity,
           ...(input.positionId ? { positionId: input.positionId } : {}),
-          ...(input.locationId ? { locationId: input.locationId } : {}),
+          ...(locationId ? { locationId } : {}),
           ...(input.lotCode ? { lotCode: input.lotCode } : {}),
           ...(input.serial ? { serial: input.serial } : {}),
           reason: `Pick list ${line.list_number}: picked from another position`,
@@ -891,6 +914,7 @@ export const recordShortPick = defineOperation({
         { remaining },
       );
     }
+    assertScale(found, await quantityScale(ctx.tx, line.variant_id));
     const missing = normalize(subtract(remaining, found));
     await updateLine(ctx.tx, line.id, {
       quantity: line.quantity,
@@ -943,11 +967,20 @@ export const recordShortPick = defineOperation({
 
 // Complete and cancel -----------------------------------------------------------------------
 
+const RECORDED_REASONS = [
+  'shopify',
+  'not_fulfilling',
+  'bundle_incomplete',
+  'expired',
+  'not_open',
+] as const;
+type RecordedReason = (typeof RECORDED_REASONS)[number];
+
 export const completePickList = defineOperation({
   id: 'picking.lists.complete',
   summary: 'Complete a pick list and fulfill what was picked',
   description:
-    'Use this when the picker is done: fulfills the picked units of manual and API reservations through the fulfill command (stock goes down now), and records Shopify orders’ picks only, because Shopify reports their fulfillment. Short units stay reserved. Lines still open block completion unless leaveOpen is true, which leaves them reserved and unpicked. fulfill false records the picks without fulfilling anything. Needs inventory.fulfill to fulfill.',
+    'Use this when the picker is done: fulfills the picked units of manual and API reservations through the fulfill command (stock goes down now), and records Shopify orders’ picks only, because Shopify reports their fulfillment. A bundle is fulfilled only when every component it still holds is on this list and picked in full. Reservations that expired or closed in the meantime are skipped and reported. Short units stay reserved. Lines still open block completion unless leaveOpen is true, which leaves them reserved and unpicked. fulfill false records the picks without fulfilling anything. Needs inventory.fulfill to fulfill.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -968,10 +1001,18 @@ export const completePickList = defineOperation({
       }),
     ),
     recordedOnly: z
-      .array(z.object({ reservationId: Id, externalRef: z.string().nullable() }))
-      .describe(
-        'Reservations whose picks were recorded but not fulfilled here, such as Shopify orders.',
-      ),
+      .array(
+        z.object({
+          reservationId: Id,
+          externalRef: z.string().nullable(),
+          reason: z
+            .enum(RECORDED_REASONS)
+            .describe(
+              'shopify: fulfilled from Shopify; not_fulfilling: completed with fulfill false; bundle_incomplete: some of the bundle’s components are not on this list or not picked in full, so fulfill it once they are; expired: the reservation expired before completion and its units are available again; not_open: the reservation was released or fulfilled in the meantime.',
+            ),
+        }),
+      )
+      .describe('Reservations whose picks were recorded but not fulfilled here, and why.'),
     leftOpen: z.number().int().describe('Lines that were still to pick and stay reserved.'),
     short: z.number().int(),
   }),
@@ -999,15 +1040,12 @@ export const completePickList = defineOperation({
         'Fulfilling needs the inventory.fulfill permission; complete with fulfill false to record the picks only.',
       );
     }
-    const lines = await ctx.tx.query<LineRow & { reservation_status: string; outstanding: string }>(
+    const lines = await ctx.tx.query<LineRow>(
       `select pl.id, pl.pick_list_id, pl.sequence, pl.reservation_id, pl.root_reservation_id,
          pl.allocation_id, pl.variant_id, pl.position_id, pl.location_id, pl.lot_id, pl.serial_id,
          pl.quantity::text, pl.picked::text, pl.short::text, pl.moved::text, pl.status,
-         pl.fulfill_on_complete, pl.external_ref, root.status as reservation_status,
-         a.outstanding::text
+         pl.fulfill_on_complete, pl.external_ref
        from pick_lines pl
-       join reservations root on root.shop_id = pl.shop_id and root.id = pl.root_reservation_id
-       join reservation_allocations a on a.shop_id = pl.shop_id and a.id = pl.allocation_id
        where pl.pick_list_id = $1
        order by pl.id
        for update of pl`,
@@ -1029,81 +1067,180 @@ export const completePickList = defineOperation({
       quantity: string;
       externalRef: string | null;
     }> = [];
-    const recordedOnly = new Map<string, string | null>();
-    const picked = lines.filter((l) => compare(l.picked, '0') > 0);
-    // Bundle components are fulfilled through their bundle, in whole bundles, when every
-    // component line of that bundle on this list is picked in full.
-    const bundles = new Map<string, typeof picked>();
-    for (const l of picked) {
-      if (!l.fulfill_on_complete || !input.fulfill) {
-        recordedOnly.set(l.root_reservation_id, l.external_ref);
-        continue;
-      }
-      if (!(OPEN_STATUSES as readonly string[]).includes(l.reservation_status)) continue;
-      if (l.reservation_id !== l.root_reservation_id) {
-        bundles.set(l.root_reservation_id, [...(bundles.get(l.root_reservation_id) ?? []), l]);
-        continue;
-      }
-      // Something else (a person, or the reservation's own expiry) may have settled part of
-      // the allocation since it was picked: fulfill what is still allocated.
-      const quantity = compare(l.picked, l.outstanding) <= 0 ? l.picked : l.outstanding;
-      if (compare(quantity, '0') <= 0) continue;
-      const done = await fulfillReservation.handler(
-        ctx,
-        fulfillReservation.input.parse({
-          reservationId: l.root_reservation_id,
-          allocationId: l.allocation_id,
-          quantity,
-          ...(input.reference ? { reference: input.reference } : {}),
-          reason: `Pick list ${list.number}`,
-        }),
-      );
-      events.push(
-        subEvent(ctx, fulfillReservation.audit.action, done, 'picking.lists.complete'),
-        ...(done.events ?? []),
-      );
-      outbox.push(...(done.outbox ?? []));
-      await ctx.tx.query('update pick_lines set fulfilled_operation_id = $2 where id = $1', [
-        l.id,
-        done.result.operationId,
-      ]);
-      fulfilled.push({
-        reservationId: l.root_reservation_id,
-        operationId: done.result.operationId,
-        quantity,
-        externalRef: l.external_ref,
-      });
+    const recordedOnly = new Map<string, { externalRef: string | null; reason: RecordedReason }>();
+
+    // The lines of each order-level reservation; an order with nothing picked is left alone.
+    const byRoot = new Map<string, LineRow[]>();
+    for (const l of lines) {
+      byRoot.set(l.root_reservation_id, [...(byRoot.get(l.root_reservation_id) ?? []), l]);
     }
-    for (const [rootId, componentLines] of bundles) {
-      const fullyPicked = componentLines.every(
-        (l) => compare(l.picked, l.quantity) === 0 && l.status === 'picked',
-      );
-      if (
-        !fullyPicked ||
-        lines.some((l) => l.root_reservation_id === rootId && l.status === 'open')
-      ) {
-        recordedOnly.set(rootId, componentLines[0]!.external_ref);
-        continue;
+    const toFulfill: string[] = [];
+    for (const [rootId, rootLines] of [...byRoot].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      if (!rootLines.some((l) => compare(l.picked, '0') > 0)) continue;
+      const first = rootLines[0]!;
+      if (!first.fulfill_on_complete) {
+        recordedOnly.set(rootId, { externalRef: first.external_ref, reason: 'shopify' });
+      } else if (!input.fulfill) {
+        recordedOnly.set(rootId, { externalRef: first.external_ref, reason: 'not_fulfilling' });
+      } else {
+        toFulfill.push(rootId);
       }
-      const done = await fulfillReservation.handler(
-        ctx,
-        fulfillReservation.input.parse({
+    }
+
+    if (toFulfill.length > 0) {
+      // ADR 0006 across the whole completion: every position these reservations (and their bundle
+      // components) hold, in id order, then the reservations in id order. The fulfill commands
+      // below then only take locks this transaction already holds.
+      const openPositions = async () =>
+        (
+          await ctx.tx.query<{ position_id: string }>(
+            `select distinct a.position_id from reservation_allocations a
+             join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
+             where (r.id = any($1::uuid[]) or r.parent_id = any($1::uuid[])) and a.outstanding > 0`,
+            [toFulfill],
+          )
+        ).map((r) => r.position_id);
+      const held = new Set(await lockPositions(ctx.tx, await openPositions()));
+      const roots = await ctx.tx.query<{
+        id: string;
+        parent_id: string | null;
+        status: string;
+        expired: boolean;
+        quantity_scale: number;
+      }>(
+        `select r.id, r.parent_id, r.status,
+           (r.expires_at is not null and r.expires_at <= now()) as expired, v.quantity_scale
+         from reservations r join variants v on v.shop_id = r.shop_id and v.id = r.variant_id
+         where r.id = any($1::uuid[]) or r.parent_id = any($1::uuid[])
+         order by r.id for update of r`,
+        [toFulfill],
+      );
+      if ((await openPositions()).some((p) => !held.has(p))) {
+        throw errors.conflict(
+          'retry_conflict',
+          'A reservation on this list changed while it was being read. Retry the request.',
+        );
+      }
+      // What each reservation and bundle component still holds, read under those locks.
+      const allocations = await ctx.tx.query<{
+        id: string;
+        reservation_id: string;
+        parent_id: string | null;
+        outstanding: string;
+      }>(
+        `select a.id, a.reservation_id, r.parent_id, a.outstanding::text
+         from reservation_allocations a
+         join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
+         where (r.id = any($1::uuid[]) or r.parent_id = any($1::uuid[])) and a.outstanding > 0`,
+        [toFulfill],
+      );
+      const outstanding = new Map(allocations.map((a) => [a.id, a.outstanding]));
+      const fulfill = async (rootId: string, args: Record<string, unknown>) => {
+        const done = await fulfillReservation.handler(
+          ctx,
+          fulfillReservation.input.parse({
+            reservationId: rootId,
+            ...args,
+            ...(input.reference ? { reference: input.reference } : {}),
+            reason: `Pick list ${list.number}`,
+          }),
+        );
+        events.push(
+          subEvent(ctx, fulfillReservation.audit.action, done, 'picking.lists.complete'),
+          ...(done.events ?? []),
+        );
+        outbox.push(...(done.outbox ?? []));
+        return done;
+      };
+
+      for (const rootId of toFulfill) {
+        const rootLines = byRoot.get(rootId)!;
+        const externalRef = rootLines[0]!.external_ref;
+        const root = roots.find((r) => r.id === rootId);
+        if (!root || !(OPEN_STATUSES as readonly string[]).includes(root.status)) {
+          recordedOnly.set(rootId, { externalRef, reason: 'not_open' });
+          continue;
+        }
+        // An expired reservation's units are already available again: fulfilling it would fail
+        // and roll back every other order on the list, so it is skipped and reported.
+        if (root.expired) {
+          recordedOnly.set(rootId, { externalRef, reason: 'expired' });
+          continue;
+        }
+        if (rootLines[0]!.reservation_id === rootId) {
+          // One fulfillment per picked allocation. Something else (a person, or a release) may
+          // have settled part of the allocation since it was picked: fulfill what is still held.
+          for (const l of [...rootLines].sort((a, b) =>
+            a.allocation_id < b.allocation_id ? -1 : 1,
+          )) {
+            const still = outstanding.get(l.allocation_id) ?? '0';
+            const quantity = compare(l.picked, still) <= 0 ? normalize(l.picked) : normalize(still);
+            if (compare(quantity, '0') <= 0) continue;
+            const done = await fulfill(rootId, { allocationId: l.allocation_id, quantity });
+            outstanding.set(l.allocation_id, normalize(subtract(still, quantity)));
+            await ctx.tx.query('update pick_lines set fulfilled_operation_id = $2 where id = $1', [
+              l.id,
+              done.result.operationId,
+            ]);
+            fulfilled.push({
+              reservationId: rootId,
+              operationId: done.result.operationId,
+              quantity,
+              externalRef,
+            });
+          }
+          continue;
+        }
+        // A bundle ships whole: it is fulfilled only when every unit its components still hold
+        // is on this list and picked in full (nothing left, nothing short). Fulfilling the bundle
+        // otherwise takes components from positions nobody picked (another warehouse, another
+        // list), and fulfilling some components alone would leave the rest stranded, since a
+        // bundle is released and fulfilled in whole bundles (ADR 0026, update).
+        const onList = new Set(rootLines.map((l) => l.allocation_id));
+        const coveredLines = rootLines.every(
+          (l) => compare(remainingOf(l), '0') === 0 && compare(l.short, '0') === 0,
+        );
+        const held = allocations.filter((a) => a.parent_id === rootId);
+        const components = roots.filter((r) => r.parent_id === rootId);
+        if (
+          !coveredLines ||
+          held.length === 0 ||
+          held.some((a) => !onList.has(a.id)) ||
+          components.some((c) => !held.some((a) => a.reservation_id === c.id))
+        ) {
+          recordedOnly.set(rootId, { externalRef, reason: 'bundle_incomplete' });
+          continue;
+        }
+        // Whole bundles the allocations cover (a component may be short of stock).
+        const [covered] = await ctx.tx.query<{ bundles: string }>(
+          `select coalesce(trunc(min(x.held / r.component_base_quantity), $2::int), 0)::text as bundles
+           from reservations r
+           cross join lateral (select coalesce(sum(a.outstanding), 0) as held
+             from reservation_allocations a
+             where a.shop_id = r.shop_id and a.reservation_id = r.id) x
+           where r.parent_id = $1`,
+          [rootId, root.quantity_scale],
+        );
+        const bundles = normalize(covered?.bundles ?? '0');
+        if (compare(bundles, '0') <= 0) {
+          recordedOnly.set(rootId, { externalRef, reason: 'bundle_incomplete' });
+          continue;
+        }
+        const done = await fulfill(rootId, { quantity: bundles });
+        await ctx.tx.query(
+          'update pick_lines set fulfilled_operation_id = $2 where id = any($1::uuid[])',
+          [
+            rootLines.filter((l) => compare(l.picked, '0') > 0).map((l) => l.id),
+            done.result.operationId,
+          ],
+        );
+        fulfilled.push({
           reservationId: rootId,
-          ...(input.reference ? { reference: input.reference } : {}),
-          reason: `Pick list ${list.number}`,
-        }),
-      );
-      events.push(
-        subEvent(ctx, fulfillReservation.audit.action, done, 'picking.lists.complete'),
-        ...(done.events ?? []),
-      );
-      outbox.push(...(done.outbox ?? []));
-      fulfilled.push({
-        reservationId: rootId,
-        operationId: done.result.operationId,
-        quantity: done.result.fulfilled,
-        externalRef: componentLines[0]!.external_ref,
-      });
+          operationId: done.result.operationId,
+          quantity: done.result.fulfilled,
+          externalRef,
+        });
+      }
     }
     const leftOpen = open.length;
     await ctx.tx.query(
@@ -1116,17 +1253,18 @@ export const completePickList = defineOperation({
        where id = $1`,
       [input.pickListId],
     );
-    for (const f of fulfilled) recordedOnly.delete(f.reservationId);
     const short = lines.filter((l) => l.status === 'short').length;
+    const recorded = [...recordedOnly].map(([reservationId, r]) => ({
+      reservationId,
+      externalRef: r.externalRef,
+      reason: r.reason,
+    }));
     return {
       result: {
         pickListId: input.pickListId,
         status: 'completed' as const,
         fulfilled,
-        recordedOnly: [...recordedOnly].map(([reservationId, externalRef]) => ({
-          reservationId,
-          externalRef,
-        })),
+        recordedOnly: recorded,
         leftOpen,
         short,
       },
@@ -1141,7 +1279,7 @@ export const completePickList = defineOperation({
             reservationId: f.reservationId,
             quantity: f.quantity,
           })),
-          recordedOnly: [...recordedOnly.keys()],
+          recordedOnly: recorded.map((r) => ({ reservationId: r.reservationId, reason: r.reason })),
           leftOpen,
           short,
         },

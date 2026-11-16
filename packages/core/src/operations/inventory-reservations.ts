@@ -642,7 +642,11 @@ export const releaseReservation = defineOperation({
   idempotency: 'required',
   http: { method: 'POST', path: '/shops/{shopId}/reservations/{reservationId}/release' },
   mcp: { tool: TOOL, action: 'release', readOnly: false, destructive: false },
-  locations: (input, tx) => allocationLocations(tx, input.reservationId),
+  // A shortage is at no position: it is about the reservation's location limit, if any.
+  locations: async (input, tx) => [
+    ...(await allocationLocations(tx, input.reservationId)),
+    ...(await shortageLocations(tx, input.reservationId)),
+  ],
   async handler(ctx, input) {
     const { root, components } = await lockTree(ctx, input.reservationId);
     assertOpen(root);
@@ -739,6 +743,17 @@ async function allocationLocations(tx: Tx, reservationId: string): Promise<strin
        join reservations r on r.shop_id = a.shop_id and r.id = a.reservation_id
        join inventory_positions p on p.shop_id = a.shop_id and p.id = a.position_id
        where r.id = $1 or r.parent_id = $1`,
+      [reservationId],
+    )
+  ).map((r) => r.location_id);
+}
+
+/** The location limit of a reservation (or bundle component) with an open shortage. */
+async function shortageLocations(tx: Tx, reservationId: string): Promise<string[]> {
+  return (
+    await tx.query<{ location_id: string }>(
+      `select distinct location_id from reservations
+       where (id = $1 or parent_id = $1) and shortage_quantity > 0 and location_id is not null`,
       [reservationId],
     )
   ).map((r) => r.location_id);
@@ -1313,10 +1328,12 @@ export const listReservations = defineOperation({
            and (not $6 or r.shortage_quantity > 0 or exists (select 1 from reservations c
              where c.shop_id = r.shop_id and c.parent_id = r.id and c.shortage_quantity > 0))
            and ($7::uuid is null or r.id < $7)
-           and ($9::uuid[] is null or not exists (
+           and ($9::uuid[] is null or (not exists (
              select 1 from reservation_allocations a
              join reservations c on c.shop_id = a.shop_id and c.id = a.reservation_id
-             where (c.id = r.id or c.parent_id = r.id)) or exists (
+             where (c.id = r.id or c.parent_id = r.id)) and (r.location_id is null or exists (
+             select 1 from locations rl where rl.shop_id = r.shop_id and rl.id = r.location_id
+               and rl.path_ids && $9::uuid[]))) or exists (
              select 1 from reservation_allocations a
              join reservations c on c.shop_id = a.shop_id and c.id = a.reservation_id
              join inventory_positions p on p.shop_id = a.shop_id and p.id = a.position_id
@@ -1391,7 +1408,7 @@ export const listShortages = defineOperation({
   id: 'inventory.shortages.list',
   summary: 'List open shortages',
   description:
-    'Use this to see demand from accepted orders (such as Shopify) that no stock covers yet, per reservation and per variant. A receipt at an eligible location fills shortages oldest first.',
+    'Use this to see demand from accepted orders (such as Shopify) that no stock covers yet, per reservation and per variant. A receipt at an eligible location fills shortages oldest first. A shortage limited to a location outside your access is left out.',
   kind: 'read',
   scope: 'shop',
   input: z.object({ variantId: Id.optional() }),
@@ -1437,9 +1454,12 @@ export const listShortages = defineOperation({
        left join reservations p on p.shop_id = r.shop_id and p.id = r.parent_id
        where r.shortage_quantity > 0 and r.status in ('active', 'partially_fulfilled')
          and ($1::uuid is null or r.variant_id = $1)
+         and ($2::uuid[] is null or r.location_id is null or exists (
+           select 1 from locations l where l.shop_id = r.shop_id and l.id = r.location_id
+             and l.path_ids && $2::uuid[]))
        order by r.id
        limit 500`,
-      [input.variantId ?? null],
+      [input.variantId ?? null, ctx.locationScope],
     );
     const totals = new Map<string, { variantId: string; sku: string; shortage: string }>();
     for (const r of rows) {

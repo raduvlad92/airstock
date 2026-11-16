@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.serials.history",
       "summary": "Show a serial’s history",
-      "description": "Use this for one serialized unit (a serial or certificate number): its status, where it is now, and every step since it was received, including the order it was fulfilled for.",
+      "description": "Use this for one serialized unit (a serial or certificate number): its status, where it is now, and every step since it was received, including the order it was fulfilled for. Positions and movements at locations you cannot access are left out (partial).",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.serial.viewed",
@@ -93,7 +93,12 @@
                       {
                         "type": "null"
                       }
-                    ]
+                    ],
+                    "description": "Null when the unit is not in stock, or is at a location you cannot access."
+                  },
+                  "partial": {
+                    "type": "boolean",
+                    "description": "True when your location access limits what is shown."
                   },
                   "movements": {
                     "type": "array",
@@ -192,6 +197,7 @@
                   "sku",
                   "status",
                   "current",
+                  "partial",
                   "movements"
                 ],
                 "additionalProperties": false

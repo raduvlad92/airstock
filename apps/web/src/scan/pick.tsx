@@ -5,7 +5,12 @@ import { useRef, useState } from 'react';
 import { api, command, errorMessage, type Out } from '../api.ts';
 import { formatDecimal } from '../components/ui.tsx';
 import { can } from '../context.tsx';
-import { linePacks, type PickLineView, type PickListView } from '../picking/view.ts';
+import {
+  linePacks,
+  type PickLineView,
+  type PickListView,
+  recordedSummary,
+} from '../picking/view.ts';
 import { type ScanEnv, useScanHandler } from './flows.ts';
 import { ScanField } from './scan-field.tsx';
 
@@ -301,9 +306,9 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
         {completed ? (
           <p>
             {completed.fulfilled.length} fulfillment(s) recorded
-            {completed.recordedOnly.length
-              ? `; ${completed.recordedOnly.length} Shopify order(s) recorded, fulfilled from Shopify`
-              : ''}
+            {recordedSummary(completed.recordedOnly)
+              .map((part) => `; ${part}`)
+              .join('')}
             {completed.short ? `; ${completed.short} short line(s) stay reserved for a count` : ''}.
           </p>
         ) : null}

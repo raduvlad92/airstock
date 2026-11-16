@@ -18,6 +18,8 @@ if (!url || !shopId) {
   process.exit(1);
 }
 const runs = Number(process.env.RUNS ?? 20);
+/** Called before each shape's first run, to measure it cold (for example: suspend the compute). */
+const coldHook = process.env.COLD_HOOK;
 const db = new PgDatabase(poolSource(url, 2));
 const ctx = { shopId, userId: null, readOnly: true };
 
@@ -37,11 +39,17 @@ const sample = async (column: string, where = 'true') =>
 
 const user = await sample('actor_id', "actor_type = 'user'");
 const connection =
-  (await sample('actor_id', "actor_type in ('connection', 'api_credential') and actor_id ~ '^[0-9a-f-]{36}$'")) ??
-  (await sample('client_id', "actor_type in ('connection', 'connector')"));
+  (await sample(
+    'actor_id',
+    "actor_type in ('connection', 'api_credential') and actor_id ~ '^[0-9a-f-]{36}$'",
+  )) ?? (await sample('client_id', "actor_type in ('connection', 'connector')"));
 const location = await sample('location_ids[1]', 'cardinality(location_ids) > 0');
 const warehouse = location
-  ? (await one<{ v: string }>('select path_ids[1]::text as v from locations where id = $1', [location]))?.v
+  ? (
+      await one<{ v: string }>('select path_ids[1]::text as v from locations where id = $1', [
+        location,
+      ])
+    )?.v
   : undefined;
 const target = await one<{ t: string; i: string }>(
   `select target_type as t, target_id as i from audit_events
@@ -68,20 +76,28 @@ const cases: Array<[string, ActivityFiltersInput, string[] | null]> = [
   ['warehouse + last 7 days', { locationId: warehouse, from: since(7) }, null],
   ['location + outcome succeeded', { locationId: location, outcome: 'succeeded' }, null],
   ['source mcp + outcome denied', { source: 'mcp', outcome: 'denied' }, null],
-  ['target + phase outcome', { targetType: target?.t, targetId: target?.i, phase: 'outcome' }, null],
-  ['integration + action catalog.*', { integration: connection, action: 'catalog.*' }, null],
-  ['outcome failed + last 7 days', { outcome: 'failed', from: since(7) }, null],
   [
-    'action exact + actor',
-    { action: 'catalog.item.updated', actorId: user },
+    'target + phase outcome',
+    { targetType: target?.t, targetId: target?.i, phase: 'outcome' },
     null,
   ],
+  ['integration + action catalog.*', { integration: connection, action: 'catalog.*' }, null],
+  ['outcome failed + last 7 days', { outcome: 'failed', from: since(7) }, null],
+  ['action exact + actor', { action: 'catalog.item.updated', actorId: user }, null],
   ['batch (attempt ID)', { attemptId: attempt }, null],
-  ['scoped reader: inventory.* + last 30 days', { action: 'inventory.*', from: since(30) }, warehouse ? [warehouse] : null],
+  [
+    'scoped reader: inventory.* + last 30 days',
+    { action: 'inventory.*', from: since(30) },
+    warehouse ? [warehouse] : null,
+  ],
   ['rare: actor + outcome conflict', { actorId: user, outcome: 'conflict' }, null],
   ['rare actor + last 90 days', { actorId: rareActor ?? user, from: since(90) }, null],
   ['rare action + last 90 days', { action: rareAction ?? 'member.invited', from: since(90) }, null],
-  ['rare prefix webhook.subscription.* + outcome succeeded', { action: 'webhook.subscription.*', outcome: 'succeeded' }, null],
+  [
+    'rare prefix webhook.subscription.* + outcome succeeded',
+    { action: 'webhook.subscription.*', outcome: 'succeeded' },
+    null,
+  ],
 ];
 
 const pct = (xs: number[], p: number) => {
@@ -89,11 +105,33 @@ const pct = (xs: number[], p: number) => {
   return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)]!;
 };
 
+import { execSync } from 'node:child_process';
+
+async function serverMs(sql: string, params: unknown[]): Promise<number> {
+  const [row] = await db.transaction(ctx, (tx) =>
+    tx.query<{ 'QUERY PLAN': Array<{ 'Planning Time': number; 'Execution Time': number }> }>(
+      `explain (analyze, timing off, format json) ${sql}`,
+      params,
+    ),
+  );
+  const plan = row!['QUERY PLAN'][0]!;
+  return plan['Planning Time'] + plan['Execution Time'];
+}
+
 console.log(`shop ${shopId}, ${runs} runs each, page of 50`);
-console.log('| Search | Rows | Median ms | p95 ms |');
-console.log('| --- | --- | --- | --- |');
+console.log(
+  `| Search | Rows | Client median ms | Client p95 ms | Server p95 ms |${coldHook ? ' Cold first run ms |' : ''}`,
+);
+console.log(`| --- | --- | --- | --- | --- |${coldHook ? ' --- |' : ''}`);
 for (const [name, filters, scope] of cases) {
   const { sql, params } = activityQuery({ filters, scope, limit: 51, cursor: null });
+  let cold = '';
+  if (coldHook) {
+    execSync(coldHook, { stdio: 'inherit' });
+    const t = performance.now();
+    await db.transaction(ctx, (tx) => tx.query(sql, params));
+    cold = ` ${(performance.now() - t).toFixed(0)} |`;
+  }
   if (process.env.EXPLAIN) {
     const plan = await db.transaction(ctx, (tx) =>
       tx.query<{ 'QUERY PLAN': string }>(`explain (analyze, buffers) ${sql}`, params),
@@ -101,12 +139,16 @@ for (const [name, filters, scope] of cases) {
     console.error(`\n-- ${name}\n${plan.map((p) => p['QUERY PLAN']).join('\n')}`);
   }
   const times: number[] = [];
+  const server: number[] = [];
   let rows = 0;
   for (let i = 0; i < runs; i++) {
     const t = performance.now();
     rows = (await db.transaction(ctx, (tx) => tx.query(sql, params))).length;
     times.push(performance.now() - t);
+    server.push(await serverMs(sql, params));
   }
-  console.log(`| ${name} | ${rows} | ${pct(times, 50).toFixed(1)} | ${pct(times, 95).toFixed(1)} |`);
+  console.log(
+    `| ${name} | ${rows} | ${pct(times, 50).toFixed(0)} | ${pct(times, 95).toFixed(0)} | ${pct(server, 95).toFixed(1)} |${cold}`,
+  );
 }
 await db.close();

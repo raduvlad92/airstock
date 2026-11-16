@@ -57,3 +57,21 @@ $$;
 -- An import's record events carry the attempt ID of the request that committed it, so the
 -- history shows the import as one batch: parent, then each record (PRD 7.4).
 alter table import_jobs add column commit_attempt_id uuid;
+
+-- Indexes for the PRD 7.4 filters, chosen on a 1-million-event history (docs/phase-2-measurements.md,
+-- I5). The timeline walks (shop_id, occurred_at) backwards and stops after a page, which is fast
+-- for any filter matching more than a few percent of a shop's events. These serve the rare ones,
+-- where that walk would read the whole history. Keys without the time deduplicate to a few bytes
+-- per event; the matches are few, so sorting them is cheap.
+create index audit_events_shop_actor_idx on audit_events (shop_id, actor_id);
+-- text_pattern_ops also serves action groups (`inventory.*`, a LIKE prefix) in any collation.
+create index audit_events_shop_action_idx on audit_events (shop_id, action text_pattern_ops);
+-- Failures, denials, and conflicts: under 1% of events.
+create index audit_events_shop_problems_idx on audit_events (shop_id, outcome)
+  where outcome not in ('succeeded', 'received');
+-- Warehouse and location filters, and location-scoped history (PRD 2.4).
+create index audit_events_locations_idx on audit_events using gin (location_ids)
+  where location_ids is not null;
+-- Stock events of one inventory operation.
+create index audit_events_operation_idx on audit_events (operation_id)
+  where operation_id is not null;

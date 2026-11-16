@@ -396,6 +396,253 @@ DATABASE_OWNER_URL=… tsx scripts/bench/seed-stock-ledger.ts --days 21 --per-da
 # The timings, and the export job of the largest shop.
 DATABASE_APP_URL=… DATABASE_OWNER_URL=… tsx scripts/bench/query-reports.ts --n 5 --json reports.json
 ```
+
 ## I7 volume run
 
-**Status:** in progress (16 November 2026). Bench branch `i7-volume`, created from `i0-personas` and migrated to current main (migrations 0016–0070). Results follow as each step finishes.
+**When:** 16 November 2026.  
+**Database:** Neon `airstock-bench`, on a branch `i7-volume` created from `i0-personas` for this run and migrated to the schema of main (migrations 0016 to 0070, with I5's 0068). Same compute as I0: autoscaling between 0.25 and 2 CU. `pg_stat_statements` was installed on the branch for the database times.  
+**Client:** the same laptop in Europe, about 15 ms per round trip (14.5–14.9 ms measured in each run).  
+**Staging:** the deployed Worker at `airstock.deletecookies.dev`, with one small test shop made through the API for this run and deleted afterwards.
+
+### Seed
+
+`scripts/bench/seed-stock-activity.ts` adds what `personas.ts` marked "I1:", then three months of stock activity: 18 August to 16 November 2026, after the opening import of 17 August. The commands are replayed in memory with the engine's rules, then written in bulk as the database owner, one transaction per shop. Those rules are:
+- allocation earliest expiry first, then oldest stock;
+- no position below zero;
+- allocations never above on hand;
+- one serial per position;
+- the moving average and owned quantity per variant, with a cost-history row per variant and operation.
+
+Afterwards `stock_reconciliation_problems()`, `transfer_reconciliation_problems()`, and `return_reconciliation_problems()` find nothing in any shop. The whole seed took about 1 minute: 4 to 27 s per shop, most of it writing.
+
+**Tracking (the "I1:" markers):**
+- Food: every variant `lot_expiry`, sell-by margin 14 days, shelf life 150 to 330 days.
+- Cosmetics: skincare, foundations, and concealers `lot_expiry` (987 variants), margin 30 days.
+- Spare parts: pumps, motors, contactors, relays, and sensors serial-tracked: 2,052 variants, 10.3%.
+- Fashion: watches serial-tracked; jewellery sold as a single variant made one of a kind.
+- Owner's store: the 900 single and graded cards and the 100 used sets made one of a kind.
+
+Opening stock of those variants was received again in one to eight lots, one serial per unit, or one unit.
+
+**Activity:**
+- **Orders:** a reservation per line (Shopify connector, API, or dashboard), fulfilled 2 to 40 hours later; 6% are released instead. The last day's stay open.
+- **Purchase orders:** by preferred supplier, every two days, for variants under 40% of their opening level (60% for food) or under their reorder rule. They are received 4 to 12 days later with costs, new lots, and new serials; 8% are short, most of those closed short. The newest stay sent or draft.
+- **Transfers:** between warehouses, received 18 to 60 hours after dispatch.
+- **Returns:** into quarantine, then inspected: 80% back to sellable, 15% damaged, 5% disposed.
+- **Counts:** a count of one location with a few corrections, one to three a day.
+- **Write-offs:** damage, and expired food lots.
+- **Reorder rules** on 5 to 50% of the stocked variants.
+
+Weekdays are busier, people work office hours, and activity grows over the three months.
+
+| Shop | Variants | Lots | Serials (in stock) | One of a kind (sold) | Reorder rules | POs (open) | Operations | Ledger entries | Reservations (open) | Transfers | Returns | Counts | Positions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Bench Cards and Bricks | 1,254 | | | 1,000 (467) | 59 | 110 (27) | 18,980 | 11,838 | 9,281 (55) | | 123 | 91 | 1,810 |
+| Bench Fuel Kitchen | 300 | 3,045 | | | 132 | 120 (23) | 20,736 | 14,754 | 10,145 (95) | | 74 | 181 | 3,993 |
+| Bench Lumen Skin | 2,000 | 2,125 | | | 194 | 76 (19) | 21,138 | 14,456 | 10,134 (62) | | 300 | 180 | 4,034 |
+| Bench Maison Verre | 4,001 | | 180 (117) | 27 (26) | 302 | 138 (26) | 21,299 | 23,718 | 9,725 (79) | 295 | 497 | 160 | 9,834 |
+| Bench Partline Supply | 20,000 | | 13,467 (11,895) | | 1,122 | 328 (50) | 16,399 | 48,265 | 7,465 (66) | 390 | 63 | 264 | 34,617 |
+| Bench Stride Sportswear | 4,014 | | | | 345 | 91 (14) | 22,198 | 23,187 | 9,987 (81) | 294 | 699 | 166 | 8,528 |
+| **Total** | **31,569** | **5,170** | **13,647** | **1,027** | **2,154** | **863 (159)** | **120,750** | **136,218** | **56,737 (438)** | **979** | **1,756** | **1,042** | **62,816** |
+
+**About the table:**
+- **Operations** count the three months only, not the opening import. Ledger entries include the opening stock.
+- **Operations by kind:** reservation 56,737, fulfillment 52,958, release 3,341, return 1,756, condition change (inspection) 1,647, count 1,042, transfer dispatch 979, transfer receipt 966, receipt 784, adjustment 540.
+- **Pace:** about 220 stock operations a day per shop (180 to 245), under the plan's 300. Spare parts ran at 220 a day instead of 280 to keep the project under 800 MB. Its orders are larger, so it still has the most ledger entries: serials move one entry per unit.
+- **Not seeded:**
+  - audit events (the I0 history on `i0-baseline` covers them, and activity search was measured in I5);
+  - idempotency records (see the storage section);
+  - bundle reservations, pick lists, and Shopify mappings.
+
+### Sizes and storage
+
+After the seed, compacted with `VACUUM FULL` on the tables the seed updated or deleted from, and `VACUUM ANALYZE`, as `scripts/bench/sizes.ts` reports them:
+
+| | `i0-personas` (I0) | `i7-volume` |
+| --- | --- | --- |
+| Database (`neondb`) | 182.5 MB | 340.4 MB |
+| Cluster, which the 1 GB limit counts | 204.9 MB | 362.2 MB |
+| Stock tables (positions, ledger, reservations, lots, serials, costs, transfers, returns, counts, POs, rules, idempotency) | 52.1 MB | 224.4 MB |
+| Catalog tables | 119.0 MB | 101.7 MB (compacted; the catalog itself did not change) |
+
+**Project storage:** `production` 154 MB, `i0-personas` 205 MB, and `i7-volume` 362 MB: 721 MB together, under the 800 MB line. Neon's API reports branch logical sizes with a lag of minutes, and `synthetic_storage_size` as 0 on this plan, so the cluster figure comes from PostgreSQL. The measurement runs added about 5 MB.
+
+**Per record** (heap and indexes, after compaction):
+
+| Record | Rows | Heap | Indexes | Total |
+| --- | --- | --- | --- | --- |
+| Ledger entry | 136,218 | 173 B | 153 B | 326 B |
+| Operation | 151,526 | 149 B | 80 B | 229 B |
+| Position | 58,407 | 163 B | 196 B | 360 B |
+| Lot | 5,170 | 185 B | 440 B | 634 B |
+| Serial | 13,647 | 197 B | 298 B | 498 B |
+| Reservation | 56,737 | 182 B | 140 B | 323 B |
+| Allocation | 59,693 | 134 B | 151 B | 286 B |
+| Cost-history row | 88,895 | 136 B | 156 B | 293 B |
+| Count line | 45,442 | 240 B | 337 B | 577 B |
+| Idempotency record (opening import) | 30,780 | 356 B | 388 B | 745 B |
+
+**What a stock change costs in storage (cost model):**
+- **An order line** (reservation, then fulfillment): about 3.2 KB in the stock tables. That is two operations, the reservation and its allocation, one ledger entry, one cost-history row, and two idempotency records (1.5 KB of it). The four audit events of the two commands add about 2.6 KB.
+- **A receipt line:** about 1.6 KB, and 2.2 KB with a new lot.
+- **A serial-tracked unit:** about 1.2 KB more than an untracked one, for its serial, its own position, and its own entry.
+- **Lots and serials are index-heavy:** 70% and 60% of their bytes are indexes. Lots have four unique keys, and serials three.
+
+**Idempotency records are never deleted.** No code or migration removes `idempotency_records`, and every command writes one. At three months of this activity that would be 120,750 records, about 90 MB, 40% of the stock tables. A retention window, such as deleting completed records after 7 or 30 days in the daily cron, would keep them to a few MB per shop.
+
+### Method
+
+**Bench (`scripts/bench/query-stock.ts`):**
+- Every command and read goes through the product's pipeline in process, as the runtime role with row-level security.
+- Ten callers work at once, each on its own connection: 100 commands per phase and shop, on different variants. Ten callers on one shop is the plan's load case.
+- Statements per command are the database layer's own count, including `BEGIN` and `COMMIT`.
+
+**Database time** is `pg_stat_statements` execution time over the phase, divided by the commands. It is reset before each timed phase, and it includes lock waits but not planning. The **Worker estimate** is the database time plus 6 ms per statement: the round trip from the Worker next to Neon (Phase 0 measured 4 to 8 ms; Phase 1 report, Section 4). "Server ≈" in the JSON output is the client time less the statements times the measured round trip. It is noisier, but agrees within 10 to 60 ms.
+
+**Staging (`scripts/bench/staging-stock.ts`):**
+- The test shop has 300 items (every sixth lot-tracked) and two locations, made through the API with an API credential of the shop.
+- Each command ran 30 times, one at a time, and the response's `Server-Timing` gives the Worker's own time, the database time, and the statement and transaction counts.
+- Staging's counts are 2 to 3 statements higher than the bench's: the credential check is a transaction of its own.
+
+### Results against the targets (plan Section 8)
+
+**Stock commands with 10 concurrent callers** (target: p95 under 500 ms). Bench, all six shops:
+
+| Command | SQL statements | Database time per command | Worker estimate | Staging, one at a time: server p50 / p95 (statements) |
+| --- | --- | --- | --- | --- |
+| Receive | 15–17 | 1.9–7.6 ms | 92–110 ms | 183 / 235 ms (18) |
+| Reserve | 13 | 3.4–6.3 ms | 81–84 ms | 185 / 242 ms (16) |
+| Fulfill | 19 | 1.8–4.1 ms | 116–118 ms | 215 / 290 ms (22) |
+| Transfer dispatch | 26–27 | 3.5–7.2 ms | 160–169 ms | 233 / 329 ms (29) |
+| Transfer receipt | 29–31 | 3.2–6.7 ms | 179–193 ms | 240 / 324 ms (33) |
+| Count submit | 27–28 | 2.7–5.8 ms | 165–174 ms | 254 / 335 ms (31) |
+
+- **Within target:** every command is well under 500 ms, on the bench estimate and on staging. Statements, not the database, set the time: each statement executes in under half a millisecond on average, and the round trips are the rest.
+- **Staging:** its database time is about 6 ms per statement (receive: 106 ms for 18), as the estimate assumes. On top of that comes the awaited audit-queue send: 80 to 106 ms at p95 on every request.
+- **One outlier:** in the first bench run, transfer receipt in Partline had a p95 of 1.1 s while its database time stayed 3.5 ms per command. That points to the laptop's connection, not the database, and a second run gave 111 ms.
+
+**Reservation with earliest-expiry allocation, one variant with 200 lots** (Fuel Kitchen; 200 lots with stock in 200 positions; target: p95 under 500 ms):
+
+| Case | Bench database time | Bench Worker estimate | Staging server p50 / p95 |
+| --- | --- | --- | --- |
+| One caller, 1 unit | 15–17 ms | 93–95 ms | 230 / 349 ms |
+| One caller, 30 units (several lots) | 15–17 ms | 93–95 ms | |
+| 10 callers on the same variant, 1 unit | 994–1,000 ms, waiting | | 671 / 851 ms |
+| 10 callers on the same variant, 12 units | 1,011 ms, waiting | | 890 / 1,062 ms |
+
+One caller is within target. Ten callers reserving the same variant at once are not. Each reservation locks every candidate position of the variant (`lockCandidates`, all 200 lots, in id order) until it commits, so reservations of one variant run one after another. With 10 waiting, the last waits for nine others. See [over target](#over-target-and-proposed-fixes).
+
+**Availability for one variant across the shop** (target: p95 under 200 ms):
+- **Bench, every shop:** 6 statements, 0.7–2.1 ms of database time, Worker estimate 37–38 ms, and the same with 10 callers (up to 5.8 ms in Partline).
+- **The 200-lot variant:** 10.5–13.2 ms, estimate 46–49 ms.
+- **Staging:** server p50 132 ms, p95 164 ms, of which 87 ms (p95) is the audit-queue send.
+- **Within target.**
+
+**Inventory list, 50 rows, with lot and condition columns** (target: p95 under 1 s). The list is `reports.run` stock on hand by position (variant, location, condition, lot), first page of 50:
+
+| Shop | Positions with stock | One caller: database time | 10 callers: database time per run |
+| --- | --- | --- | --- |
+| Bench Cards and Bricks | 1,810 | 71 ms | 660 ms |
+| Bench Fuel Kitchen | 3,993 | 171 ms | 1,234 ms |
+| Bench Lumen Skin | 4,034 | 172 ms | 817 ms |
+| Bench Stride Sportswear | 8,528 | 279 ms | 1,430 ms |
+| Bench Maison Verre | 9,834 | 334 ms | 1,784 ms |
+| Bench Partline Supply | 34,617 | 1,361 ms | 7,386 ms |
+
+- **Over target:** Partline even with one caller, and four shops with 10 callers.
+- **Staging's test shop** (300 items): server p95 166 ms.
+- **Cause:** the first page costs as much as the whole report, because the report computes its count and totals over every row, and `stock_positions` is slow over a whole shop. See below.
+
+**Webhook delivery, commit to receipt** (target: p95 under 10 s). A `stock.changed` subscription on the staging test shop pointed at a receiver on the laptop behind a Cloudflare quick tunnel, standing in for n8n. Forty receipts, one at a time:
+- all 40 delivered on the first attempt;
+- **from the event's time:** p50 293 ms, p95 366 ms, max 423 ms;
+- **from the moment the command's response reached the client:** p50 164 ms, p95 215 ms.
+
+Delivery runs in the request's own outbox run right after the response, as plan risk R7 assumes. **Within target.** The subscription and the tunnel were removed afterwards.
+
+**Reports on the full persona seed** (target: under 5 s and 10 s). `query-reports.ts` from I5, run again on the three-month seed:
+- stock on hand for Partline (18,460 positions with stock) takes 1.56 s at the server, against I5's 0.8 s on three weeks of history;
+- value 7 days ago takes 0.10–0.12 s;
+- the stock-on-hand export (18,460 rows, 2.2 MB) took 7.7 s;
+- every other shop is under 0.35 s.
+
+**Within target.** Activity search was not measured again: the history is unchanged since I5.
+
+### Over target, and proposed fixes
+
+**1. The inventory list (stock on hand) on large shops.** For Partline's first page:
+
+| Plan step | Time |
+| --- | --- |
+| `stock_positions(array(select variant_id from vf))`, one Function Scan over 34,020 positions | 1,226 ms (742,000 buffer hits) |
+| Joins, grouping, the count and totals over 18,460 rows, and the page of 51 | 160 ms |
+| **Total execution** | **1,387 ms** |
+
+The function's own joins take 160 ms. Two things in it cost the rest, because it is called with a 20,000-element array and is not inlined (its argument is a sub-select):
+- `location_fulfillment_eligible(l.shop_id, l.path_ids)` runs once per position, as a SQL function with two `NOT EXISTS` lookups: about 15 buffer hits and 25 µs each, about 0.9 s here;
+- when the planner applies `p.variant_id = any($1)` as a filter instead of an index condition, it compares every position with up to 20,000 ids one by one.
+
+Run as a prepared generic plan, the body takes 1,042 ms. With both changes below it takes 194 ms, and with only one of them 1.1–1.8 s:
+- (a) compute eligibility once per location in a materialized CTE (the shop's 477 stocked locations, 27 ms);
+- (b) filter with `p.variant_id in (select unnest($1))`.
+
+Proposed, in a separate change with a migration and tests:
+1. In `stock_positions`, apply (a) and (b), or store the effective eligibility on `locations` (kept current when a location or warehouse changes) and drop the per-row function. Expected: Partline's list from 1.4 s to about 0.3 s, and every command that allocates over many positions gains too.
+2. In the report runner, compute the count and totals on the first page only, or from a cheaper aggregate. On-hand totals need no availability rule; reserved and available can sum only the positions with allocations.
+3. Then measure again with 10 callers. Ten such queries share at most 2 CU, so the per-query cost has to come down about 5× for the 10-caller case to hold on Partline.
+
+**2. Ten concurrent reservations of the same variant** (plan risk R5). One reservation alone is fast at 200 lots: staging p95 349 ms, bench database time 15 ms. But all reservations of a variant serialize on the candidate lock. Through the Worker, with 10 callers on one variant, p95 was 851 ms (1 unit) and 1,062 ms (12 units). This is the owner's release-day case: many orders for one new booster box in the same second. Proposed, as ADR 0020 already anticipates:
+1. Lock fewer rows for less time. Choose positions without a lock, then lock only the chosen ones in id order and check them again (retry if they changed). Or take a per-variant advisory lock and then only the chosen positions.
+2. Cut the statements between the lock and the commit. A reservation holds its locks for about 9 of its 16 statements, roughly 55 ms in the Worker, so 10 in a row take about 0.6–0.9 s.
+
+Different variants do not wait for each other: with 10 callers on different variants, the bench's database time stayed at 3–6 ms per reservation.
+
+**3. Staging's database ran out of memory under 10 concurrent callers.** During the staging run with 10 callers, at 12:50 UTC, one reservation answered 500 (`internal_error`). For about two minutes new connections then failed with "could not fork new process for connection: Cannot allocate memory", and the compute restarted at 12:53.
+- **Staging's compute:** 0.25 CU, `shared_buffers` 128 MB, `max_connections` 112.
+- **Connections held:** Hyperdrive held 60 idle `airstock_app` connections.
+- **What it means:** at this size, each idle backend's memory leaves no room for a burst. The other 10-caller staging phases were not run again, to leave staging alone.
+- **Proposed:**
+  1. Cap Hyperdrive's origin connections well under what the compute can hold, about 20 at 0.25 CU.
+  2. Or point Hyperdrive at Neon's pooled endpoint.
+  3. For production (the owner's I7 decision), use a minimum of 0.5 CU or more.
+  4. Run the 10-caller staging phases again after the change.
+
+### Neon compute used
+
+- **The `i7-volume` branch:** 221 compute seconds and 876 active seconds, as Neon's API reported them during the run. The counters lag by minutes; the totals at the end are in the PR.
+- **The project for the billing period:** from 2,049 to 2,378 compute seconds, which includes the other branches.
+- **Scaling to zero:** the branch's compute keeps Neon's default suspend after 5 idle minutes. This run adds no crons or retries, so the plan's compute-hours row waits for the I6 crons.
+
+### Other findings
+
+- **The audit-queue send is awaited on every request.** On staging it took 80–106 ms at p95, about a third of every command's server time and half of a read's. It is the largest single cost after the statements.
+- **`cleanup.ts` could not delete a shop with a submitted count.** A count names its operation, and the operation names its count (migration 0032), so neither table could go first. Fixed in this PR (scripts only): the script clears `count_sessions.operation_id` first.
+- **The idempotency records** (above) are never deleted.
+
+### How to run it again
+
+```sh
+# A branch of i0-personas (Neon console or API), migrated, with pg_stat_statements.
+DATABASE_OWNER_URL=… tsx packages/db/src/migrate-cli.ts
+psql … -c 'create extension if not exists pg_stat_statements'
+# The seed (about 1 minute), one shop at a time to watch the size; spare parts at 220 a day.
+for s in Cards Fuel Lumen Stride Maison; do
+  DATABASE_OWNER_URL=… tsx scripts/bench/seed-stock-activity.ts --only "Bench $s%" --check
+done
+DATABASE_OWNER_URL=… tsx scripts/bench/seed-stock-activity.ts --only 'Bench Partline%' --per-day 220 --check
+# Compact what the seed rewrote, then vacuum analyze.
+psql … -c 'vacuum full inventory_positions' …   # also variant_costs, variants, variant_cost_history,
+                                                 # inventory_operations, inventory_entries, products
+# Sizes, then the timings (about 10 minutes), then the reports.
+DATABASE_OWNER_URL=… NEON_API_KEY=… NEON_PROJECT_ID=… tsx scripts/bench/sizes.ts
+DATABASE_OWNER_URL=… DATABASE_APP_URL=… tsx scripts/bench/query-stock.ts --workers 10 --per-worker 10 --json stock.json
+DATABASE_APP_URL=… DATABASE_OWNER_URL=… tsx scripts/bench/query-reports.ts --n 3
+# Staging: a test shop made through the API, and an API credential of it with every scope.
+AIRSTOCK_TOKEN=… tsx scripts/bench/staging-stock.ts --shop <id> --items 300 --n 30
+AIRSTOCK_TOKEN=… tsx scripts/bench/staging-stock.ts --shop <id> --skip-setup --webhook-only \
+  --webhook-url https://<tunnel> --webhook-port 8787 --webhook-n 40
+AIRSTOCK_TOKEN=… tsx scripts/bench/staging-stock.ts --shop <id> --skip-setup --contention --workers 10
+DATABASE_OWNER_URL=<staging owner> tsx scripts/bench/cleanup.ts --names '<test shop>' --yes
+```
+
+The branch `i7-volume` was deleted afterwards to keep the project's storage free for I6 and the rest of I7; a branch of `i0-personas` and the commands above make it again in a few minutes.

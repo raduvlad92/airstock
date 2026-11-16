@@ -354,7 +354,7 @@
                         ]
                       }
                     },
-                    "description": "One object per row, keyed by column key. Decimals are exact strings."
+                    "description": "One object per row, keyed by column key, plus the row’s `key`. Decimals are exact strings."
                   },
                   "totals": {
                     "type": "object",

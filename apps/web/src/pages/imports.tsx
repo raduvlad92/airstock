@@ -207,7 +207,7 @@ function RecentExports({ shopId }: { shopId: string }) {
 }
 
 /** The session needs the custom header, so the file is fetched and saved from memory. */
-async function downloadExport(path: string) {
+export async function downloadExport(path: string) {
   const res = await fetch(path, {
     headers: { 'x-airstock-request': '1' },
     credentials: 'same-origin',

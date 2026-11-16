@@ -141,7 +141,9 @@ const ResultOut = z.object({
   columns: z.array(ColumnOut).describe('Cost columns appear only with costs.read.'),
   rows: z
     .array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])))
-    .describe('One object per row, keyed by column key. Decimals are exact strings.'),
+    .describe(
+      'One object per row, keyed by column key, plus the row’s `key`. Decimals are exact strings.',
+    ),
   totals: z
     .record(z.string(), z.string())
     .describe('Sums over every row the filters select, not only this page.'),

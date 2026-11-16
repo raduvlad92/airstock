@@ -18,6 +18,7 @@ import { LabelsPage } from './pages/labels.tsx';
 import { PickingPage } from './pages/picking.tsx';
 import { ProductsPage } from './pages/products.tsx';
 import { PurchasingPage } from './pages/purchasing.tsx';
+import { parseReportsSearch, ReportsPage } from './pages/reports.tsx';
 import { ReturnsPage } from './pages/returns.tsx';
 import { MembersPage, SettingsLayout, ShopSettingsPage } from './pages/settings.tsx';
 import { ShopsPage } from './pages/shops.tsx';
@@ -134,6 +135,12 @@ const alertsRoute = createRoute({
   path: '/alerts',
   component: AlertsPage,
 });
+const reportsRoute = createRoute({
+  getParentRoute: () => shopRoute,
+  path: '/reports',
+  component: ReportsPage,
+  validateSearch: parseReportsSearch,
+});
 const purchasingRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/purchasing',
@@ -244,6 +251,7 @@ export const routeTree = rootRoute.addChildren([
     suppliersRoute,
     purchasingRoute,
     alertsRoute,
+    reportsRoute,
     labelsRoute,
     pickingRoute,
     activityRoute,

@@ -1227,7 +1227,7 @@ export async function runReport(
 
   if (columns.some((col) => col.key === 'packs')) await addPackBreakdown(tx, rows);
   const out = rows.map((r) => {
-    const row: ReportRow = {};
+    const row: ReportRow = { key: String(r.key) };
     for (const col of columns) {
       const v = r[col.key] ?? null;
       row[col.key] =

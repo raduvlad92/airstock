@@ -2237,6 +2237,46 @@ button.danger {
   flex: 1 1 18rem;
 }
 
+/* Reports --------------------------------------------------------------------------------- */
+
+.report-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.6rem;
+}
+
+.report-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.report-list p {
+  margin: 0.25rem 0 0;
+}
+
+.report-link {
+  font-weight: 600;
+}
+
+.report-table th .link-button {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.report-table tfoot tr.report-total td {
+  font-weight: 600;
+  border-top: 2px solid var(--line-strong);
+}
+
 /* After the picking rows' selected style, which this hover must not outrank in order. */
 .table tr.clickable:hover td {
   background: var(--surface-2);

@@ -26,3 +26,20 @@ export function sectionsOf(
   }
   return out;
 }
+
+type Completed = Out<typeof ops.completePickList>;
+
+const RECORDED: Record<Completed['recordedOnly'][number]['reason'], string> = {
+  shopify: 'Shopify order(s) recorded, fulfilled from Shopify',
+  not_fulfilling: 'order(s) recorded without fulfilling',
+  bundle_incomplete: 'bundle order(s) not fulfilled: some components are not on this list',
+  expired: 'expired reservation(s) not fulfilled: their units are available again',
+  not_open: 'order(s) released or fulfilled in the meantime',
+};
+
+/** What completion recorded without fulfilling, grouped by why: "2 Shopify order(s) recorded…". */
+export function recordedSummary(recordedOnly: Completed['recordedOnly']): string[] {
+  const counts = new Map<keyof typeof RECORDED, number>();
+  for (const r of recordedOnly) counts.set(r.reason, (counts.get(r.reason) ?? 0) + 1);
+  return [...counts].map(([reason, n]) => `${n} ${RECORDED[reason]}`);
+}

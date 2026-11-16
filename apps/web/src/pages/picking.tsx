@@ -16,7 +16,7 @@ import {
   PageHeader,
 } from '../components/ui.tsx';
 import { can, useShopContext } from '../context.tsx';
-import { linePacks, type PickListView, sectionsOf } from '../picking/view.ts';
+import { linePacks, type PickListView, recordedSummary, sectionsOf } from '../picking/view.ts';
 import { useWarehouses } from './warehouses.tsx';
 
 type Lists = Out<typeof ops.listPickLists>;
@@ -331,9 +331,9 @@ function PickListDetail({
       {done ? (
         <Notice tone="ok">
           Completed: {done.fulfilled.length} fulfillment(s) recorded
-          {done.recordedOnly.length
-            ? `, ${done.recordedOnly.length} Shopify order(s) recorded only`
-            : ''}
+          {recordedSummary(done.recordedOnly)
+            .map((part) => `, ${part}`)
+            .join('')}
           {done.short ? `, ${done.short} short line(s) still reserved` : ''}.
         </Notice>
       ) : null}

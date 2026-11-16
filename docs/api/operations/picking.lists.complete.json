@@ -3,7 +3,7 @@
     "post": {
       "operationId": "picking.lists.complete",
       "summary": "Complete a pick list and fulfill what was picked",
-      "description": "Use this when the picker is done: fulfills the picked units of manual and API reservations through the fulfill command (stock goes down now), and records Shopify orders’ picks only, because Shopify reports their fulfillment. Short units stay reserved. Lines still open block completion unless leaveOpen is true, which leaves them reserved and unpicked. fulfill false records the picks without fulfilling anything. Needs inventory.fulfill to fulfill.",
+      "description": "Use this when the picker is done: fulfills the picked units of manual and API reservations through the fulfill command (stock goes down now), and records Shopify orders’ picks only, because Shopify reports their fulfillment. A bundle is fulfilled only when every component it still holds is on this list and picked in full. Reservations that expired or closed in the meantime are skipped and reported. Short units stay reserved. Lines still open block completion unless leaveOpen is true, which leaves them reserved and unpicked. fulfill false records the picks without fulfilling anything. Needs inventory.fulfill to fulfill.",
       "x-permission": "picking.run",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "picking.list.completed",
@@ -126,15 +126,27 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "shopify",
+                            "not_fulfilling",
+                            "bundle_incomplete",
+                            "expired",
+                            "not_open"
+                          ],
+                          "description": "shopify: fulfilled from Shopify; not_fulfilling: completed with fulfill false; bundle_incomplete: some of the bundle’s components are not on this list or not picked in full, so fulfill it once they are; expired: the reservation expired before completion and its units are available again; not_open: the reservation was released or fulfilled in the meantime."
                         }
                       },
                       "required": [
                         "reservationId",
-                        "externalRef"
+                        "externalRef",
+                        "reason"
                       ],
                       "additionalProperties": false
                     },
-                    "description": "Reservations whose picks were recorded but not fulfilled here, such as Shopify orders."
+                    "description": "Reservations whose picks were recorded but not fulfilled here, and why."
                   },
                   "leftOpen": {
                     "type": "integer",

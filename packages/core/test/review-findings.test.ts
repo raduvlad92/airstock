@@ -426,7 +426,7 @@ describe('F-SERIAL-TWO-PLACES: one serial can end up on hand at two locations', 
 // position nobody picked from.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-COMPLETE-WHOLE-BUNDLE: completing a list ships bundle components it never listed', () => {
-  it.fails('leaves the other warehouse’s component in stock when only this warehouse was picked', async () => {
+  it('leaves the other warehouse’s component in stock when only this warehouse was picked', async () => {
     const a = await createVariant(h);
     const b = await createVariant(h);
     await h.run(ops.receiveStock, { variantId: a, locationId: shop.locationId, quantity: '1' });
@@ -705,7 +705,7 @@ describe('F-PO-PACK-RESIZED: a PO receipt in packs uses the pack’s current siz
 // the picker never touched while the bin they picked from keeps its count.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-RESCAN-ELSEWHERE: a rescanned lot is reallocated away from where the picker stands', () => {
-  it.fails('keeps the new allocation at the line’s location when only a lot is scanned', async () => {
+  it('keeps the new allocation at the line’s location when only a lot is scanned', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
     const binZ = await createLeafLocation(h, shop.warehouseId, `Bin Z ${uuidv7().slice(-4)}`);
@@ -749,7 +749,7 @@ describe('F-PICK-RESCAN-ELSEWHERE: a rescanned lot is reallocated away from wher
 // (every other order on the list) rolls back. picking.ts says expiry is tolerated.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-COMPLETE-EXPIRED: one expired reservation blocks completing the whole list', () => {
-  it.fails('completes the list and fulfills the other orders when one reservation expired', async () => {
+  it('completes the list and fulfills the other orders when one reservation expired', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.receiveStock, { variantId, locationId: shop.locationId, quantity: '4' });
     const keep = await h.run(ops.reserveStock, { variantId, quantity: '1' });
@@ -814,7 +814,7 @@ describe('F-RETURN-SKIPS-INSPECTION: a return’s quarantined units can be made 
 // bundle stays reserved, so the stock is never decremented and stays promised.
 // ---------------------------------------------------------------------------------------------
 describe('F-PICK-BUNDLE-SPLIT-LINE: a bundle whose line was split by a lot rescan is never fulfilled', () => {
-  it.fails('fulfills the bundle when its picks cover every component', async () => {
+  it('fulfills the bundle when its picks cover every component', async () => {
     const a = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId: a, trackingMode: 'lot' });
     await h.run(ops.receiveStock, {

@@ -1,8 +1,10 @@
 import { type Caller, ops, uuidv7 } from '@airstock/core';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import pg from 'pg';
+import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   addMember,
   appDatabase,
+  createLeafLocation,
   createVariant,
   type Harness,
   harness,
@@ -315,7 +317,11 @@ describe('pick lists (A41, pick half)', () => {
       manual.reservationId,
     ]);
     expect(done.recordedOnly).toEqual([
-      { reservationId: order.reservationId, externalRef: 'shopify:order/77/line/1' },
+      {
+        reservationId: order.reservationId,
+        externalRef: 'shopify:order/77/line/1',
+        reason: 'shopify',
+      },
     ]);
     const [still] = await ownerQuery<{ status: string }>(
       'select status from reservations where id = $1',
@@ -438,5 +444,207 @@ describe('pick lists across shops and location scopes', () => {
     await expect(
       h.run(ops.createPickList, { orders: ['scope2:order'] }, { caller: viewer.caller }),
     ).rejects.toMatchObject({ code: 'forbidden' });
+  });
+});
+
+/** Runs a command and returns 'succeeded' or the error code. */
+async function outcomeOf(p: Promise<unknown>): Promise<string> {
+  return p.then(
+    () => 'succeeded',
+    (e: { code?: string }) => e.code ?? String(e),
+  );
+}
+
+/** An owner-role connection outside the app, for holding row locks like a concurrent command. */
+async function rawClient(): Promise<pg.Client> {
+  const client = new pg.Client({ connectionString: inject('databases').ownerUrl });
+  await client.connect();
+  return client;
+}
+
+/** Waits until some backend is blocked on a row lock while running SQL that matches `like`. */
+async function waitForLockWait(like: string, timeoutMs = 5000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const rows = await ownerQuery(
+      `select 1 from pg_stat_activity where wait_event_type = 'Lock' and query like $1`,
+      [like],
+    );
+    if (rows.length > 0) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`no backend waited on a lock for ${like}`);
+}
+
+async function availability(variantId: string): Promise<string> {
+  return (await h.run(ops.getAvailability, { variantId })).totals.onHand;
+}
+
+describe('completing pick lists: bundles, expiry, precision, and lock order', () => {
+  it('skips and reports an expired reservation, and fulfills the rest', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: loc['A-01']!, quantity: '4' });
+    const keep = await h.run(ops.reserveStock, { variantId, quantity: '1' });
+    const lapse = await h.run(ops.reserveStock, {
+      variantId,
+      quantity: '1',
+      expiresInSeconds: 600,
+      externalRef: 'api:order/lapsed',
+    });
+    const list = await h.run(ops.createPickList, {
+      reservationIds: [keep.reservationId, lapse.reservationId],
+    });
+    for (const line of list.pickLines) {
+      await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: line.lineId });
+    }
+    await ownerQuery(
+      `update reservations set expires_at = now() - interval '1 minute' where shop_id = $1 and id = $2`,
+      [shop.shopId, lapse.reservationId],
+    );
+    const done = await h.run(ops.completePickList, { pickListId: list.pickListId });
+    expect(done.fulfilled.map((f: Row) => f.reservationId)).toEqual([keep.reservationId]);
+    expect(done.recordedOnly).toEqual([
+      { reservationId: lapse.reservationId, externalRef: 'api:order/lapsed', reason: 'expired' },
+    ]);
+    expect(await availability(variantId)).toBe('3.000000');
+    expect(await reconcile(shop.shopId)).toEqual([]);
+  });
+
+  it('fulfills a bundle only once every component it holds is picked on one list', async () => {
+    const wh = await h.run(ops.createWarehouse, { name: `Second ${uuidv7().slice(-4)}` });
+    const far = await createLeafLocation(h, wh.warehouseId, 'Far shelf');
+    const a = await createVariant(h);
+    const b = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId: a, locationId: loc['A-01']!, quantity: '1' });
+    await h.run(ops.receiveStock, { variantId: b, locationId: far, quantity: '1' });
+    const bundle = await createVariant(h);
+    await h.run(ops.setBundle, {
+      variantId: bundle,
+      bundleVersion: 0,
+      components: [
+        { variantId: a, quantity: '1' },
+        { variantId: b, quantity: '1' },
+      ],
+    });
+    const r = await h.run(ops.reserveStock, {
+      variantId: bundle,
+      quantity: '1',
+      externalRef: 'api:order/kit',
+    });
+    // This warehouse's list holds component a only: the bundle is recorded, nothing ships.
+    const here = await h.run(ops.createPickList, {
+      warehouseId: shop.warehouseId,
+      reservationIds: [r.reservationId],
+    });
+    for (const line of here.pickLines) {
+      await h.run(ops.recordPick, { pickListId: here.pickListId, lineId: line.lineId });
+    }
+    const first = await h.run(ops.completePickList, { pickListId: here.pickListId });
+    expect(first.fulfilled).toEqual([]);
+    expect(first.recordedOnly).toEqual([
+      { reservationId: r.reservationId, externalRef: 'api:order/kit', reason: 'bundle_incomplete' },
+    ]);
+    expect([await availability(a), await availability(b)]).toEqual(['1.000000', '1.000000']);
+    // A list with both components fulfills the whole bundle.
+    const both = await h.run(ops.createPickList, { reservationIds: [r.reservationId] });
+    expect(both.pickLines).toHaveLength(2);
+    for (const line of both.pickLines) {
+      await h.run(ops.recordPick, { pickListId: both.pickListId, lineId: line.lineId });
+    }
+    const second = await h.run(ops.completePickList, { pickListId: both.pickListId });
+    expect(second.fulfilled).toEqual([
+      expect.objectContaining({ reservationId: r.reservationId, quantity: '1' }),
+    ]);
+    expect([await availability(a), await availability(b)]).toEqual(['0.000000', '0.000000']);
+    expect(await reconcile(shop.shopId)).toEqual([]);
+  });
+
+  it('refuses a pick or short pick in fractions of a whole-unit variant', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: loc['A-01']!, quantity: '3' });
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '2' });
+    const list = await h.run(ops.createPickList, { reservationIds: [r.reservationId] });
+    const lineId = list.pickLines[0].lineId;
+    await expect(
+      h.run(ops.recordPick, { pickListId: list.pickListId, lineId, quantity: '0.5' }),
+    ).rejects.toMatchObject({ code: 'quantity_precision' });
+    await expect(
+      h.run(ops.recordShortPick, { pickListId: list.pickListId, lineId, found: '1.5' }),
+    ).rejects.toMatchObject({ code: 'quantity_precision' });
+    await h.run(ops.cancelPickList, { pickListId: list.pickListId });
+  });
+
+  it('does not deadlock a pick with a completion that holds the list', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, { variantId, locationId: loc['A-01']!, quantity: '2' });
+    const r = await h.run(ops.reserveStock, { variantId, quantity: '1' });
+    const list = await h.run(ops.createPickList, { reservationIds: [r.reservationId] });
+    // A completion locks the list row, then its lines.
+    const completion = await rawClient();
+    try {
+      await completion.query('begin');
+      await completion.query('select 1 from pick_lists where id = $1 for update', [
+        list.pickListId,
+      ]);
+      const pick = outcomeOf(
+        h.run(ops.recordPick, { pickListId: list.pickListId, lineId: list.pickLines[0].lineId }),
+      );
+      await waitForLockWait('%pick_lists%');
+      const lines = await completion
+        .query('select 1 from pick_lines where pick_list_id = $1 for update', [list.pickListId])
+        .then(
+          () => 'locked',
+          (e: { code?: string }) => e.code,
+        );
+      await completion.query(lines === 'locked' ? 'commit' : 'rollback');
+      expect({ lines, pick: await pick }).toEqual({ lines: 'locked', pick: 'succeeded' });
+    } finally {
+      await completion.end();
+    }
+  });
+
+  it('locks every position up front, so completion does not deadlock with id-ordered locks', async () => {
+    const variantId = await createVariant(h);
+    // The first receipt makes the lower position id; its shelf sorts last on the walk.
+    const late = await location(`Z-${uuidv7().slice(-4)}`);
+    const early = await location(`A-${uuidv7().slice(-4)}`);
+    await h.run(ops.receiveStock, { variantId, locationId: late, quantity: '1' });
+    await h.run(ops.receiveStock, { variantId, locationId: early, quantity: '1' });
+    const positions = await ownerQuery<{ id: string; location_id: string }>(
+      'select id, location_id from inventory_positions where shop_id = $1 and variant_id = $2 order by id',
+      [shop.shopId, variantId],
+    );
+    expect(positions.map((p) => p.location_id)).toEqual([late, early]);
+    const [low, high] = positions.map((p) => p.id);
+    const one = await h.run(ops.reserveStock, { variantId, quantity: '1', locationId: late });
+    const two = await h.run(ops.reserveStock, { variantId, quantity: '1', locationId: early });
+    const list = await h.run(ops.createPickList, {
+      reservationIds: [one.reservationId, two.reservationId],
+    });
+    for (const line of list.pickLines) {
+      await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: line.lineId });
+    }
+    // Another command locks both positions in id order (ADR 0006) and has the first one.
+    const other = await rawClient();
+    try {
+      await other.query('begin');
+      await other.query('select 1 from inventory_positions where id = $1 for update', [low]);
+      const complete = outcomeOf(h.run(ops.completePickList, { pickListId: list.pickListId }));
+      await waitForLockWait('%inventory_positions%for update%');
+      const second = await other
+        .query('select 1 from inventory_positions where id = $1 for update', [high])
+        .then(
+          () => 'locked',
+          (e: { code?: string }) => e.code,
+        );
+      await other.query(second === 'locked' ? 'commit' : 'rollback');
+      expect({ second, complete: await complete }).toEqual({
+        second: 'locked',
+        complete: 'succeeded',
+      });
+    } finally {
+      await other.end();
+    }
+    expect(await availability(variantId)).toBe('0.000000');
   });
 });

@@ -909,3 +909,25 @@ describe('F-TRANSFER-DEST-UNLOCKED: a transfer receipt can land stock at a locat
     expect(stranded!.units ?? '0').toBe('0');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// F-SCOPE-COST-TOTALS (minor scope leak). getAvailability (inventory.ts) returns the shop-wide
+// owned quantity and value from variant_costs whenever the caller has costs.read, without looking
+// at ctx.locationScope; valuation refuses location-scoped members for exactly this reason. A
+// manager limited to one warehouse learns the units and value held everywhere else.
+// ---------------------------------------------------------------------------------------------
+describe('F-SCOPE-COST-TOTALS: get_stock shows shop-wide owned quantity and value to scoped members', () => {
+  it.fails('shows a scoped member no cost figures beyond their own locations', async () => {
+    const variantId = await createVariant(h);
+    await h.run(ops.receiveStock, {
+      variantId,
+      locationId: shop.locationId,
+      quantity: '5',
+      unitCost: '10',
+    });
+    const scoped = await addMember(shop.shopId, 'manager', [store]);
+    const view = await h.run(ops.getAvailability, { variantId }, { caller: scoped.caller });
+    expect(view.totals.ownedTotal).toBe('0');
+    expect(view.cost === null || view.cost.ownedQuantity === view.totals.ownedTotal).toBe(true);
+  });
+});

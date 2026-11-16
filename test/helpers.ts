@@ -26,6 +26,21 @@ export function appDatabase(hooks: DatabaseHooks = {}, max = 16): Database {
   return new PgDatabase(testConnectionSource(inject('databases').appUrl, max), hooks);
 }
 
+/**
+ * A database whose every transaction makes the in-transaction audit insert fail (A12), through
+ * the test-only trigger of test/global-setup.ts. For commands that take no note or reason.
+ */
+export function failingAuditDatabase(inner: Database): Database {
+  return {
+    transaction: (ctx, fn) =>
+      inner.transaction(ctx, async (tx) => {
+        await tx.query(`select set_config('airstock.test_fail_audit', 'on', true)`);
+        return fn(tx);
+      }),
+    close: () => inner.close(),
+  };
+}
+
 let ownerPool: pg.Pool | null = null;
 
 /** Owner connection for test assertions that must see every shop. Never used by the app. */

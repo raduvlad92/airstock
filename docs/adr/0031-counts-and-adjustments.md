@@ -1,4 +1,4 @@
-# 0030. Counts and adjustments: counted basis per line, review after a movement, explicit choices below reserved
+# 0031. Counts and adjustments: counted basis per line, review after a movement, explicit choices below reserved
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D10, Section 5.6, and PRD 6.6 (milestone I2). Builds on [ADR 0020](0020-stock-model.md), [ADR 0022](0022-valuation.md), and [ADR 0028](0028-transfers.md).
 

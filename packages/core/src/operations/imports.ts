@@ -1688,7 +1688,7 @@ export const createExport = defineOperation({
   id: 'exports.create',
   summary: 'Export products or variants as CSV',
   description:
-    'Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Runs as a job; the file is ready for 24 hours and deleted after 7 days. The person downloads it in the Airstock dashboard: Products, then Import, under Recent exports (or through the API).',
+    'Use this whenever someone asks to export or download items as a file, including with their barcodes, supplier SKUs, or packs. Exports what a catalog query returns (the same mode, search, filter, sort, and fields), in a format the import accepts. Every file has product, name, sku, barcode, supplier and supplier_sku (the preferred supplier), price, status, family, tags, weight, option and pack columns, the requested custom fields, and available. Runs as a job; the file is ready for 24 hours and deleted after 7 days. The person downloads it in the Airstock dashboard: Products, then Import, under Recent exports (or through the API).',
   kind: 'command',
   scope: 'shop',
   input: ExportQuery.partial(),

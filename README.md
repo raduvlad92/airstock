@@ -5,7 +5,8 @@
 A visual product database and inventory system for ecommerce merchants, with an API and MCP access from day one. Working title; the product name is not chosen yet.
 
 - **What and why:** [PRD and architecture](docs/ecommerce-platform-prd-and-architecture.md)
-- **Current build:** [Phase 1 plan](docs/phase-1-build-plan.md) and [Phase 1 status](docs/phase-1-status.md); Phase 0 in its [report](docs/phase-0-report.md)
+- **Next build:** [Phase 2 plan](docs/phase-2-build-plan.md): core inventory and the Shopify connector, for the January pilot
+- **Done:** Phase 1 in its [report](docs/phase-1-report.md) and [status](docs/phase-1-status.md); Phase 0 in its [report](docs/phase-0-report.md)
 - **Decisions:** [architecture decision records](docs/adr/README.md)
 - **API contract:** [OpenAPI 3.1](docs/api/README.md), generated from the operation registry, one file per operation; the Worker serves the joined document at `/openapi.json`
 

@@ -1,0 +1,542 @@
+{
+  "/api/v1/shops/{shopId}/transfers/{transferId}/receive": {
+    "post": {
+      "operationId": "inventory.transfers.receive",
+      "summary": "Receive transfer units at the destination",
+      "description": "Use this when dispatched units arrive. Moves the actual quantities out of transit into the destination (or the shelf named by locationId inside it); partial receipts leave the rest in transit. Units that arrived damaged can be received with condition \"damaged\". Received sellable units fill open order shortages first. If units are missing, report an exception and resolve it. Needs the destination in your location scope.",
+      "x-permission": "inventory.transfer",
+      "x-connection-scope": "inventory:write",
+      "x-audit-action": "inventory.transfer.received",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "transferId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "description": "Per line; leave out to act on every line in full.",
+                  "minItems": 1,
+                  "maxItems": 200,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                        "description": "The line’s variant; a transfer has one line per variant."
+                      },
+                      "quantity": {
+                        "description": "Base units, or packs with packId. Leave out for everything this step allows.",
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                      },
+                      "packId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "lotCode": {
+                        "description": "Only units of this lot.",
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "serials": {
+                        "description": "Exactly these serials (scanned or typed).",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        }
+                      }
+                    },
+                    "required": [
+                      "variantId"
+                    ]
+                  }
+                },
+                "locationId": {
+                  "description": "The shelf to put the units on, inside the destination; needed when the destination has sub-locations.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "condition": {
+                  "description": "Receive in this condition instead of the line’s, for example damaged.",
+                  "type": "string",
+                  "enum": [
+                    "sellable",
+                    "quarantine",
+                    "damaged",
+                    "repair",
+                    "supplier_return"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "description": "Why, in a few words; kept in the history."
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operationId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The stock operation this step recorded, if it moved stock."
+                  },
+                  "transfer": {
+                    "type": "object",
+                    "properties": {
+                      "transferId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "transfer",
+                          "move"
+                        ]
+                      },
+                      "reference": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "trackingReference": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "draft",
+                          "ready",
+                          "partially_dispatched",
+                          "dispatched",
+                          "partially_received",
+                          "received",
+                          "cancelled",
+                          "exception"
+                        ]
+                      },
+                      "from": {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "warehouseId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "path",
+                          "warehouseId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "to": {
+                        "type": "object",
+                        "properties": {
+                          "locationId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "warehouseId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "locationId",
+                          "path",
+                          "warehouseId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "exception": {
+                        "type": "object",
+                        "properties": {
+                          "open": {
+                            "type": "boolean"
+                          },
+                          "note": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "open",
+                          "note"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "readyAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "closedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "version": {
+                        "type": "number"
+                      },
+                      "totals": {
+                        "type": "object",
+                        "properties": {
+                          "planned": {
+                            "type": "string"
+                          },
+                          "cancelled": {
+                            "type": "string"
+                          },
+                          "dispatched": {
+                            "type": "string"
+                          },
+                          "received": {
+                            "type": "string"
+                          },
+                          "resolved": {
+                            "type": "string",
+                            "description": "Settled by an exception resolution (lost, damaged, short)."
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "Still held at the source, waiting for dispatch."
+                          },
+                          "inTransit": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "planned",
+                          "cancelled",
+                          "dispatched",
+                          "received",
+                          "resolved",
+                          "held",
+                          "inTransit"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "lines": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "planned": {
+                              "type": "string"
+                            },
+                            "cancelled": {
+                              "type": "string"
+                            },
+                            "dispatched": {
+                              "type": "string"
+                            },
+                            "received": {
+                              "type": "string"
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "description": "Settled by an exception resolution (lost, damaged, short)."
+                            },
+                            "held": {
+                              "type": "string",
+                              "description": "Still held at the source, waiting for dispatch."
+                            },
+                            "inTransit": {
+                              "type": "string"
+                            },
+                            "lineId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "variantId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "sku": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "condition": {
+                              "type": "string",
+                              "enum": [
+                                "sellable",
+                                "quarantine",
+                                "damaged",
+                                "repair",
+                                "supplier_return"
+                              ]
+                            },
+                            "lotCode": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "serials": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Serials named when the line was made."
+                            },
+                            "entered": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "packId": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                    },
+                                    "packName": {
+                                      "type": "string"
+                                    },
+                                    "quantity": {
+                                      "type": "string"
+                                    },
+                                    "factor": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "packId",
+                                    "packName",
+                                    "quantity",
+                                    "factor"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "reservationId": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The transfer hold at the source."
+                            },
+                            "inTransitUnits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "lotCode": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "serial": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "quantity": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "lotCode",
+                                  "serial",
+                                  "quantity"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "planned",
+                            "cancelled",
+                            "dispatched",
+                            "received",
+                            "resolved",
+                            "held",
+                            "inTransit",
+                            "lineId",
+                            "variantId",
+                            "sku",
+                            "name",
+                            "condition",
+                            "lotCode",
+                            "serials",
+                            "entered",
+                            "reservationId",
+                            "inTransitUnits"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "transferId",
+                      "kind",
+                      "reference",
+                      "trackingReference",
+                      "note",
+                      "status",
+                      "from",
+                      "to",
+                      "exception",
+                      "createdAt",
+                      "readyAt",
+                      "closedAt",
+                      "version",
+                      "totals",
+                      "lines"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "shortagesFilled": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "operationId",
+                  "transfer",
+                  "shortagesFilled"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

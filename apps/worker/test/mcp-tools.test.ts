@@ -34,6 +34,7 @@ describe('MCP tools', () => {
       'receive_stock',
       'search_activity',
       'search_catalog',
+      'transfer_stock',
       'warehouse_work',
     ]);
     await mcp.close();

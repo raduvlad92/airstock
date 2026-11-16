@@ -342,6 +342,10 @@
                               "shortage": {
                                 "type": "string",
                                 "description": "Demand from accepted orders that no stock covers yet (whole shop)."
+                              },
+                              "onOrder": {
+                                "type": "string",
+                                "description": "Still expected on sent purchase orders to these warehouses. Never sellable."
                               }
                             },
                             "required": [
@@ -356,7 +360,8 @@
                               "expired",
                               "inTransit",
                               "ownedTotal",
-                              "shortage"
+                              "shortage",
+                              "onOrder"
                             ],
                             "additionalProperties": false
                           },
@@ -465,6 +470,44 @@
                               "additionalProperties": false
                             }
                           },
+                          "onOrder": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "purchaseOrderId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "number": {
+                                  "type": "string"
+                                },
+                                "warehouseId": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                },
+                                "expectedOn": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "quantity": {
+                                  "type": "string",
+                                  "description": "Base units still open on the order’s lines."
+                                }
+                              },
+                              "required": [
+                                "purchaseOrderId",
+                                "number",
+                                "warehouseId",
+                                "expectedOn",
+                                "quantity"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "Open purchase orders for this variant, by destination (PRD 5.3)."
+                          },
                           "costVisible": {
                             "type": "boolean"
                           },
@@ -517,6 +560,7 @@
                           "partial",
                           "totals",
                           "positions",
+                          "onOrder",
                           "costVisible",
                           "cost"
                         ],

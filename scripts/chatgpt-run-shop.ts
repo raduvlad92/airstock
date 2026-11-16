@@ -3,19 +3,24 @@
  * Pokémon TCG products in nested packs, LEGO sets, one-of-a-kind graded cards, lot-tracked food,
  * one warehouse with shelves A1 and B2, three suppliers with supplier items, reorder rules that
  * leave three items low, fulfilled and reserved orders, and cost history. The prompts and their
- * expected answers are in docs/chatgpt-runs/phase-2.json and docs/phase-2-status.md Section 6.
+ * expected answers are in docs/chatgpt-runs/phase-2.json and docs/phase-2-status.md Section 6;
+ * apps/worker/test/chatgpt-run.test.ts runs this script, the prompts, and the harness end to end.
  *
- *   AIRSTOCK_TOKEN=ask_… tsx scripts/chatgpt-run-shop.ts --shop <id> --phase opening|later|all \
+ *   AIRSTOCK_TOKEN=ask_… pnpm chatgpt-run:shop --shop <shop ID> --phase opening|later|all \
  *     [--base https://airstock.deletecookies.dev]
  *
  * - `opening`: the catalog, warehouse, suppliers, and opening stock at the older costs.
  * - `later`: newer deliveries at higher costs, the orders, a move, and the reorder rules. Run it
- *   some time after `opening`, so the stock value at a moment in between differs from now.
- * - `all`: both at once (a dry-run shop).
+ *   two minutes or more after `opening`: it values the stock at the last whole minute before it
+ *   starts (refusing if the opening step was still running then) and prints that moment and both
+ *   values for prompt 8.
+ * - `all`: both, waiting for the next whole minute in between (a dry-run shop).
  *
- * The shop is new and empty (created in the dashboard). The token is an API credential of that
- * shop with every scope, read from the environment and never printed. Each command carries an
- * idempotency key made from the shop and the step, so running a phase again repeats nothing.
+ * The shop is new and empty (created in the dashboard; its ID is in the address /app/shops/<ID>).
+ * The token is an API credential of that shop with every scope, read from the environment and
+ * never printed. Only the REST API is used: no database access. Each command carries an
+ * idempotency key made from the shop and the step, so running a phase again with the same
+ * credential repeats nothing.
  */
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -576,6 +581,9 @@ async function load({ get }: Client): Promise<Ids> {
   const { locations } = await get<{
     locations: Array<{ locationId: string; code: string | null }>;
   }>('/locations');
+  if (!locations.some((l) => l.code === 'A1')) {
+    throw new Error('This shop has no shelf A1 yet: run --phase opening first.');
+  }
   const byCode = (code: string) => locations.find((l) => l.code === code)!.locationId;
   const { suppliers: list } = await get<{ suppliers: Array<{ id: string; name: string }> }>(
     '/suppliers',
@@ -949,7 +957,7 @@ export async function seedRunShop(
   const valueNow = await stockValue(api);
   if (valueMoment) {
     log(
-      `Prompt 8: ask for the value at ${valueMoment.local} (${shop.timezone}): ${valueMoment.value} then, ${valueNow} now (before the run's own changes).`,
+      `Prompt 8: ask for the value at ${valueMoment.local} (${shop.timezone}; ${valueMoment.at}): ${valueMoment.value} then, ${valueNow} now (before the run's own changes).`,
     );
   } else {
     log(`Stock value now: ${valueNow}.`);

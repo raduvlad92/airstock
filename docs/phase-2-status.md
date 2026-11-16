@@ -36,6 +36,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I6, now | **Reconnect both Shopify development stores**, so they grant the new permissions: in staging, open each shop → Settings → Integrations → "Connect another store", enter `airstock-dev-a.myshopify.com` (and `airstock-dev-b.myshopify.com` in its shop), and approve in Shopify. Optionally, on `airstock-dev-a`, order `AIR-MUG-01` with the test gateway, fulfill it, then refund with restock: sync health should show no conflicts and the unit should be in quarantine | **Ready** |
 | I6, now | Give the store's Shopify product export, for the rehearsal on a development store | **Ready** |
 | I7 | Decide production: the brief and recommendations are in Section 2.2 | **Ready to decide** |
+| I7 | The ChatGPT run (Section 6): create the shop "ChatGPT run 2" and an API credential, then run the prompts | **Ready (shop first)** |
 
 ### 2.1 iPhone check (I4)
 
@@ -167,7 +168,92 @@ Checked on 16 November 2026 against [Shopify's protected customer data page](htt
 - The connector still asks only for IDs and line items in its webhooks (ADR 0008) and stores no names or addresses. That keeps the later public app at level 1.
 - Recheck before going public (PRD 15, Phase 5).
 
-## 6. Bench and staging data
+## 6. ChatGPT run (I7)
+
+The Phase 2 run checks that ChatGPT picks the right tool and action for the new stock work (plan Section 7.4, G16). It runs on a new staging shop, "ChatGPT run 2". The lead fills the shop through the API with `scripts/chatgpt-run-shop.ts`, using only an API credential of that shop, and reads the results back through the activity API. The prompts and their expected calls are in [docs/chatgpt-runs/phase-2.json](chatgpt-runs/phase-2.json).
+
+### 6.1 Before the run (owner)
+
+1. **Create the shop.** In staging, on the Shops page, use **Create a shop**: name "ChatGPT run 2", currency EUR, and your own time zone.
+2. **Create an API credential.** In that shop, open Integrations → API credentials. Under **Create a credential**, name it "ChatGPT run", tick every box under Access, and tap **Create credential**. The token is shown once; keep the page open.
+3. **Tell the lead in chat** that the shop is ready. Don't paste the token in chat: the lead asks for it through a secure field. The shop's ID is in the address bar (`/app/shops/<ID>/…`); paste that in chat.
+
+The lead then fills the shop in two steps, a few minutes apart, so the stock value at a moment between them differs from the value now (prompt 8):
+
+```sh
+AIRSTOCK_TOKEN=<credential> pnpm chatgpt-run:shop --shop <shop ID> --phase opening
+# two minutes or more later
+AIRSTOCK_TOKEN=<credential> pnpm chatgpt-run:shop --shop <shop ID> --phase later
+```
+
+What the shop holds afterwards:
+- **Catalog:** four sealed Pokémon TCG products, with cases (and a pallet of booster-box cases); four LEGO sets in the Building sets family; three graded cards added as one-of-a-kind items; three foods tracked by lot and expiry.
+- **Warehouse:** "Main warehouse" with Receiving, shelf A1, and shelf B2.
+- **Suppliers:** Nordwind TCG Distribution, Brickhouse Wholesale, and Fresh Fuel Foods, each with supplier SKUs and costs.
+- **Stock and costs:** opening stock at older costs, then newer deliveries at higher costs, and a move of 6 booster boxes to B2.
+- **Orders:** 1001 to 1003 fulfilled; 1004 and 1005 reserved and waiting to be picked.
+- **Reorder rules:** three items end up at or below their reorder point.
+
+The later step prints the moment for prompt 8, such as "17 Nov, 14:05", with the values then and now. The lead gives that moment to the owner with the go-ahead.
+
+### 6.2 Connect ChatGPT
+
+1. In ChatGPT, reconnect the Airstock connector (or remove it and add it again): https://airstock.deletecookies.dev/mcp.
+2. On the consent page, choose "ChatGPT run 2" and tick every box. The earlier ChatGPT connection is revoked on the new one's first call (D20).
+3. Start a new chat. ChatGPT asks before each change; approve it.
+
+### 6.3 The prompts
+
+Ask in one chat, in this order. "Expected" is what a correct answer says. The numbers come from the lead's local run of the same steps; they hold if each earlier prompt did what it asked.
+
+| # | Prompt | Expected |
+| --- | --- | --- |
+| 1 | How many Surging Sparks booster boxes do I have, and how many are reserved? | 16 on hand: 10 on A1 and 6 on B2. 2 are reserved, for order 1005, so 14 are available. |
+| 2 | Receive 3 cases of 6 Surging Sparks booster boxes from Nordwind TCG Distribution onto shelf A1, at 95 euros a box. | 18 boxes received onto A1 at €95 each, so A1 holds 28. The average cost goes from €90.67 to €92.96. |
+| 3 | Move 2 Prismatic Evolutions Elite Trainer Boxes from shelf A1 to B2. | A1 keeps 3, B2 has 2. |
+| 4 | What's running low? Draft purchase orders for it. | Three items: Pikachu ex Box (1 available, reorder point 4), Prismatic Evolutions Elite Trainer Box (5, point 6), and Protein Shake Chocolate (20, point 24). ChatGPT shows the proposal and asks first; answer "Yes, draft them". Two draft orders: Fresh Fuel Foods, 4 trays of 12 shakes, €93.60; Nordwind TCG Distribution, a case of 12 Pikachu ex Boxes (€174) and a case of 10 Elite Trainer Boxes (€540), €714. |
+| 5 | Which food lots expire in the next 30 days, and which orders got lot L-2311? | Granola L-2309 (6 units, expires 2 December, sellable until 27 November) and Protein Shake L-2311 (8 units, expires 10 December). Lot L-2311 went to order 1003, 4 units. After 21 December, protein bar lot L-2315 (20 January) is inside the 30 days too. |
+| 6 | I counted shelf B2: 4 of LEGO-10316 and none of LEGO-42143. | Rivendell 5 → 4 and Daytona 1 → 0 on B2, recorded as count corrections. |
+| 7 | Order 1001's LEGO set came back damaged. | A return for order 1001: 1 LEGO Millennium Falcon (75192), reason damaged. Stock doesn't change until the return is received. |
+| 8 | What is my stock worth now, and what was it worth at *the moment the lead gave*? | Now €8,649.17: the value the later step printed (€7,634.17), plus the €1,710 received in prompt 2, minus the €695 counted out in prompt 6. At the moment: €7,415.20, the opening stock. |
+| 9 | Add a PSA 10 Charizard, Base Set 4/102, certificate 12345678, priced at 450 euros, on shelf A1. | A one-of-a-kind Charizard in the Trading cards family, one unit on A1, €450. With no cost given, its value is unknown; ChatGPT may ask for one. |
+| 10 | Make a pick list for the open orders in the main warehouse. | Pick list 1 from orders 1004 and 1005: Galaxy Explorer × 1 and Pikachu ex Box × 2 on A1, Surging Sparks booster box × 2 on B2. |
+| 11 | On pick list 1, the picker found only 1 of the 2 Pikachu ex Boxes on shelf A1. Record that. | The Pikachu line is short: 1 picked, 1 missing. Airstock suggests counting A1. |
+| 12 | Someone scanned 84731629 in the warehouse. Which item is that and where is it? | The Umbreon VMAX 215/203 Evolving Skies PSA 10 slab: one of a kind, 1 unit on shelf A1. |
+| 13 | *Optional:* Are there any Shopify sync problems? | The development store's sync health: last sync and push, pending pushes, conflicts, unmapped items. |
+| 14 | *Optional:* List the Charizard on Shopify as a draft. | The Charizard appears in the development store as a draft product at €450. |
+
+**Prompts 13 and 14** need a Shopify development store connected to "ChatGPT run 2" (Integrations → Shopify → Connect a Shopify store). A store connected to another staging shop must be disconnected there first; reconnect it to its own shop afterwards. Without a store, skip both; the lead's table lists them as skipped.
+
+**Prompt 15, read-only:**
+1. In ChatGPT, reconnect Airstock again. On the consent page, choose "ChatGPT run 2" and tick only the read boxes: "See the shop and your role", "Read items and variants", "Read warehouses and locations", "Read stock and availability", and "Read the activity history".
+2. In a new chat, ask: "Set PKM-PRE-ETB on shelf A1 to zero."
+3. **Expected:** refused, because the connection lacks `inventory:write` (A15). A1 still holds 3 Elite Trainer Boxes. ChatGPT may also decline without calling Airstock; that counts as right.
+
+### 6.4 After the run
+
+The owner says "done" in chat. The lead runs the harness with the same credential; it reads the MCP calls from the shop's activity history, prints one row per call, and marks each prompt right or wrong:
+
+```sh
+AIRSTOCK_TOKEN=<credential> pnpm chatgpt-run --shop <shop ID> --from <ISO time before the first prompt> \
+  --expect docs/chatgpt-runs/phase-2.json --out <file>.md
+```
+
+- Calls are split into prompts where ChatGPT paused 8 seconds or more (`--gap`). If a split is off, give that prompt an `at` time in a copy of the expected file.
+- In this API mode, a read shows the record it was about rather than its full input, and a refusal shows its code. `--db` with `DATABASE_OWNER_URL` shows the full arguments.
+- The lead records the table and the verdicts below. Afterwards, revoke the credential (Integrations → API credentials).
+
+### 6.5 Dry runs
+
+Both runs are made without staging and without ChatGPT: a plain MCP client makes each prompt's expected calls.
+- `apps/worker/test/chatgpt-run.test.ts` runs the whole chain in the Worker tests on every CI run: the seed script through the REST API, the calls through MCP, and the harness through the activity API. It checks the API mode lists the same calls as the database mode, and that the expected file marks 13 of 13 prompts right, with 13 and 14 skipped.
+- A local run on 16 November used `wrangler dev`, the seed script's two steps, and real pauses between prompts. DRY_RUN_RESULT
+
+### 6.6 Result
+
+Not run yet.
+
+## 7. Bench and staging data
 
 | Where | Data | Purpose |
 | --- | --- | --- |

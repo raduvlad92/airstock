@@ -465,7 +465,13 @@ After the seed, compacted with `VACUUM FULL` on the tables the seed updated or d
 | Stock tables (positions, ledger, reservations, lots, serials, costs, transfers, returns, counts, POs, rules, idempotency) | 52.1 MB | 224.4 MB |
 | Catalog tables | 119.0 MB | 101.7 MB (compacted; the catalog itself did not change) |
 
-**Project storage:** `production` 154 MB, `i0-personas` 205 MB, and `i7-volume` 362 MB: 721 MB together, under the 800 MB line. Neon's API reports branch logical sizes with a lag of minutes, and `synthetic_storage_size` as 0 on this plan, so the cluster figure comes from PostgreSQL. The measurement runs added about 5 MB.
+**Project storage:** `production` 154 MB, `i0-personas` 205 MB, and `i7-volume` 362 MB: 721 MB together, under the 800 MB line. Neon's API reports branch logical sizes with a lag of minutes, and `synthetic_storage_size` as 0 on this plan, so the cluster figure comes from PostgreSQL.
+
+The measurement runs then added 48 MB, to 410 MB (768 MB for the project):
+- the commands' idempotency records, 11 MB;
+- their audit events, 11 MB;
+- outbox rows, 4 MB;
+- their stock rows, and the dead row versions their updates left.
 
 **Per record** (heap and indexes, after compaction):
 
@@ -480,15 +486,16 @@ After the seed, compacted with `VACUUM FULL` on the tables the seed updated or d
 | Allocation | 59,693 | 134 B | 151 B | 286 B |
 | Cost-history row | 88,895 | 136 B | 156 B | 293 B |
 | Count line | 45,442 | 240 B | 337 B | 577 B |
-| Idempotency record (opening import) | 30,780 | 356 B | 388 B | 745 B |
+| Idempotency record, opening import | 30,780 | 356 B | 388 B | 745 B |
+| Idempotency record, a command (stores its response, 974 B on average) | 7,278 | 1,213 B (row) | | about 1.6 KB |
 
 **What a stock change costs in storage (cost model):**
-- **An order line** (reservation, then fulfillment): about 3.2 KB in the stock tables. That is two operations, the reservation and its allocation, one ledger entry, one cost-history row, and two idempotency records (1.5 KB of it). The four audit events of the two commands add about 2.6 KB.
-- **A receipt line:** about 1.6 KB, and 2.2 KB with a new lot.
+- **An order line** (reservation, then fulfillment): about 4 KB in the stock tables. That is two operations, the reservation and its allocation, one ledger entry, one cost-history row, and two idempotency records (2.4 KB of it). The audit events of the two commands add about 3 KB.
+- **A receipt:** about 2.3 KB, of which 1.4 KB is the idempotency record, and 2.9 KB with a new lot.
 - **A serial-tracked unit:** about 1.2 KB more than an untracked one, for its serial, its own position, and its own entry.
 - **Lots and serials are index-heavy:** 70% and 60% of their bytes are indexes. Lots have four unique keys, and serials three.
 
-**Idempotency records are never deleted.** No code or migration removes `idempotency_records`, and every command writes one. At three months of this activity that would be 120,750 records, about 90 MB, 40% of the stock tables. A retention window, such as deleting completed records after 7 or 30 days in the daily cron, would keep them to a few MB per shop.
+**Idempotency records are never deleted.** No code or migration removes `idempotency_records`, and every command writes one with its whole response, about 1.6 KB. At three months of this activity that would be 120,750 records, about 190 MB: as much as all the other stock tables together. A retention window would keep them to a few MB per shop, for example deleting completed records after 7 or 30 days in the daily cron.
 
 ### Method
 
@@ -617,7 +624,7 @@ Different variants do not wait for each other: with 10 callers on different vari
 
 - **The audit-queue send is awaited on every request.** On staging it took 80–106 ms at p95, about a third of every command's server time and half of a read's. It is the largest single cost after the statements.
 - **`cleanup.ts` could not delete a shop with a submitted count.** A count names its operation, and the operation names its count (migration 0032), so neither table could go first. Fixed in this PR (scripts only): the script clears `count_sessions.operation_id` first.
-- **The idempotency records** (above) are never deleted.
+- **The idempotency records** (above) are never deleted, and a command's record is 1.6 KB.
 
 ### How to run it again
 

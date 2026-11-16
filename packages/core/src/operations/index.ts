@@ -40,6 +40,7 @@ import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopifyMappingOperations } from './shopify-mapping.ts';
 import { shopifyOnboardingCallbacks, shopifyOnboardingOperations } from './shopify-onboarding.ts';
+import { shopifyOrderCallbacks } from './shopify-orders.ts';
 import { shopsOperations } from './shops.ts';
 import { storageOperations } from './storage.ts';
 import { suppliersOperations } from './suppliers.ts';
@@ -99,6 +100,7 @@ export const operationsById: ReadonlyMap<string, AnyOperation> = new Map(
 export const integrationCallbacks: readonly AnyOperation[] = [
   ...shopifyIntegrationCallbacks,
   ...shopifyOnboardingCallbacks,
+  ...shopifyOrderCallbacks,
 ];
 
 export * from './access.ts';
@@ -134,6 +136,7 @@ export * from './returns.ts';
 export * from './shopify.ts';
 export * from './shopify-mapping.ts';
 export * from './shopify-onboarding.ts';
+export * from './shopify-orders.ts';
 export * from './shops.ts';
 export * from './storage.ts';
 export * from './suppliers.ts';

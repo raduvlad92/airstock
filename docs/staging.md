@@ -43,12 +43,22 @@ too. Airstock therefore:
 
 ### Shopify app settings
 
-Not embedded; authorization-code install (`use_legacy_install_flow`); scopes `read_products`,
-`read_inventory`, `write_inventory`, `read_locations`, `read_orders`; webhooks API version
-`2026-10`; app URL `https://airstock.deletecookies.dev/shopify/app`; redirect URL
-`https://airstock.deletecookies.dev/shopify/oauth/callback`. Airstock subscribes each store to
-`orders/create` and `app/uninstalled` at install (ADR 0008). Tokens are expiring offline tokens,
-stored encrypted with `SHOPIFY_TOKEN_KEY`.
+The app's configuration is `config/shopify/shopify.app.staging.toml`, applied with the Shopify
+CLI (`shopify app deploy --path config/shopify --config staging --allow-updates`; version
+`airstock-staging-2` on 16 November 2026). Not embedded; authorization-code install
+(`use_legacy_install_flow`); app URL `https://airstock.deletecookies.dev/shopify/app`; redirect URL
+`https://airstock.deletecookies.dev/shopify/oauth/callback`; webhooks API version `2026-10`.
+
+- **Scopes:** `read_products`, `write_products`, `read_inventory`, `write_inventory`,
+  `read_locations`, `read_orders`, `read_fulfillments`, `read_merchant_managed_fulfillment_orders`,
+  `read_returns` (ADR 0035). A store installed before a scope was added keeps its old grant until
+  it is connected again from the dashboard; the connector skips reads it was not granted.
+- **Webhooks:** the mandatory privacy topics (`customers/data_request`, `customers/redact`,
+  `shop/redact`) are subscribed on the app. Each store is subscribed at install to
+  `orders/create`, `orders/edited`, `orders/cancelled`, `fulfillments/create`,
+  `fulfillments/update`, `refunds/create`, `reverse_fulfillment_orders/dispose`, and
+  `app/uninstalled`, with `includeFields` (ADR 0008, ADR 0035).
+- Tokens are expiring offline tokens, stored encrypted with `SHOPIFY_TOKEN_KEY`.
 
 ## Secrets
 

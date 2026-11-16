@@ -73,6 +73,9 @@ export function shopifyConnectorCaller(
         'storage.read',
         'inventory.read',
         'inventory.reserve',
+        // Shopify reports fulfillments and returns; the order sync applies them (I6).
+        'inventory.fulfill',
+        'returns.manage',
         'integrations.sync',
       ]),
     },

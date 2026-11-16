@@ -27,3 +27,6 @@ apps/worker/public/openapi.json
 # Playwright
 test-results/
 playwright-report/
+
+# Shopify CLI project cache
+config/shopify/.shopify/

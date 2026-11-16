@@ -1,0 +1,25 @@
+# The staging Shopify app, "Airstock Staging" (docs/staging.md). Applied with the Shopify CLI:
+#   shopify app deploy --path config/shopify --config staging --force
+# Scopes match SHOPIFY_SCOPES in packages/shopify/src/oauth.ts (ADR 0035). Order topics are
+# subscribed per store at install, with includeFields (ADR 0008); only the mandatory privacy
+# topics are subscribed here, for the whole app.
+
+client_id = "5023573bb7a0db1c57597424be17feff"
+name = "Airstock Staging"
+application_url = "https://airstock.deletecookies.dev/shopify/app"
+embedded = false
+
+[access_scopes]
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_fulfillments,read_merchant_managed_fulfillment_orders,read_returns"
+optional_scopes = [ ]
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [ "https://airstock.deletecookies.dev/shopify/oauth/callback" ]
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "https://airstock.deletecookies.dev/shopify/webhooks"

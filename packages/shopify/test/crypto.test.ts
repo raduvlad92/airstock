@@ -52,14 +52,21 @@ describe('Shopify request checks', () => {
   });
 
   it('treats a write scope as covering its read scope', () => {
+    const rest = [
+      'read_fulfillments',
+      'read_merchant_managed_fulfillment_orders',
+      'read_returns',
+      'write_products',
+    ];
     expect(
-      missingScopes(['read_products', 'write_inventory', 'read_locations', 'read_orders']),
+      missingScopes(['read_products', 'write_inventory', 'read_locations', 'read_orders', ...rest]),
     ).toEqual([]);
     expect(missingScopes(['read_products'])).toEqual([
       'read_inventory',
       'write_inventory',
       'read_locations',
       'read_orders',
+      ...rest,
     ]);
   });
 

@@ -133,7 +133,8 @@ function shopifyConfigFromEnv(env: Env): Promise<ShopifyAppConfig | null> {
         clientId: env.SHOPIFY_CLIENT_ID,
         clientSecret: env.SHOPIFY_API_SECRET,
       }),
-      admin: (shopDomain, accessToken) => httpShopifyAdmin(shopDomain, accessToken),
+      admin: (shopDomain, accessToken, scopes) =>
+        httpShopifyAdmin(shopDomain, accessToken, fetch, scopes ?? null),
     };
   })();
   return shopifyConfig;

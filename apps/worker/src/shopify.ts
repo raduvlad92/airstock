@@ -7,6 +7,7 @@ import {
   matchBySku,
   NotConnectedError,
   normalizeShopDomain,
+  ORDER_TOPICS,
   receiveWebhook,
   type ShopifyConfig,
   type SyncDeps,
@@ -45,7 +46,14 @@ const INSTALL_COOKIE = '__Host-airstock_shopify';
 const INSTALL_TTL_SECONDS = 10 * 60;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Topics Airstock subscribes to. Others are acknowledged and ignored. */
-const HANDLED_TOPICS = new Set(['orders/create', 'app/uninstalled']);
+const HANDLED_TOPICS = new Set([...ORDER_TOPICS, 'app/uninstalled']);
+/**
+ * Shopify's mandatory privacy webhooks. Airstock stores no customer data (order and line
+ * references only), so a data request or customer redaction has nothing to return or erase;
+ * shop/redact arrives after an uninstall, when the tokens are already gone. Each is verified,
+ * logged, and acknowledged.
+ */
+const PRIVACY_TOPICS = new Set(['customers/data_request', 'customers/redact', 'shop/redact']);
 
 interface InstallFlow {
   state: string;
@@ -86,6 +94,10 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
     const shopDomain = c.req.header('x-shopify-shop-domain') ?? '';
     const webhookId = c.req.header('x-shopify-webhook-id') ?? null;
     const eventId = c.req.header('x-shopify-event-id') ?? webhookId;
+    if (PRIVACY_TOPICS.has(topic)) {
+      deps.logger.info?.('shopify_privacy_webhook', { topic, shopDomain });
+      return c.body(null, 200);
+    }
     if (!HANDLED_TOPICS.has(topic)) return c.body(null, 200);
     if (!isShopDomain(shopDomain) || !eventId || eventId.length > 200) {
       return problem(

@@ -242,6 +242,12 @@ describe('Shopify install', () => {
     expect(row.refresh_token_ciphertext).not.toContain('shprt_');
     expect(row.webhooks.map((w) => `${w.topic}:${w.status}`)).toEqual([
       'ORDERS_CREATE:subscribed',
+      'ORDERS_EDITED:subscribed',
+      'ORDERS_CANCELLED:subscribed',
+      'FULFILLMENTS_CREATE:subscribed',
+      'FULFILLMENTS_UPDATE:subscribed',
+      'REFUNDS_CREATE:subscribed',
+      'REVERSE_FULFILLMENT_ORDERS_DISPOSE:subscribed',
       'APP_UNINSTALLED:subscribed',
     ]);
     const store = await connectedStore(deps(), m.shopId, row.id);

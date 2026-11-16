@@ -30,3 +30,12 @@
 ## Revisit when
 
 Shopify changes the inventory mutation again, catalogs need batched pushes, or Phase 3 adds cancellations, fulfillment, and the reconciler.
+
+## Update, 16 November 2026
+
+Phase 2 (I6) adds the order lifecycle: edits, cancellations, fulfillments, fulfillment
+cancellations, refunds, and Shopify returns, each applied as the order's state in one
+transaction ([ADR 0035](0035-shopify-order-lifecycle.md)). Shortage reservations replace the
+`insufficient_stock` outcome (ADR 0021), and the line's record of Shopify's quantity follows every
+change Shopify makes itself, so the compare-and-set push stays quiet for those.
+

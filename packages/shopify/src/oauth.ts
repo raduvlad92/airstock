@@ -3,13 +3,24 @@
 /** Pinned Admin API version. The inventory fields used by the push changed in 2026 releases. */
 export const SHOPIFY_API_VERSION = '2026-10';
 
-/** Only what Phase 0 uses (plan Section 8.1). */
+/**
+ * What the connector uses (plan Section 5.14), checked against Shopify's 2026-10 reference:
+ * orders, edits, cancellations, and refunds need `read_orders`; the fulfillments topics
+ * `read_fulfillments`; where an order's lines are committed (fulfillment orders) for a
+ * merchant's own locations `read_merchant_managed_fulfillment_orders`; returns and their
+ * dispositions `read_returns`; listing Airstock's products in Shopify (D21) `write_products`,
+ * requested now so a store approves the connector's scopes once.
+ */
 export const SHOPIFY_SCOPES = [
   'read_products',
   'read_inventory',
   'write_inventory',
   'read_locations',
   'read_orders',
+  'read_fulfillments',
+  'read_merchant_managed_fulfillment_orders',
+  'read_returns',
+  'write_products',
 ] as const;
 
 const SHOP_DOMAIN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;

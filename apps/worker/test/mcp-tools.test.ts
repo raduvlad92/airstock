@@ -57,6 +57,7 @@ describe('MCP tools', () => {
       'manage_storage',
       'manage_suppliers',
       'receive_stock',
+      'run_report',
       'search_activity',
       'search_catalog',
       'stock_alerts',

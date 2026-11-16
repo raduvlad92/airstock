@@ -35,6 +35,7 @@ import { membersOperations } from './members.ts';
 import { pickingOperations } from './picking.ts';
 import { purchasingOperations } from './purchasing.ts';
 import { reorderOperations } from './reorder.ts';
+import { reportsOperations } from './reports.ts';
 import { returnsOperations } from './returns.ts';
 import { shopifyIntegrationCallbacks, shopifyOperations } from './shopify.ts';
 import { shopifyMappingOperations } from './shopify-mapping.ts';
@@ -75,6 +76,7 @@ export const operations: readonly AnyOperation[] = [
   ...pickingOperations,
   ...purchasingOperations,
   ...reorderOperations,
+  ...reportsOperations,
   ...returnsOperations,
   ...shopifyOperations,
   ...shopifyMappingOperations,
@@ -127,6 +129,7 @@ export * from './members.ts';
 export * from './picking.ts';
 export * from './purchasing.ts';
 export * from './reorder.ts';
+export * from './reports.ts';
 export * from './returns.ts';
 export * from './shopify.ts';
 export * from './shopify-mapping.ts';

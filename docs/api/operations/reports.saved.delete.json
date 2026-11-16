@@ -1,0 +1,65 @@
+{
+  "/api/v1/shops/{shopId}/saved-reports/{savedReportId}/delete": {
+    "post": {
+      "operationId": "reports.saved.delete",
+      "summary": "Delete a saved report",
+      "x-permission": "reports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "reports.saved_report.deleted",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "savedReportId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deleted": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "deleted"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

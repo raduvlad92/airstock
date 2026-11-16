@@ -100,6 +100,7 @@ export {
   sendInvitationEmail,
   viewInvitation,
 } from './operations/members.ts';
+export { REPORT_EXPORT_TOPIC, runReportExportJob } from './operations/reports.ts';
 export { shopifyNumericId } from './operations/shopify.ts';
 export { ONBOARDING_RUN_TOPIC } from './operations/shopify-onboarding.ts';
 export {

@@ -19,9 +19,11 @@ import {
   handleWebhookOutbox,
   ingestAuditEvents,
   ops,
+  REPORT_EXPORT_TOPIC,
   reconcileShop,
   runExportJob,
   runImportJob,
+  runReportExportJob,
   sessionCaller,
   uuidv7,
   WebhookSecretCipher,
@@ -146,6 +148,8 @@ const app = createApp({
         }
         if (m.topic === 'catalog.export.run' && payload.exportId)
           await runExportJob(jobDeps, m.shopId, payload.exportId);
+        if (m.topic === REPORT_EXPORT_TOPIC && payload.exportId)
+          await runReportExportJob(jobDeps, m.shopId, payload.exportId);
         await handleWebhookOutbox(webhookDeps, m);
       }
     }),

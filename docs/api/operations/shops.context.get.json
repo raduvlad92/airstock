@@ -111,7 +111,9 @@
                         "exports.run",
                         "webhooks.manage",
                         "purchasing.manage",
-                        "alerts.manage"
+                        "alerts.manage",
+                        "reports.run",
+                        "reports.manage"
                       ]
                     }
                   },

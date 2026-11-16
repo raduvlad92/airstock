@@ -1,0 +1,141 @@
+{
+  "/api/v1/shops/{shopId}/report-exports": {
+    "get": {
+      "operationId": "reports.exports.list",
+      "summary": "List recent report exports",
+      "x-permission": "exports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "reports.exports.listed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "exports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "exportId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "report": {
+                          "type": "string",
+                          "enum": [
+                            "stock_on_hand",
+                            "low_stock",
+                            "movements",
+                            "inventory_value",
+                            "cost_of_goods",
+                            "purchasing",
+                            "expiring_lots",
+                            "shortages"
+                          ]
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "savedReportId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "description": "The saved report’s name, when it was one.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "rowCount": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "downloadUntil": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "downloadPath": {
+                          "description": "An API path: the file downloads in the dashboard (Reports) while signed in.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "exportId",
+                        "report",
+                        "title",
+                        "savedReportId",
+                        "name",
+                        "status",
+                        "rowCount",
+                        "error",
+                        "createdAt",
+                        "completedAt",
+                        "downloadUntil",
+                        "downloadPath"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "exports"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

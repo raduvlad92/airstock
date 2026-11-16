@@ -66,6 +66,7 @@ const NAV = [
   { to: '/shops/$shopId/suppliers', label: 'Suppliers', permission: 'catalog.read' },
   { to: '/shops/$shopId/purchasing', label: 'Purchasing', permission: 'inventory.read' },
   { to: '/shops/$shopId/alerts', label: 'Alerts', permission: 'inventory.read' },
+  { to: '/shops/$shopId/reports', label: 'Reports', permission: 'reports.run' },
   { to: '/shops/$shopId/labels', label: 'Labels', permission: 'catalog.read' },
   { to: '/shops/$shopId/picking', label: 'Picking', permission: 'inventory.read' },
   { to: '/shops/$shopId/activity', label: 'Activity', permission: 'activity.read' },

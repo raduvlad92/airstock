@@ -1707,6 +1707,7 @@ export const ExportOut = z.object({
 
 export interface ExportRow {
   id: string;
+  kind: 'catalog' | 'report';
   status: string;
   row_count: number | null;
   error: string | null;
@@ -1749,7 +1750,7 @@ const ExportQuery = QueryInput.pick({
 
 export async function loadExport(tx: Tx, exportId: string): Promise<ExportRow> {
   const [row] = await tx.query<ExportRow>(
-    `select id, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query
+    `select id, kind, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query
      from export_jobs where id = $1`,
     [exportId],
   );
@@ -1831,8 +1832,8 @@ export const listExports = defineOperation({
   },
   async handler(ctx) {
     const rows = await ctx.tx.query<ExportRow>(
-      `select id, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query
-       from export_jobs order by created_at desc limit 50`,
+      `select id, kind, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query
+       from export_jobs where kind = 'catalog' order by created_at desc limit 50`,
     );
     return {
       result: { exports: rows.map((r) => exportOut(ctx.shopId, r)) },
@@ -1865,7 +1866,7 @@ export const downloadExport = defineOperation({
     return {
       result: {
         fileKey: exportFileKey(ctx.shopId, input.exportId),
-        fileName: `airstock-${row.query.mode}-${input.exportId.slice(-8)}.csv`,
+        fileName: `airstock-${row.kind === 'report' ? `report-${(row.query as { report?: string }).report}` : row.query.mode}-${input.exportId.slice(-8)}.csv`,
       },
       audit: { targetType: 'export', targetId: input.exportId, context: { rows: row.row_count } },
     };
@@ -1883,8 +1884,9 @@ export async function runExportJob(
 ): Promise<'done' | 'missing'> {
   const job = await deps.db.transaction({ shopId, userId: null }, async (tx) => {
     const [row] = await tx.query<ExportRow>(
-      `update export_jobs set status = 'running' where id = $1 and status in ('pending', 'running')
-       returning id, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query`,
+      `update export_jobs set status = 'running'
+       where id = $1 and kind = 'catalog' and status in ('pending', 'running')
+       returning id, kind, status, row_count, error, created_at, completed_at, download_until, file_deleted_at, caller, query`,
       [exportId],
     );
     return row ?? null;

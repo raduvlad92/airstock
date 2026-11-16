@@ -47,6 +47,13 @@ export const PERMISSIONS = [
   'purchasing.manage',
   /** Acknowledge alerts (D12). Seeing alerts needs inventory.read, within the location scope. */
   'alerts.manage',
+  /**
+   * Run the standard reports and saved reports (PRD 3.5), within the location scope; cost and
+   * value columns also need costs.read.
+   */
+  'reports.run',
+  /** Share saved reports with the shop, and change or delete shared ones (D15). */
+  'reports.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -65,6 +72,8 @@ const READ: Permission[] = [
   'storage.read',
   'inventory.read',
   'activity.read',
+  // Every role that reads inventory runs reports (D15).
+  'reports.run',
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {

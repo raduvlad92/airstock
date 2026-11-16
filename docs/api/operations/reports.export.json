@@ -1,0 +1,308 @@
+{
+  "/api/v1/shops/{shopId}/report-exports": {
+    "post": {
+      "operationId": "reports.export",
+      "summary": "Export a report as CSV",
+      "description": "Starts a job that writes every row of a standard or saved report to a CSV file, with a totals line. The file can be downloaded for 24 hours and is deleted after 7 days; each download is logged. Location scope and costs.read apply as when running the report. The file downloads from the export file route, which needs catalog:read for an API credential, as for catalog exports.",
+      "x-permission": "exports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "reports.export.created",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "report": {
+                  "description": "A standard report; or give savedReportId.",
+                  "type": "string",
+                  "enum": [
+                    "stock_on_hand",
+                    "low_stock",
+                    "movements",
+                    "inventory_value",
+                    "cost_of_goods",
+                    "purchasing",
+                    "expiring_lots",
+                    "shortages"
+                  ]
+                },
+                "savedReportId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "filters": {
+                  "default": {},
+                  "description": "The report’s filters; for a saved report, these replace the saved ones.",
+                  "type": "object",
+                  "properties": {
+                    "warehouseId": {
+                      "description": "Only this warehouse.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "locationId": {
+                      "description": "Only this location and the locations inside it.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "familyId": {
+                      "description": "Only products of this family.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "categoryId": {
+                      "description": "Only products in this category (a Category option ID).",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "supplierId": {
+                      "description": "Only variants this supplier sells; for purchasing, only this supplier’s orders.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "variantId": {
+                      "description": "Only this variant.",
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    },
+                    "search": {
+                      "description": "Part of a SKU or product name.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "condition": {
+                      "description": "stock_on_hand: only this stock condition.",
+                      "type": "string",
+                      "enum": [
+                        "sellable",
+                        "quarantine",
+                        "damaged",
+                        "repair",
+                        "supplier_return"
+                      ]
+                    },
+                    "at": {
+                      "description": "inventory_value: value at this moment. A date (2026-12-01) means the end of that day in the shop’s time zone; now when left out.",
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "from": {
+                      "description": "movements, cost_of_goods: start of the period. A date means the start of that day in the shop’s time zone; 30 days before `to` when left out.",
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "to": {
+                      "description": "movements, cost_of_goods: end of the period. A date includes that whole day; a time is exclusive; now when left out.",
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "days": {
+                      "description": "expiring_lots: lots expiring within this many days (default 30), and expired ones.",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3650
+                    },
+                    "movementType": {
+                      "description": "movements: only this type of movement.",
+                      "type": "string",
+                      "enum": [
+                        "receipt",
+                        "transfer",
+                        "fulfillment",
+                        "adjustment",
+                        "return",
+                        "count",
+                        "condition_change",
+                        "reversal"
+                      ]
+                    },
+                    "overdueOnly": {
+                      "description": "purchasing: only lines past their expected date.",
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "true",
+                            "false"
+                          ]
+                        }
+                      ]
+                    },
+                    "groupBy": {
+                      "description": "Rows per: stock_on_hand position (default), variant, location; movements variant (default), location, type, entry; inventory_value location (default), warehouse, category, family, variant; cost_of_goods variant (default), location, warehouse, category, family; purchasing line (default), order, variant, supplier; expiring_lots lot (default), position; shortages order (default), variant.",
+                      "type": "string",
+                      "enum": [
+                        "position",
+                        "variant",
+                        "location",
+                        "warehouse",
+                        "category",
+                        "family",
+                        "entry",
+                        "type",
+                        "line",
+                        "order",
+                        "supplier",
+                        "lot",
+                        "rule"
+                      ]
+                    },
+                    "sort": {
+                      "description": "A column key from the result’s columns; prefix \"-\" for descending.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "export": {
+                    "type": "object",
+                    "properties": {
+                      "exportId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "report": {
+                        "type": "string",
+                        "enum": [
+                          "stock_on_hand",
+                          "low_stock",
+                          "movements",
+                          "inventory_value",
+                          "cost_of_goods",
+                          "purchasing",
+                          "expiring_lots",
+                          "shortages"
+                        ]
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "savedReportId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "name": {
+                        "description": "The saved report’s name, when it was one.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "rowCount": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "completedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadUntil": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "downloadPath": {
+                        "description": "An API path: the file downloads in the dashboard (Reports) while signed in.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "exportId",
+                      "report",
+                      "title",
+                      "savedReportId",
+                      "name",
+                      "status",
+                      "rowCount",
+                      "error",
+                      "createdAt",
+                      "completedAt",
+                      "downloadUntil",
+                      "downloadPath"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "export"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

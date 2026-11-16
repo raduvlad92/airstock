@@ -10,7 +10,7 @@
 /** Opening routes: [task, tools in order of preference]. Only registered tools are named. */
 const ROUTES: Array<[string, string[]]> = [
   ['catalog (products, variants, prices, barcodes)', ['search_catalog', 'edit_catalog']],
-  ['stock levels, lots, serials, value', ['get_stock']],
+  ['one item’s stock, lots, serials', ['get_stock']],
   [
     'changing stock',
     ['receive_stock', 'manage_reservations', 'transfer_stock', 'adjust_stock', 'manage_returns'],
@@ -18,7 +18,7 @@ const ROUTES: Array<[string, string[]]> = [
   ['purchasing', ['manage_purchasing', 'manage_suppliers']],
   ['alerts', ['stock_alerts']],
   ['picking', ['warehouse_work']],
-  ['reports', ['run_report']],
+  ['reports, stock value, cost of goods', ['run_report']],
   ['Shopify', ['shopify_sync']],
   ['history', ['search_activity']],
 ];
@@ -48,6 +48,10 @@ const DETAILS: Array<[string, string]> = [
   [
     'adjust_stock',
     'A counted quantity is a count in adjust_stock, not an adjustment you compute; every adjustment needs a reason.',
+  ],
+  [
+    'run_report',
+    'What the stock is worth, now or on a past date (inventory_value with at), and cost of goods come from run_report; a date means the end of that day. Totals marked partial cover only the locations this connection may see.',
   ],
   [
     'import_export',

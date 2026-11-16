@@ -324,3 +324,75 @@ DATABASE_OWNER_URL=… DATABASE_APP_URL=… NEON_API_KEY=… NEON_PROJECT_ID=…
 ```
 
 `--only` takes shape keys (comma-separated), and `--explain` prints each plan. Delete the branch afterwards.
+
+## I5 reports (bench project)
+
+**When:** 16 November 2026.  
+**Database:** a throwaway branch of `i0-personas` (`i5-reports-bench`, deleted afterwards), migrated to the schema of this change (up to migration 0068, the reports migration). Same compute and client as the I0 baseline: about 15 ms per round trip from the client.
+
+### Stock history
+
+`i0-personas` has opening stock and no stock history. `scripts/bench/seed-stock-ledger.ts` adds three weeks of it, set-based, as the database owner, one transaction per shop (about 1 s each):
+- The opening stock moves to a week before the history. Each variant gets its moving average from its opening receipts' unit costs; the seed ran before migration 0017, so it had none.
+- Each day has 300 operations per shop on random sellable positions with stock. About a third are receipts of 6 to 48 units and two thirds fulfillments of 1 to 3 units, both at the variant's average. Each has its operation, ledger entry, balance, owned quantity, and cost-history row. No position goes below zero at any moment.
+- Reorder rules cover 5% of the stocked variants, about half of them low.
+
+`stock_reconciliation_problems()` finds nothing afterwards.
+
+| Shop | Variants | Positions | Operations (21 days) | Reorder rules |
+| --- | --- | --- | --- | --- |
+| Bench Cards and Bricks | 1,254 | 1,236 | 6,232 | 65 |
+| Bench Fuel Kitchen | 300 | 300 | 6,300 | 15 |
+| Bench Lumen Skin | 2,000 | 1,932 | 6,281 | 103 |
+| Bench Maison Verre | 4,001 | 5,879 | 6,160 | 190 |
+| Bench Partline Supply | 20,000 | 16,990 | 1,690 | 689 |
+| Bench Stride Sportswear | 4,014 | 4,443 | 6,231 | 194 |
+
+Partline's positions mostly hold one or two units, so most of its drawn fulfillments were dropped to keep stock at or above zero.
+
+### Report timings
+
+`scripts/bench/query-reports.ts` runs each shape 5 times per shop through the product's operation (`execute` as the shop's owner, with row-level security and the access event), first page of 100 rows. "Client" is the whole run as the laptop saw it: the pipeline's 4 to 6 statements at about 15 ms each, plus the report query. "Server" is planning plus execution of the report query, from EXPLAIN (ANALYZE, TIMING OFF) after the timed runs. In the Worker, next to the database, a run takes about the server time plus 10 to 30 ms.
+
+The largest shop, Partline (20,000 variants, 16,990 positions):
+
+| Report | Rows | Client median | Client slowest | Server |
+| --- | --- | --- | --- | --- |
+| Stock on hand, positions | 16,982 | 1,081 ms | 1,181 ms | 799 ms |
+| Stock on hand, per variant, by on hand | 14,187 | 1,043 ms | 1,101 ms | 789 ms |
+| Stock on hand, per location | 420 | 888 ms | 991 ms | 722 ms |
+| Inventory value now, per location | 420 | 245 ms | 283 ms | 76 ms |
+| Inventory value 7 days ago, per location | 420 | 254 ms | 268 ms | 83 ms |
+| Inventory value 7 days ago, per variant, by value | 14,190 | 273 ms | 276 ms | 113 ms |
+| Inventory value 7 days ago, per category | 10 | 282 ms | 290 ms | 90 ms |
+| Movements, 30 days, per variant | 14,195 | 340 ms | 402 ms | 162 ms |
+| Movements, 30 days, each entry | 18,680 | 321 ms | 346 ms | 168 ms |
+| Cost of goods, 30 days, per variant | 703 | 175 ms | 193 ms | 15 ms |
+| Low stock | 341 | 467 ms | 643 ms | 8 ms |
+
+The other shops:
+
+| Shop | Variants | Stock on hand, positions (client, server) | Value 7 days ago, per variant (client, server) | Movements, entries (client, server) |
+| --- | --- | --- | --- | --- |
+| Bench Cards and Bricks | 1,254 | 256 ms, 56 ms | 177 ms, 12 ms | 230 ms, 56 ms |
+| Bench Fuel Kitchen | 300 | 203 ms, 19 ms | 185 ms, 21 ms | 231 ms, 61 ms |
+| Bench Lumen Skin | 2,000 | 284 ms, 90 ms | 171 ms, 15 ms | 243 ms, 78 ms |
+| Bench Maison Verre | 4,001 | 427 ms, 244 ms | 177 ms, 27 ms | 280 ms, 131 ms |
+| Bench Stride Sportswear | 4,014 | 396 ms, 208 ms | 189 ms, 26 ms | 253 ms, 84 ms |
+
+Purchasing, expiring lots, and shortages have no rows in the seed (no orders, lots, or shortages yet) and take 140 to 220 ms, all of it round trips.
+
+**Against the targets (plan Section 8):** stock on hand on the 20,000-variant shop takes 0.8 s at the server, and value at a past date 0.1 s, against 5 s and 10 s. Stock on hand grows with the positions: it computes what is reserved and available through `stock_positions`, the shared rule. At that rate a single shop with all 31,000 variants would take about 1.3 s. Value at a date reads the balances, the ledger entries after the date (one new index, `inventory_entries (shop_id, created_at)`), and the last cost-history row per variant.
+
+**Export job:** every stock-on-hand row of Partline (16,982 rows, 2.1 MB of CSV) in 6.7 s, as four pages of 5,000 in one read-only transaction. Interactive runs stop after 25 s (`report_too_large`, which points to the export); an export's statements may run 5 minutes.
+
+### How to run it again
+
+```sh
+# A branch of i0-personas (Neon console or API), migrated to the current schema.
+DATABASE_OWNER_URL=… tsx packages/db/src/migrate-cli.ts
+# Three weeks of receipts and fulfillments, and reorder rules (about 6 s for the six shops).
+DATABASE_OWNER_URL=… tsx scripts/bench/seed-stock-ledger.ts --days 21 --per-day 300
+# The timings, and the export job of the largest shop.
+DATABASE_APP_URL=… DATABASE_OWNER_URL=… tsx scripts/bench/query-reports.ts --n 5 --json reports.json
+```

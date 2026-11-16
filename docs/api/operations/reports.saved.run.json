@@ -1,0 +1,517 @@
+{
+  "/api/v1/shops/{shopId}/saved-reports/{savedReportId}/run": {
+    "get": {
+      "operationId": "reports.saved.run",
+      "summary": "Run a saved report",
+      "description": "Use this to run a report someone saved (find it with list_saved). Filters given here replace the saved ones for this run only, such as `at` for the value on another date.",
+      "x-permission": "reports.run",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "reports.saved_report.run",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "savedReportId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only this warehouse.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "locationId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only this location and the locations inside it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "familyId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only products of this family.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "categoryId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only products in this category (a Category option ID).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "supplierId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only variants this supplier sells; for purchasing, only this supplier’s orders.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Only this variant.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "search",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Part of a SKU or product name.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        {
+          "name": "condition",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "stock_on_hand: only this stock condition.",
+            "type": "string",
+            "enum": [
+              "sellable",
+              "quarantine",
+              "damaged",
+              "repair",
+              "supplier_return"
+            ]
+          }
+        },
+        {
+          "name": "at",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "inventory_value: value at this moment. A date (2026-12-01) means the end of that day in the shop’s time zone; now when left out.",
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        {
+          "name": "from",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "movements, cost_of_goods: start of the period. A date means the start of that day in the shop’s time zone; 30 days before `to` when left out.",
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        {
+          "name": "to",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "movements, cost_of_goods: end of the period. A date includes that whole day; a time is exclusive; now when left out.",
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        {
+          "name": "days",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "expiring_lots: lots expiring within this many days (default 30), and expired ones.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3650
+          }
+        },
+        {
+          "name": "movementType",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "movements: only this type of movement.",
+            "type": "string",
+            "enum": [
+              "receipt",
+              "transfer",
+              "fulfillment",
+              "adjustment",
+              "return",
+              "count",
+              "condition_change",
+              "reversal"
+            ]
+          }
+        },
+        {
+          "name": "overdueOnly",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "purchasing: only lines past their expected date.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "groupBy",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Rows per: stock_on_hand position (default), variant, location; movements variant (default), location, type, entry; inventory_value location (default), warehouse, category, family, variant; cost_of_goods variant (default), location, warehouse, category, family; purchasing line (default), order, variant, supplier; expiring_lots lot (default), position; shortages order (default), variant.",
+            "type": "string",
+            "enum": [
+              "position",
+              "variant",
+              "location",
+              "warehouse",
+              "category",
+              "family",
+              "entry",
+              "type",
+              "line",
+              "order",
+              "supplier",
+              "lot",
+              "rule"
+            ]
+          }
+        },
+        {
+          "name": "sort",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "A column key from the result’s columns; prefix \"-\" for descending.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        {
+          "name": "cursor",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "nextCursor from the previous page of the same run.",
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "default": 100,
+            "description": "Rows per page, at most 500.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "report": {
+                    "type": "string",
+                    "enum": [
+                      "stock_on_hand",
+                      "low_stock",
+                      "movements",
+                      "inventory_value",
+                      "cost_of_goods",
+                      "purchasing",
+                      "expiring_lots",
+                      "shortages"
+                    ]
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "groupBy": {
+                    "type": "string",
+                    "enum": [
+                      "position",
+                      "variant",
+                      "location",
+                      "warehouse",
+                      "category",
+                      "family",
+                      "entry",
+                      "type",
+                      "line",
+                      "order",
+                      "supplier",
+                      "lot",
+                      "rule"
+                    ]
+                  },
+                  "groupLabel": {
+                    "type": "string"
+                  },
+                  "sort": {
+                    "type": "string"
+                  },
+                  "columns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "text",
+                            "quantity",
+                            "money",
+                            "integer",
+                            "date",
+                            "datetime",
+                            "boolean"
+                          ]
+                        },
+                        "cost": {
+                          "type": "boolean"
+                        },
+                        "total": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "label",
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Cost columns appear only with costs.read."
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "description": "One object per row, keyed by column key, plus the row’s `key`. Decimals are exact strings."
+                  },
+                  "totals": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Sums over every row the filters select, not only this page."
+                  },
+                  "rowCount": {
+                    "type": "number"
+                  },
+                  "nextCursor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "partial": {
+                    "type": "boolean",
+                    "description": "True when your access is limited to some locations: totals cover only those."
+                  },
+                  "costVisible": {
+                    "type": "boolean"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "description": "inventory_value: the moment valued.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "from": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "days": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "ignoredFilters": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Filters this report does not take."
+                  },
+                  "savedReport": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "report": {
+                        "type": "string",
+                        "enum": [
+                          "stock_on_hand",
+                          "low_stock",
+                          "movements",
+                          "inventory_value",
+                          "cost_of_goods",
+                          "purchasing",
+                          "expiring_lots",
+                          "shortages"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "description": "The standard report it runs."
+                      },
+                      "filters": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      },
+                      "shared": {
+                        "type": "boolean"
+                      },
+                      "mine": {
+                        "type": "boolean"
+                      },
+                      "canEdit": {
+                        "type": "boolean"
+                      },
+                      "version": {
+                        "type": "number"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "report",
+                      "title",
+                      "filters",
+                      "shared",
+                      "mine",
+                      "canEdit",
+                      "version",
+                      "updatedAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "report",
+                  "title",
+                  "groupBy",
+                  "groupLabel",
+                  "sort",
+                  "columns",
+                  "rows",
+                  "totals",
+                  "rowCount",
+                  "nextCursor",
+                  "partial",
+                  "costVisible",
+                  "currency",
+                  "at",
+                  "from",
+                  "to",
+                  "days",
+                  "ignoredFilters",
+                  "savedReport"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

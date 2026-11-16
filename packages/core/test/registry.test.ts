@@ -69,7 +69,7 @@ describe('operation registry (PRD 9.3, A23)', () => {
   });
 
   it('routes a combined tool by action and keeps the idempotency key out of the input', () => {
-    const reserve = buildMcpTools(operations).find((t) => t.name === 'reserve_stock')!;
+    const reserve = buildMcpTools(operations).find((t) => t.name === 'manage_reservations')!;
     const call = resolveToolCall(reserve, {
       action: 'release',
       reservationId: 'x',

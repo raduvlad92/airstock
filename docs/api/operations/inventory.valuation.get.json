@@ -1,0 +1,173 @@
+{
+  "/api/v1/shops/{shopId}/valuation": {
+    "get": {
+      "operationId": "inventory.valuation.get",
+      "summary": "Value stock at a date and cost of goods for a period",
+      "description": "Use this for \"what is my stock worth\" and cost of goods questions. Value is owned units times the moving average cost, for one variant or the whole shop, now or at any past moment (reproducible later). Cost of goods sums fulfillments between from and to at the cost each one recorded. Needs costs.read; not available to members limited to some locations.",
+      "x-permission": "costs.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.valuation.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "at",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Value at this moment; now when left out.",
+            "type": "string"
+          }
+        },
+        {
+          "name": "from",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "Start of the cost-of-goods period (inclusive).",
+            "type": "string"
+          }
+        },
+        {
+          "name": "to",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "description": "End of the cost-of-goods period (exclusive); now by default.",
+            "type": "string"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Exact; round to cents only for display."
+                  },
+                  "quantity": {
+                    "type": "string"
+                  },
+                  "unknownCostVariants": {
+                    "type": "number",
+                    "description": "Variants with stock but no cost yet; they are left out of the value."
+                  },
+                  "variants": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "variantId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "sku": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        },
+                        "averageCost": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "value": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "variantId",
+                        "sku",
+                        "quantity",
+                        "averageCost",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Per variant, the 200 most valuable (or the one asked for)."
+                  },
+                  "costOfGoods": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "quantity": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "from",
+                          "to",
+                          "quantity",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "at",
+                  "currency",
+                  "value",
+                  "quantity",
+                  "unknownCostVariants",
+                  "variants",
+                  "costOfGoods"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

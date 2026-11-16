@@ -3,8 +3,9 @@ import { seedShop } from '../../../test/helpers.ts';
 import { mcpSession } from './mcp-client.ts';
 import { type TestApp, testApp } from './setup.ts';
 
-// The tool list is a contract with MCP clients (PRD 9.3): 16 tools or fewer after Phase 1
-// (ADR 0005). A new tool adds one line here; a new action on an existing tool does not.
+// The tool list is a contract with MCP clients (PRD 9.3). Phase 2 gates on measured tool choice,
+// not a count (ADR 0005, update of 16 November 2026). A new tool adds one line here; a new action
+// on an existing tool does not.
 
 let t: TestApp;
 beforeAll(async () => {
@@ -20,16 +21,16 @@ describe('MCP tools', () => {
     expect(tools.map((x) => x.name).sort()).toEqual([
       'describe_catalog',
       'edit_catalog',
-      'get_availability',
       'get_operation_outcome',
       'get_shop_context',
+      'get_stock',
       'import_export',
       'manage_catalog_schema',
       'manage_media',
+      'manage_reservations',
       'manage_storage',
       'manage_suppliers',
       'receive_stock',
-      'reserve_stock',
       'search_activity',
       'search_catalog',
     ]);

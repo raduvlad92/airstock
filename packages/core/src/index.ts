@@ -19,6 +19,7 @@ export {
   ingestAuditEvents,
   type OutboxMessage,
   sweepExpiredReservations,
+  sweepShortages,
   sweepUnboundConnectionGrants,
 } from './background.ts';
 export type { Caller, CallerKind, Membership, Source } from './caller.ts';

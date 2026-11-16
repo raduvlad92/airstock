@@ -1,0 +1,104 @@
+{
+  "/api/v1/shops/{shopId}/stock-settings": {
+    "get": {
+      "operationId": "inventory.settings.get",
+      "summary": "Show the shop’s stock settings and allocation rules",
+      "description": "Shows whether receipts fill open shortages, the default reservation expiry, and, per channel, the ordered warehouses and locations its reservations take stock from. A channel without a rule uses every fulfillment-eligible location.",
+      "x-permission": "storage.read",
+      "x-connection-scope": "storage:read",
+      "x-audit-action": "inventory.settings.viewed",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fillShortagesOnReceipt": {
+                    "type": "boolean"
+                  },
+                  "reservationExpiryMinutes": {
+                    "description": "Null: reservations never expire.",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "channel": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "locations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "warehouse",
+                                  "location"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "channel",
+                        "version",
+                        "locations"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "fillShortagesOnReceipt",
+                  "reservationExpiryMinutes",
+                  "rules"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

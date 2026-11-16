@@ -14,8 +14,12 @@ import { type Database, type DatabaseHooks, PgDatabase, poolSource } from '@airs
 import pg from 'pg';
 import { inject } from 'vitest';
 
-export function appDatabase(hooks: DatabaseHooks = {}): Database {
-  return new PgDatabase(poolSource(inject('databases').appUrl, 60), hooks);
+/**
+ * The runtime role's pool. Test files run in parallel against one server (100 connections), so
+ * files that race many commands keep their pool small; the races still overlap on it.
+ */
+export function appDatabase(hooks: DatabaseHooks = {}, max = 60): Database {
+  return new PgDatabase(poolSource(inject('databases').appUrl, max), hooks);
 }
 
 /** Owner connection for test assertions that must see every shop. Never used by the app. */

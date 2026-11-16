@@ -15,7 +15,7 @@ import {
 // Milestone I1 schema groundwork (migration 0017): the in-transit system location, the shared
 // stock function, half-even rounding, lot expiry, and the owned quantity behind valuation.
 
-const db = appDatabase();
+const db = appDatabase({}, 6);
 const sink = new MemoryAuditSink();
 let shop: SeededShop;
 let h: Harness;

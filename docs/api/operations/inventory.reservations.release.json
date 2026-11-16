@@ -3,7 +3,7 @@
     "post": {
       "operationId": "inventory.reservations.release",
       "summary": "Release a reservation, fully or partly",
-      "description": "Returns reserved units to availability without moving stock. Without a quantity, everything still reserved is released.",
+      "description": "Use this when held units are no longer needed, such as a cancelled order line. Returns reserved units to availability without moving stock: an open shortage is released first, then allocations. Without a quantity, everything still open is released.",
       "x-permission": "inventory.reserve",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "inventory.reservation.released",
@@ -45,9 +45,14 @@
               "type": "object",
               "properties": {
                 "quantity": {
+                  "description": "How much to act on (bundles for a bundle reservation). Leave out for everything still open.",
                   "type": "string",
-                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$",
-                  "description": "Decimal string greater than zero, at most 14 integer digits and 6 decimal places."
+                  "pattern": "^(0|[1-9]\\d{0,13})(\\.\\d{1,6})?$"
+                },
+                "allocationId": {
+                  "description": "Act on this allocation only.",
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                 },
                 "reason": {
                   "type": "string",
@@ -80,13 +85,17 @@
                   },
                   "status": {
                     "type": "string"
+                  },
+                  "shortageReleased": {
+                    "type": "string"
                   }
                 },
                 "required": [
                   "reservationId",
                   "operationId",
                   "released",
-                  "status"
+                  "status",
+                  "shortageReleased"
                 ],
                 "additionalProperties": false
               }

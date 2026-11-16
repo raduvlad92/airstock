@@ -1,0 +1,279 @@
+{
+  "/api/v1/shops/{shopId}/lots/trace": {
+    "get": {
+      "operationId": "inventory.lots.trace",
+      "summary": "Trace a lot from receipt to every order",
+      "description": "Use this for recalls and \"which orders got lot X\": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode.",
+      "x-permission": "inventory.read",
+      "x-connection-scope": "inventory:read",
+      "x-audit-action": "inventory.lot.traced",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "lotId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "variantId",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "name": "lotCode",
+          "in": "query",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A lot or batch code. Codes are unique per variant, ignoring case and extra spaces."
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lot": {
+                    "type": "object",
+                    "properties": {
+                      "lotId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      },
+                      "sku": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": "string"
+                      },
+                      "expiresOn": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "producedOn": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "supplierId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "supplierName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "purchaseOrderRef": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "lotId",
+                      "variantId",
+                      "sku",
+                      "code",
+                      "expiresOn",
+                      "producedOn",
+                      "supplierId",
+                      "supplierName",
+                      "purchaseOrderRef"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "totals": {
+                    "type": "object",
+                    "properties": {
+                      "received": {
+                        "type": "string"
+                      },
+                      "fulfilled": {
+                        "type": "string"
+                      },
+                      "onHand": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "received",
+                      "fulfilled",
+                      "onHand"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "orders": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "externalRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reservationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "quantity": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "externalRef",
+                        "reservationId",
+                        "quantity"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Every reservation that received units of the lot."
+                  },
+                  "movements": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "string",
+                          "description": "Positive into stock, negative out of it."
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "locationPath": {
+                          "type": "string"
+                        },
+                        "condition": {
+                          "type": "string"
+                        },
+                        "reservationId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "externalRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reference": {
+                          "description": "The operation’s own reference.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "supplierId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "actorType": {
+                          "type": "string"
+                        },
+                        "source": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "kind",
+                        "occurredAt",
+                        "quantity",
+                        "locationId",
+                        "locationPath",
+                        "condition",
+                        "reservationId",
+                        "externalRef",
+                        "reference",
+                        "supplierId",
+                        "actorType",
+                        "source"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "lot",
+                  "totals",
+                  "orders",
+                  "movements"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

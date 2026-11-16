@@ -250,8 +250,13 @@ export async function previewRows(
         id: string;
         product_id: string;
         quantity_scale: number;
+        tracking_mode: string;
+        one_of_a_kind: boolean;
+        is_bundle: boolean;
       }>(
-        `select sku_normalized, id, product_id, quantity_scale from variants where sku_normalized = any($1::text[])`,
+        `select sku_normalized, id, product_id, quantity_scale, tracking_mode, one_of_a_kind,
+           exists (select 1 from bundles b where b.shop_id = v.shop_id and b.variant_id = v.id and b.active) as is_bundle
+         from variants v where sku_normalized = any($1::text[])`,
         [skus.filter(Boolean)],
       )
     ).map((r) => [r.sku_normalized, r]),
@@ -375,6 +380,11 @@ export async function previewRows(
           const scale = match?.quantity_scale ?? 0;
           if (decimalScale(normalize(q)) > scale)
             fail(`At most ${scale} decimal places for this item.`);
+          else if (match && match.tracking_mode !== 'none')
+            fail('This item is tracked by lot or serial: receive it with its lots or serials.');
+          else if (match?.is_bundle) fail('A bundle holds no stock of its own.');
+          else if (match?.one_of_a_kind)
+            fail('This item is one of a kind: receive its single unit in the dashboard.');
           else data.stock.push({ locationId: t.slice(6), quantity: normalize(q) });
         }
       } else if (t.startsWith('field:')) {

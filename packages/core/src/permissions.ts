@@ -18,6 +18,8 @@ export const PERMISSIONS = [
   'inventory.read',
   'inventory.receive',
   'inventory.reserve',
+  /** Ship reserved units: lowers on hand and reserved together (PRD 6.3). */
+  'inventory.fulfill',
   'activity.read',
   'credentials.manage',
   'connections.manage',
@@ -51,7 +53,12 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // Managers hold every new Phase 1 permission too (schema, costs, commercial terms, imports).
   manager: new Set(PERMISSIONS.filter((p) => p !== 'shop.manage')),
   catalog_editor: new Set([...READ, 'catalog.write', 'imports.run', 'exports.run']),
-  inventory_operator: new Set([...READ, 'inventory.receive', 'inventory.reserve']),
+  inventory_operator: new Set([
+    ...READ,
+    'inventory.receive',
+    'inventory.reserve',
+    'inventory.fulfill',
+  ]),
   viewer: new Set(READ),
 };
 

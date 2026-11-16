@@ -70,7 +70,26 @@ describe('receive, reserve, release, availability', () => {
       available: '132.000000',
       quarantined: '0',
       damaged: '4.000000',
+      repair: '0',
+      supplierReturn: '0',
+      expired: '0',
+      inTransit: '0',
+      ownedTotal: '154.000000',
+      shortage: '0.000000',
     });
+    // Per location: one catalog identity, three sites (PRD 5.4).
+    const sellable = view.positions.filter(
+      (p: { condition: string }) => p.condition === 'sellable',
+    );
+    expect(
+      sellable.map((p: { locationId: string; available: string }) => [p.locationId, p.available]),
+    ).toEqual(
+      expect.arrayContaining([
+        [shop.locationId, '17.000000'],
+        [rentedLoc, '70.000000'],
+        [partnerLoc, '45.000000'],
+      ]),
+    );
     expect(view.partial).toBe(false);
     expect(await reconcile(shop.shopId)).toEqual([]);
   });
@@ -87,22 +106,30 @@ describe('receive, reserve, release, availability', () => {
     expect(view.totals.available).toBe('5.000000');
   });
 
-  it('allocates across locations in path order when no location is given', async () => {
+  it('allocates the oldest stock first, then in path order, when no location is given (D3)', async () => {
     const variantId = await createVariant(h);
     const wh = await h.run(ops.createWarehouse, { name: 'Path order' });
     const a = await createLeafLocation(h, wh.warehouseId, 'A');
     const b = await createLeafLocation(h, wh.warehouseId, 'B');
+    const c = await createLeafLocation(h, wh.warehouseId, 'C');
     await h.run(ops.receiveStock, { variantId, locationId: b, quantity: '5' });
     await h.run(ops.receiveStock, { variantId, locationId: a, quantity: '3' });
-    const res = await h.run(ops.reserveStock, { variantId, quantity: '7' });
+    await h.run(ops.receiveStock, { variantId, locationId: c, quantity: '2' });
+    // A and C arrived together: path order breaks the tie.
+    await ownerQuery(
+      'update inventory_positions set received_at = $2 where variant_id = $1 and location_id = any($3::uuid[])',
+      [variantId, new Date(Date.now() + 60_000), [a, c]],
+    );
+    const res = await h.run(ops.reserveStock, { variantId, quantity: '9' });
     expect(
       res.allocations.map((x: { locationId: string; quantity: string }) => [
         x.locationId,
         x.quantity,
       ]),
     ).toEqual([
+      [b, '5.000000'],
       [a, '3.000000'],
-      [b, '4.000000'],
+      [c, '1.000000'],
     ]);
   });
 
@@ -120,7 +147,7 @@ describe('receive, reserve, release, availability', () => {
       h.run(ops.releaseReservation, { reservationId: r.reservationId, quantity: '5' }),
     ).rejects.toMatchObject({ code: 'quantity_exceeds_reserved' });
     const rest = await h.run(ops.releaseReservation, { reservationId: r.reservationId });
-    expect(rest).toMatchObject({ released: '4.000000', status: 'released' });
+    expect(rest).toMatchObject({ released: '4', status: 'released' });
     expect((await h.run(ops.getAvailability, { variantId })).totals.available).toBe('10.000000');
     await expect(
       h.run(ops.releaseReservation, { reservationId: r.reservationId }),

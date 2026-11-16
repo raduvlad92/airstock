@@ -1,0 +1,100 @@
+{
+  "/api/v1/shops/{shopId}/allocation-rules": {
+    "post": {
+      "operationId": "inventory.allocation_rules.set",
+      "summary": "Set where a channel’s reservations take stock from",
+      "description": "Replaces the ordered list of warehouses or locations that reservations for a channel take stock from, first to last. Within each, lots that expire first and the oldest stock go first. An empty list lets every fulfillment-eligible location take part.",
+      "x-permission": "storage.manage",
+      "x-connection-scope": "storage:write",
+      "x-audit-action": "inventory.allocation_rule.set",
+      "parameters": [
+        {
+          "name": "shopId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "in": "header",
+          "required": true,
+          "description": "Unique per command. Retrying with the same key returns the original result without repeating the effect.",
+          "schema": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "description": "\"default\", or a sales channel such as \"shopify:<connection>\"."
+                },
+                "locationIds": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "description": "Warehouse or location IDs in priority order; a warehouse covers its locations."
+                }
+              },
+              "required": [
+                "channel",
+                "locationIds"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "number"
+                  },
+                  "locationIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  }
+                },
+                "required": [
+                  "channel",
+                  "version",
+                  "locationIds"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "default": {
+          "$ref": "#/components/responses/Problem"
+        }
+      }
+    }
+  }
+}

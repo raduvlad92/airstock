@@ -14,6 +14,7 @@ import {
   sweepExpiredReservations,
   sweepExportFiles,
   sweepMediaUploads,
+  sweepShortages,
   sweepUnboundConnectionGrants,
   systemCaller,
   uuidv7,
@@ -291,6 +292,8 @@ export default {
         );
       }
       await sweepExpiredReservations(db);
+      // Shortages a receipt could not reach in its own transaction (D6).
+      await sweepShortages(db);
       await sweepUnboundConnectionGrants(db);
       // Uploads never finalized: expire them and delete their objects (ADR 0015).
       await sweepMediaUploads(db, (keys) => r2MediaStore(env.FILES).delete(keys), { logger });

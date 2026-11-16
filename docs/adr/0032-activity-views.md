@@ -1,4 +1,4 @@
-# 0031. Activity views
+# 0032. Activity views
 
 **Status:** Accepted, 16 November 2026. Implements Phase 2 plan decision D15 and the activity half of Section 5.15 (milestone I5); amends ADR 0004's storage.
 

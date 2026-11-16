@@ -3,7 +3,7 @@
  * activity for the persona shops from seed-personas.ts, 1,000,000 events in all by default.
  *
  *   DATABASE_OWNER_URL=… tsx scripts/bench/seed-history.ts [--events 1000000] [--names 'Bench %']
- *     [--batch 5000] [--max-mb 850] [--seed 7] [--dry-run]
+ *     [--batch 5000] [--max-mb 850] [--seed 7] [--dry-run] [--context shops.json]
  *
  * Events use the real envelope (core `auditEvent`) and arrive through the function the audit queue
  * consumer calls, `ingest_audit_events`, in time order, into monthly partitions created the way
@@ -25,6 +25,8 @@
  * Stops before the database passes --max-mb (the free plan refuses every write at 1 GB).
  */
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import pg from 'pg';
 import { type AuditEvent, auditEvent } from '../../packages/core/src/audit.ts';
@@ -41,6 +43,7 @@ const { values: args } = parseArgs({
     seed: { type: 'string', default: '7' },
     'dry-run': { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
+    context: { type: 'string' },
   },
 });
 const url = process.env.DATABASE_OWNER_URL;
@@ -104,129 +107,153 @@ interface Shop {
   quota: number;
 }
 
-const shopRows = await q<{ id: string; name: string; created_at: Date }>(
-  'select id, name, created_at from shops where name like $1 order by name',
-  [args.names],
-);
-if (shopRows.length === 0)
-  throw new Error(`No shops match ${args.names}. Run seed-personas.ts first.`);
+async function loadShops(): Promise<Shop[]> {
+  const shopRows = await q<{ id: string; name: string; created_at: Date }>(
+    'select id, name, created_at from shops where name like $1 order by name',
+    [args.names],
+  );
+  if (shopRows.length === 0)
+    throw new Error(`No shops match ${args.names}. Run seed-personas.ts first.`);
+  const shops: Shop[] = [];
+  for (const s of shopRows) {
+    const persona = PERSONAS.find((p) => p.shopName === s.name);
+    const members = await q<{ user_id: string; role: string }>(
+      'select user_id, role from memberships where shop_id = $1 order by created_at, id',
+      [s.id],
+    );
+    const [credential] = await q<{ id: string; user_id: string }>(
+      `select c.id, m.user_id from api_credentials c join memberships m on m.shop_id = c.shop_id and m.id = c.membership_id
+     where c.shop_id = $1 limit 1`,
+      [s.id],
+    );
+    const [grant] = await q<{ id: string; client_id: string | null }>(
+      'select id, client_id from connection_grants where shop_id = $1 limit 1',
+      [s.id],
+    );
+    const variants = await q<{ id: string; product_id: string; sku: string }>(
+      `select id, product_id, sku from variants where shop_id = $1 and status = 'active'`,
+      [s.id],
+    );
+    const positions = await q<{
+      variant_id: string;
+      location_ids: string[];
+      position_ids: string[];
+    }>(
+      `select variant_id, array_agg(location_id) as location_ids, array_agg(id) as position_ids
+     from inventory_positions where shop_id = $1 group by variant_id`,
+      [s.id],
+    );
+    const leaves = await q<{ id: string }>(
+      `select l.id from locations l where l.shop_id = $1
+       and not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id)`,
+      [s.id],
+    );
+    const fields = await q<{ key: string; type: string; options: string[] }>(
+      `select f.key, f.type, coalesce(array(select o.label from field_options o
+       where o.shop_id = f.shop_id and o.field_id = f.id order by o.position), '{}') as options
+     from field_definitions f where f.shop_id = $1`,
+      [s.id],
+    );
+    const receipts = await q<{
+      variant_id: string;
+      location_id: string;
+      position_id: string;
+      quantity: string;
+      external_ref: string;
+    }>(
+      `select e.variant_id, e.location_id, e.position_id, e.delta::text as quantity, o.external_ref
+     from inventory_entries e join inventory_operations o on o.shop_id = e.shop_id and o.id = e.operation_id
+     where e.shop_id = $1 and o.reason = 'opening stock' order by e.variant_id, e.location_id`,
+      [s.id],
+    );
+    const [counts] = await q<{
+      products: number;
+      locations: number;
+      warehouses: string[];
+      suppliers: string[];
+      bundles: string[];
+    }>(
+      `select (select count(*) from products where shop_id = $1)::int as products,
+       (select count(*) from locations where shop_id = $1)::int as locations,
+       array(select id::text from warehouses where shop_id = $1) as warehouses,
+       array(select id::text from suppliers where shop_id = $1) as suppliers,
+       array(select variant_id::text from bundles where shop_id = $1 and active) as bundles`,
+      [s.id],
+    );
+    const owner = { userId: members[0]!.user_id, role: members[0]!.role };
+    shops.push({
+      id: s.id,
+      name: s.name,
+      key: persona?.key ?? 'other',
+      share: persona?.activityShare ?? 1 / shopRows.length,
+      shopify: persona?.shopify ?? true,
+      start: new Date(s.created_at).getTime(),
+      owner,
+      members: members.map((m) => ({ userId: m.user_id, role: m.role })),
+      credentialId: credential?.id ?? uuidv7(),
+      credentialUser: credential?.user_id ?? owner.userId,
+      grantId: grant?.id ?? uuidv7(),
+      clientId: grant?.client_id ?? 'https://chatgpt.com/oauth/client.json',
+      connectorId: uuidv7(),
+      products: [...new Set(variants.map((v) => v.product_id))],
+      variants: variants.map((v) => ({ id: v.id, productId: v.product_id, sku: v.sku })),
+      variantById: new Map(
+        variants.map((v) => [v.id, { id: v.id, productId: v.product_id, sku: v.sku }]),
+      ),
+      stocked: positions.map((p) => ({
+        variantId: p.variant_id,
+        locationIds: p.location_ids,
+        positionIds: p.position_ids,
+      })),
+      leaves: leaves.map((l) => l.id),
+      warehouses: counts!.warehouses,
+      suppliers: counts!.suppliers,
+      bundles: counts!.bundles,
+      fields,
+      importId: receipts[0]?.external_ref.replace(/^import /, '') ?? uuidv7(),
+      receipts: receipts.map((r) => ({
+        variantId: r.variant_id,
+        locationId: r.location_id,
+        positionId: r.position_id,
+        quantity: r.quantity,
+      })),
+      counts: {
+        products: counts!.products,
+        variants: variants.length,
+        locations: counts!.locations,
+        fields: fields.length,
+      },
+      quota: 0,
+    });
+  }
+  return shops;
+}
+
+// With --context, the shops are read from the file when it exists, and written to it otherwise:
+// risk R3 empties the stock tables between the persona seed and this one, so the context is
+// taken before that and the history still points at the receipts and positions it had.
+let shops: Shop[];
+if (args.context && existsSync(args.context)) {
+  const saved = JSON.parse(await readFile(args.context, 'utf8')) as Array<
+    Omit<Shop, 'variantById'>
+  >;
+  shops = saved.map((x) => ({ ...x, variantById: new Map(x.variants.map((v) => [v.id, v])) }));
+  console.log(`Read ${shops.length} shops from ${args.context}.`);
+} else {
+  shops = await loadShops();
+  if (args.context) {
+    await writeFile(args.context, JSON.stringify(shops.map(({ variantById: _, ...x }) => x)));
+    console.log(`Wrote the shops to ${args.context}.`);
+  }
+}
 const existing = await q<{ n: string }>(
   'select count(*)::text as n from audit_events where shop_id = any($1::uuid[])',
-  [shopRows.map((s) => s.id)],
+  [shops.map((x) => x.id)],
 );
 if (Number(existing[0]!.n) > 1000 && !args.force && !args['dry-run']) {
   throw new Error(
     `These shops already have ${existing[0]!.n} events. Clean up and reseed, or pass --force to add more.`,
   );
-}
-
-const shops: Shop[] = [];
-for (const s of shopRows) {
-  const persona = PERSONAS.find((p) => p.shopName === s.name);
-  const members = await q<{ user_id: string; role: string }>(
-    'select user_id, role from memberships where shop_id = $1 order by created_at, id',
-    [s.id],
-  );
-  const [credential] = await q<{ id: string; user_id: string }>(
-    `select c.id, m.user_id from api_credentials c join memberships m on m.shop_id = c.shop_id and m.id = c.membership_id
-     where c.shop_id = $1 limit 1`,
-    [s.id],
-  );
-  const [grant] = await q<{ id: string; client_id: string | null }>(
-    'select id, client_id from connection_grants where shop_id = $1 limit 1',
-    [s.id],
-  );
-  const variants = await q<{ id: string; product_id: string; sku: string }>(
-    `select id, product_id, sku from variants where shop_id = $1 and status = 'active'`,
-    [s.id],
-  );
-  const positions = await q<{ variant_id: string; location_ids: string[]; position_ids: string[] }>(
-    `select variant_id, array_agg(location_id) as location_ids, array_agg(id) as position_ids
-     from inventory_positions where shop_id = $1 group by variant_id`,
-    [s.id],
-  );
-  const leaves = await q<{ id: string }>(
-    `select l.id from locations l where l.shop_id = $1
-       and not exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id)`,
-    [s.id],
-  );
-  const fields = await q<{ key: string; type: string; options: string[] }>(
-    `select f.key, f.type, coalesce(array(select o.label from field_options o
-       where o.shop_id = f.shop_id and o.field_id = f.id order by o.position), '{}') as options
-     from field_definitions f where f.shop_id = $1`,
-    [s.id],
-  );
-  const receipts = await q<{
-    variant_id: string;
-    location_id: string;
-    position_id: string;
-    quantity: string;
-    external_ref: string;
-  }>(
-    `select e.variant_id, e.location_id, e.position_id, e.delta::text as quantity, o.external_ref
-     from inventory_entries e join inventory_operations o on o.shop_id = e.shop_id and o.id = e.operation_id
-     where e.shop_id = $1 and o.reason = 'opening stock' order by e.variant_id, e.location_id`,
-    [s.id],
-  );
-  const [counts] = await q<{
-    products: number;
-    locations: number;
-    warehouses: string[];
-    suppliers: string[];
-    bundles: string[];
-  }>(
-    `select (select count(*) from products where shop_id = $1)::int as products,
-       (select count(*) from locations where shop_id = $1)::int as locations,
-       array(select id::text from warehouses where shop_id = $1) as warehouses,
-       array(select id::text from suppliers where shop_id = $1) as suppliers,
-       array(select variant_id::text from bundles where shop_id = $1 and active) as bundles`,
-    [s.id],
-  );
-  const owner = { userId: members[0]!.user_id, role: members[0]!.role };
-  shops.push({
-    id: s.id,
-    name: s.name,
-    key: persona?.key ?? 'other',
-    share: persona?.activityShare ?? 1 / shopRows.length,
-    shopify: persona?.shopify ?? true,
-    start: new Date(s.created_at).getTime(),
-    owner,
-    members: members.map((m) => ({ userId: m.user_id, role: m.role })),
-    credentialId: credential?.id ?? uuidv7(),
-    credentialUser: credential?.user_id ?? owner.userId,
-    grantId: grant?.id ?? uuidv7(),
-    clientId: grant?.client_id ?? 'https://chatgpt.com/oauth/client.json',
-    connectorId: uuidv7(),
-    products: [...new Set(variants.map((v) => v.product_id))],
-    variants: variants.map((v) => ({ id: v.id, productId: v.product_id, sku: v.sku })),
-    variantById: new Map(
-      variants.map((v) => [v.id, { id: v.id, productId: v.product_id, sku: v.sku }]),
-    ),
-    stocked: positions.map((p) => ({
-      variantId: p.variant_id,
-      locationIds: p.location_ids,
-      positionIds: p.position_ids,
-    })),
-    leaves: leaves.map((l) => l.id),
-    warehouses: counts!.warehouses,
-    suppliers: counts!.suppliers,
-    bundles: counts!.bundles,
-    fields,
-    importId: receipts[0]?.external_ref.replace(/^import /, '') ?? uuidv7(),
-    receipts: receipts.map((r) => ({
-      variantId: r.variant_id,
-      locationId: r.location_id,
-      positionId: r.position_id,
-      quantity: r.quantity,
-    })),
-    counts: {
-      products: counts!.products,
-      variants: variants.length,
-      locations: counts!.locations,
-      fields: fields.length,
-    },
-    quota: 0,
-  });
 }
 
 // Callers --------------------------------------------------------------------------------------
@@ -753,7 +780,7 @@ const apiSync: Activity = (s, t) => {
       target_id: 'variants',
       context: { ...queryContext(s, 'first'), sort: { field: 'updated_at', direction: 'desc' } },
     });
-  if (chance(s.key === 'parts' ? 0.5 : 0.15)) {
+  if (chance(s.key === 'parts' ? 0.6 : 0.15)) {
     for (let i = 0; i < int(1, 8); i++) {
       const p = stocked(s);
       if (p) receipt(r, p.variantId, pick(p.locationIds), `ERP-GR-${int(10000, 99999)}`);
@@ -977,14 +1004,14 @@ const ACTIVITIES: Array<{
   {
     name: 'scan',
     run: scan,
-    weight: (s) => (s.key === 'parts' || s.key === 'owner' ? 18 : 12),
+    weight: (s) => (s.key === 'parts' || s.key === 'owner' ? 20 : 14),
     people: true,
   },
   { name: 'mcp', run: mcpChat, weight: () => 9, people: true },
-  { name: 'shopify', run: shopifyOrder, weight: (s) => (s.shopify ? 20 : 0), people: false },
+  { name: 'shopify', run: shopifyOrder, weight: (s) => (s.shopify ? 26 : 0), people: false },
   { name: 'api', run: apiSync, weight: (s) => (s.key === 'parts' ? 22 : 8), people: false },
   { name: 'catalog', run: catalogWork, weight: () => 6, people: true },
-  { name: 'stock', run: stockWork, weight: () => 7, people: true },
+  { name: 'stock', run: stockWork, weight: () => 11, people: true },
   { name: 'expiry', run: expirySweep, weight: () => 2, people: false },
   { name: 'review', run: activityReview, weight: () => 3, people: true },
 ];

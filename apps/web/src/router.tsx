@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/
 import { RootLayout, ShopLayout } from './components/layout.tsx';
 import { parseLabelsSearch } from './labels/search.ts';
 import { ActivityPage } from './pages/activity.tsx';
+import { AlertsPage } from './pages/alerts.tsx';
 import { FamiliesSettingsPage, FieldsSettingsPage } from './pages/catalog-settings.tsx';
 import { ImportsPage } from './pages/imports.tsx';
 import {
@@ -118,6 +119,11 @@ const suppliersRoute = createRoute({
       ? { supplier: search.supplier }
       : {},
 });
+const alertsRoute = createRoute({
+  getParentRoute: () => shopRoute,
+  path: '/alerts',
+  component: AlertsPage,
+});
 const purchasingRoute = createRoute({
   getParentRoute: () => shopRoute,
   path: '/purchasing',
@@ -226,6 +232,7 @@ export const routeTree = rootRoute.addChildren([
     warehousesRoute,
     suppliersRoute,
     purchasingRoute,
+    alertsRoute,
     labelsRoute,
     pickingRoute,
     activityRoute,

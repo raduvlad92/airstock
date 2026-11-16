@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
+import { ReorderRulesList } from '../components/reorder-rules.tsx';
 import {
   Badge,
   Card,
@@ -60,6 +61,7 @@ export function PurchasingPage() {
   const context = useShopContext(shopId);
   const canManage = can(context.data, 'purchasing.manage');
   const [creating, setCreating] = useState(false);
+  const [fromLowStock, setFromLowStock] = useState(false);
   const open = (id: string | null) =>
     void navigate({
       to: '/shops/$shopId/purchasing',
@@ -73,9 +75,18 @@ export function PurchasingPage() {
         subtitle="Purchase orders to your suppliers: draft, send as PDF, receive, and close."
         actions={
           canManage ? (
-            <button type="button" className="small" onClick={() => setCreating(!creating)}>
-              New purchase order
-            </button>
+            <>
+              <button
+                type="button"
+                className="small ghost"
+                onClick={() => setFromLowStock(!fromLowStock)}
+              >
+                Draft from low stock
+              </button>
+              <button type="button" className="small" onClick={() => setCreating(!creating)}>
+                New purchase order
+              </button>
+            </>
           ) : null
         }
       />
@@ -88,6 +99,15 @@ export function PurchasingPage() {
           }}
         />
       ) : null}
+      {fromLowStock ? (
+        <LowStockDrafts
+          shopId={shopId}
+          onDone={(id) => {
+            setFromLowStock(false);
+            if (id) open(id);
+          }}
+        />
+      ) : null}
       {search.po ? (
         <PurchaseOrderPanel
           shopId={shopId}
@@ -96,6 +116,7 @@ export function PurchasingPage() {
         />
       ) : null}
       <PurchaseOrderList shopId={shopId} selected={search.po ?? null} onOpen={open} />
+      <ReorderRulesList shopId={shopId} />
     </div>
   );
 }
@@ -1140,5 +1161,146 @@ function ReceiveLineForm({
         <ErrorNotice error={receive.error} />
       )}
     </form>
+  );
+}
+
+// Drafting from low stock (PRD 6.8) ----------------------------------------------------------
+
+type Suggestions = Out<typeof ops.suggestFromLowStock>;
+
+/**
+ * One proposed order per preferred supplier and warehouse. The person reviews the quantities,
+ * leaves out lines, and saves; each order is saved as a draft.
+ */
+function LowStockDrafts({
+  shopId,
+  onDone,
+}: {
+  shopId: string;
+  onDone: (firstId: string | null) => void;
+}) {
+  const suggestions = useQuery({
+    queryKey: ['shop', shopId, 'purchasing', 'suggestions'],
+    queryFn: () => api<Suggestions>(`/shops/${shopId}/purchase-orders/suggestions`),
+  });
+  // Edited quantities and left-out lines, keyed by rule.
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [skipped, setSkipped] = useState<Record<string, boolean>>({});
+  const refresh = usePurchasingRefresh(shopId);
+  const create = useMutation({
+    mutationFn: async () => {
+      const ids: string[] = [];
+      for (const draft of suggestions.data?.drafts ?? []) {
+        const lines = draft.lines
+          .filter((l) => !skipped[l.ruleId])
+          .map((l) => ({
+            variantId: l.variantId,
+            packId: l.packId,
+            quantity: (quantities[l.ruleId] ?? l.quantity).trim(),
+            ...(l.supplierItemId ? { supplierItemId: l.supplierItemId } : {}),
+          }));
+        if (lines.length === 0) continue;
+        const po = await command<PurchaseOrder>(`/shops/${shopId}/purchase-orders`, {
+          supplierId: draft.supplierId,
+          warehouseId: draft.warehouseId,
+          lines,
+        });
+        ids.push(po.id);
+      }
+      return ids;
+    },
+    onSuccess: async (ids) => {
+      await refresh();
+      onDone(ids[0] ?? null);
+    },
+  });
+  const drafts = suggestions.data?.drafts ?? [];
+  const count = drafts.filter((d) => d.lines.some((l) => !skipped[l.ruleId])).length;
+  return (
+    <Card title="Draft from low stock">
+      <ErrorNotice error={suggestions.error} />
+      {suggestions.isPending ? <Loading /> : null}
+      {suggestions.data && drafts.length === 0 ? (
+        <Empty>Nothing is low, or open orders already cover it.</Empty>
+      ) : null}
+      {drafts.map((d) => (
+        <div key={`${d.supplierId}:${d.warehouseId}`} className="stack">
+          <h3>
+            {d.supplierName} → {d.warehouseName}
+          </h3>
+          <div className="table-wrap">
+            <table className="table compact">
+              <thead>
+                <tr>
+                  <th>Include</th>
+                  <th>Item</th>
+                  <th className="num">Available</th>
+                  <th className="num">On order</th>
+                  <th className="num">Point</th>
+                  <th>Order</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.lines.map((l) => (
+                  <tr key={l.ruleId}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Include ${l.sku}`}
+                        checked={!skipped[l.ruleId]}
+                        onChange={(e) => setSkipped({ ...skipped, [l.ruleId]: !e.target.checked })}
+                      />
+                    </td>
+                    <td>
+                      {l.productName} <span className="muted">{l.sku}</span>
+                    </td>
+                    <td className="num">{formatDecimal(l.available)}</td>
+                    <td className="num">{formatDecimal(l.onOrder)}</td>
+                    <td className="num">{formatDecimal(l.reorderPoint)}</td>
+                    <td>
+                      <input
+                        aria-label={`Quantity for ${l.sku}`}
+                        className="num-input"
+                        value={quantities[l.ruleId] ?? l.quantity}
+                        onChange={(e) =>
+                          setQuantities({ ...quantities, [l.ruleId]: e.target.value })
+                        }
+                        inputMode="decimal"
+                      />{' '}
+                      {l.packName ? `× ${l.packName} (${formatDecimal(l.packFactor)})` : 'units'}
+                      {l.minimumOrderQuantity ? (
+                        <span className="muted">
+                          {' '}
+                          · minimum {formatDecimal(l.minimumOrderQuantity)}
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+      {suggestions.data && suggestions.data.withoutSupplier.length > 0 ? (
+        <Notice>
+          No supplier for {suggestions.data.withoutSupplier.map((l) => l.sku).join(', ')}: give
+          their rules a preferred supplier, or the items a preferred supplier item.
+        </Notice>
+      ) : null}
+      <div className="form-actions">
+        <button
+          type="button"
+          disabled={create.isPending || count === 0}
+          onClick={() => create.mutate()}
+        >
+          Save {count} {count === 1 ? 'draft' : 'drafts'}
+        </button>
+        <button type="button" className="ghost" onClick={() => onDone(null)}>
+          Cancel
+        </button>
+      </div>
+      <ErrorNotice error={create.error} />
+    </Card>
   );
 }

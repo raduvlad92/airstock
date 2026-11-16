@@ -2,6 +2,11 @@ import { z } from 'zod';
 import { AppError, errors } from '../errors.ts';
 import { defineOperation } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
+import { MAPPING_IN_DASHBOARD, ShopifyId, shopifyNumericId } from '../shopify/ids.ts';
+import { SHOPIFY_PUSH_TOPIC } from '../shopify/targets.ts';
+import { applyLocationMaps, applyVariantMaps, lockActiveConnection } from './shopify-mapping.ts';
+
+export { shopifyNumericId };
 
 // Shopify slice (plan Section 8). These operations only touch PostgreSQL; calls to Shopify
 // live in packages/shopify, which runs them through the same pipeline.
@@ -9,20 +14,20 @@ import { Id, iso } from '../schemas.ts';
 const SYNC_TOOL_LATER =
   'Temporary: Shopify sync is managed from the dashboard until the sync tool arrives in Phase 3.';
 
-/** A Shopify resource ID, as a GID (gid://shopify/Location/123) or the bare number. */
-const ShopifyId = z
-  .string()
-  .regex(/^(gid:\/\/shopify\/[A-Za-z]+\/)?[0-9]{1,20}$/, 'A Shopify ID or GID.');
-
-export function shopifyNumericId(value: string): string {
-  return value.slice(value.lastIndexOf('/') + 1);
-}
-
 const ShopDomain = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/, 'A myshopify.com domain.');
 
 const ShopifyLocation = z.object({ id: z.string(), name: z.string(), active: z.boolean() });
+
+const LocationMapSummary = z.object({
+  shopifyLocationId: z.string(),
+  shopifyLocationName: z.string().nullable(),
+  warehouseId: Id.nullable(),
+  locationId: Id.nullable(),
+  receiveLocationId: Id.nullable(),
+  scopeName: z.string().describe('The warehouse name, or the location path.'),
+});
 
 const ConnectionSummary = z.object({
   connectionId: Id,
@@ -35,7 +40,12 @@ const ConnectionSummary = z.object({
   webhooks: z.array(
     z.object({ topic: z.string(), status: z.string(), message: z.string().optional() }),
   ),
-  locationMap: z.object({ shopifyLocationId: z.string(), locationId: Id }).nullable(),
+  locationMaps: z.array(LocationMapSummary),
+  /** The first location map, kept for clients written against one location per store. */
+  locationMap: z.object({ shopifyLocationId: z.string(), locationId: Id.nullable() }).nullable(),
+  unmappedLocations: z
+    .array(ShopifyLocation)
+    .describe('Active Shopify locations without a map: never synced, never guessed.'),
   variantsMapped: z.number().int(),
   conflicts: z.number().int(),
   lastWebhookAt: z.string().nullable(),
@@ -45,7 +55,7 @@ export const listShopifyConnections = defineOperation({
   id: 'shopify.connections.list',
   summary: 'List connected Shopify stores',
   description:
-    'Shows each connected Shopify store with its location and variant mappings, webhook status, and unexplained quantity differences.',
+    'Shows each connected Shopify store with its location and variant mappings, the Shopify locations not mapped, webhook status, and unexplained quantity differences.',
   kind: 'read',
   scope: 'shop',
   input: z.object({}),
@@ -66,16 +76,27 @@ export const listShopifyConnections = defineOperation({
       uninstalled_at: Date | null;
       shopify_locations: Array<{ id: string; name: string; active: boolean }>;
       webhooks: Array<{ topic: string; status: string; message?: string }>;
-      location_map: { shopifyLocationId: string; locationId: string } | null;
+      location_maps: Array<{
+        shopifyLocationId: string;
+        warehouseId: string | null;
+        locationId: string | null;
+        receiveLocationId: string | null;
+        scopeName: string;
+      }>;
       variants_mapped: number;
       conflicts: number;
       last_webhook_at: Date | null;
     }>(
       `select c.id, c.shop_domain, c.status, c.scopes, c.created_at, c.uninstalled_at,
          c.shopify_locations, c.webhooks,
-         (select json_build_object('shopifyLocationId', m.shopify_location_id, 'locationId', m.location_id)
-            from shopify_location_maps m where m.shop_id = c.shop_id and m.connection_id = c.id
-            limit 1) as location_map,
+         coalesce((select json_agg(json_build_object('shopifyLocationId', m.shopify_location_id,
+             'warehouseId', m.warehouse_id, 'locationId', m.location_id,
+             'receiveLocationId', m.receive_location_id,
+             'scopeName', coalesce(w.name, l.path)) order by m.position)
+            from shopify_location_maps m
+            left join warehouses w on w.shop_id = m.shop_id and w.id = m.warehouse_id
+            left join locations l on l.shop_id = m.shop_id and l.id = m.location_id
+            where m.shop_id = c.shop_id and m.connection_id = c.id), '[]'::json) as location_maps,
          (select count(*)::int from shopify_variant_maps v
             where v.shop_id = c.shop_id and v.connection_id = c.id) as variants_mapped,
          (select count(*)::int from shopify_inventory_levels l
@@ -88,20 +109,32 @@ export const listShopifyConnections = defineOperation({
     );
     return {
       result: {
-        connections: rows.map((r) => ({
-          connectionId: r.id,
-          shopDomain: r.shop_domain,
-          status: r.status,
-          scopes: r.scopes,
-          createdAt: iso(r.created_at) as string,
-          uninstalledAt: iso(r.uninstalled_at),
-          shopifyLocations: r.shopify_locations,
-          webhooks: r.webhooks,
-          locationMap: r.location_map,
-          variantsMapped: r.variants_mapped,
-          conflicts: r.conflicts,
-          lastWebhookAt: iso(r.last_webhook_at),
-        })),
+        connections: rows.map((r) => {
+          const names = new Map(r.shopify_locations.map((l) => [l.id, l.name]));
+          const mapped = new Set(r.location_maps.map((m) => m.shopifyLocationId));
+          const first = r.location_maps[0];
+          return {
+            connectionId: r.id,
+            shopDomain: r.shop_domain,
+            status: r.status,
+            scopes: r.scopes,
+            createdAt: iso(r.created_at) as string,
+            uninstalledAt: iso(r.uninstalled_at),
+            shopifyLocations: r.shopify_locations,
+            webhooks: r.webhooks,
+            locationMaps: r.location_maps.map((m) => ({
+              ...m,
+              shopifyLocationName: names.get(m.shopifyLocationId) ?? null,
+            })),
+            locationMap: first
+              ? { shopifyLocationId: first.shopifyLocationId, locationId: first.locationId }
+              : null,
+            unmappedLocations: r.shopify_locations.filter((l) => l.active && !mapped.has(l.id)),
+            variantsMapped: r.variants_mapped,
+            conflicts: r.conflicts,
+            lastWebhookAt: iso(r.last_webhook_at),
+          };
+        }),
       },
       audit: { targetType: 'shopify_connection', targetId: 'list' },
     };
@@ -110,9 +143,9 @@ export const listShopifyConnections = defineOperation({
 
 export const setShopifyMappings = defineOperation({
   id: 'shopify.mappings.set',
-  summary: 'Map a Shopify store to a location and variants',
+  summary: 'Map a Shopify store to one location and its variants',
   description:
-    'Replaces the mappings of one connected Shopify store: one Shopify location to one location, and the listed Shopify variants to variants. Airstock then sets Shopify’s available quantity at that location to Airstock’s availability, and keeps it in step.',
+    'Replaces every mapping of one connected Shopify store: one Shopify location to one location, and the listed Shopify variants to variants. For several locations, packs, or bundles, use the location and variant maps. Airstock then sets Shopify’s available quantity at that location to Airstock’s availability, and keeps it in step.',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -140,20 +173,13 @@ export const setShopifyMappings = defineOperation({
   audit: { action: 'shopify.mappings.set' },
   idempotency: 'required',
   http: { method: 'POST', path: '/shops/{shopId}/shopify/connections/{connectionId}/mappings' },
-  mcp: { exception: SYNC_TOOL_LATER },
+  mcp: { exception: MAPPING_IN_DASHBOARD },
   locations: (input) => [input.locationId],
   async handler(ctx, input) {
-    const [connection] = await ctx.tx.query<{ status: string }>(
-      'select status from shopify_connections where id = $1 for update',
-      [input.connectionId],
-    );
-    if (!connection) throw errors.notFound('Shopify connection');
-    if (connection.status !== 'active') {
-      throw errors.conflict('shopify_not_connected', 'This Shopify store is not connected.');
-    }
+    await lockActiveConnection(ctx.tx, input.connectionId);
     const [location] = await ctx.tx.query<{ status: string; has_children: boolean }>(
       `select l.status, exists (select 1 from locations c where c.shop_id = l.shop_id and c.parent_id = l.id) as has_children
-       from locations l where l.id = $1 and l.kind = 'storage' for share`,
+       from locations l where l.id = $1 and l.kind = 'storage'`,
       [input.locationId],
     );
     if (!location) throw errors.notFound('Location');
@@ -163,50 +189,27 @@ export const setShopifyMappings = defineOperation({
         'Map an active location without sub-locations.',
       );
     }
+    const shopifyLocationId = shopifyNumericId(input.shopifyLocationId);
+    await applyLocationMaps(ctx, input.connectionId, [
+      { shopifyLocationId, locationId: input.locationId },
+    ]);
     const variants = input.variants.map((v) => ({
       variantId: v.variantId,
       shopifyVariantId: shopifyNumericId(v.shopifyVariantId),
       shopifyInventoryItemId: shopifyNumericId(v.shopifyInventoryItemId),
     }));
-    const unique = (values: string[]) => new Set(values).size === values.length;
-    if (
-      !unique(variants.map((v) => v.variantId)) ||
-      !unique(variants.map((v) => v.shopifyVariantId))
-    ) {
-      throw errors.validation([
-        { path: 'variants', message: 'Each variant and Shopify variant may appear once.' },
-      ]);
-    }
-    const [known] = await ctx.tx.query<{ count: number }>(
-      'select count(*)::int as count from variants where id = any($1::uuid[])',
-      [variants.map((v) => v.variantId)],
+    await applyVariantMaps(
+      ctx,
+      input.connectionId,
+      variants.map((v) => ({ ...v, source: 'sku' as const })),
+      true,
     );
-    if ((known?.count ?? 0) !== variants.length) throw errors.notFound('Variant');
-
-    const shopifyLocationId = shopifyNumericId(input.shopifyLocationId);
-    // Two statements: every part of one statement sees the same snapshot, so an insert there
-    // would still collide with the rows its own delete removes.
+    // Every level is read from Shopify again before the next push (ADR 0008).
     await ctx.tx.query(
-      `with del_loc as (
-         delete from shopify_location_maps where connection_id = $1),
-       del_var as (
-         delete from shopify_variant_maps where connection_id = $1)
-       -- Every level is read from Shopify again before the next push.
-       update shopify_inventory_levels set expected_available = null, expected_as_of = null,
+      `update shopify_inventory_levels set expected_available = null, expected_as_of = null,
          conflict_at = null, conflict_shopify_available = null, updated_at = now()
        where connection_id = $1`,
       [input.connectionId],
-    );
-    await ctx.tx.query(
-      `with loc as (
-         insert into shopify_location_maps (shop_id, connection_id, shopify_location_id, location_id)
-         values (app_shop_id(), $1, $2, $3))
-       insert into shopify_variant_maps (shop_id, connection_id, shopify_variant_id,
-         shopify_inventory_item_id, variant_id)
-       select app_shop_id(), $1, x."shopifyVariantId", x."shopifyInventoryItemId", x."variantId"
-       from jsonb_to_recordset($4::jsonb) as x("variantId" uuid, "shopifyVariantId" text,
-         "shopifyInventoryItemId" text)`,
-      [input.connectionId, shopifyLocationId, input.locationId, JSON.stringify(variants)],
     );
     return {
       result: {
@@ -222,10 +225,7 @@ export const setShopifyMappings = defineOperation({
         changes: { shopifyLocationId, locationId: input.locationId, variants },
       },
       // The first push sets Shopify to Airstock's availability at the mapped location.
-      outbox: variants.map((v) => ({
-        topic: 'inventory.availability_changed',
-        payload: { variantId: v.variantId, locationIds: [input.locationId] },
-      })),
+      outbox: [{ topic: SHOPIFY_PUSH_TOPIC, payload: { connectionId: input.connectionId } }],
     };
   },
 });

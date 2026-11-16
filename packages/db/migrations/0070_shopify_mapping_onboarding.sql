@@ -125,9 +125,15 @@ create table shopify_onboarding_rows (
   match text not null check (match in ('sku', 'barcode', 'new', 'skipped')),
   -- The existing variant a match found; set for new ones once the import created them.
   variant_id uuid,
+  -- A barcode match on one of the variant's packs: the Shopify variant sells that pack.
+  pack_id uuid,
   -- The SKU written to the import (the existing variant's SKU for a barcode match).
   import_sku text,
   import_row integer,
+  -- Pictures to reference once the import created the record: the product's on its first new
+  -- variant, a variant's own picture on that variant.
+  pictures jsonb not null default '[]'::jsonb,
+  tracked boolean not null default true,
   note text,
   mapped boolean not null default false,
   primary key (shop_id, onboarding_id, shopify_variant_id),

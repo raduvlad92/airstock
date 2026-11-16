@@ -1,3 +1,4 @@
+import type { CatalogImage, CatalogProduct, CatalogVariant } from '@airstock/core';
 import { SHOPIFY_API_VERSION } from './oauth.ts';
 
 // The Admin GraphQL calls Phase 0 needs. Everything Shopify-specific stays behind this
@@ -55,6 +56,18 @@ export interface ShopifyAdmin {
   /** Orders created at or after `since`, newest first, with their line items. */
   ordersSince(since: string): Promise<ShopifyOrder[]>;
   ensureWebhooks(uri: string, topics: string[]): Promise<WebhookStatus[]>;
+  /** Starts the onboarding read of the whole catalog as a bulk operation; returns its ID. */
+  startCatalogRead(): Promise<string>;
+  /** A bulk operation's state; `url` is set when it completed with results. */
+  bulkOperation(id: string): Promise<BulkOperationState>;
+  /** Downloads and parses a completed catalog read. */
+  fetchCatalog(url: string): Promise<CatalogProduct[]>;
+}
+
+export interface BulkOperationState {
+  status: 'running' | 'completed' | 'failed';
+  url: string | null;
+  error: string | null;
 }
 
 export class ShopifyApiError extends Error {
@@ -99,6 +112,15 @@ const QUERIES = {
     }
   }`,
   webhooks: `query { webhookSubscriptions(first: 50) { nodes { id topic uri } } }`,
+  bulkRun: `mutation($query: String!) {
+    bulkOperationRunQuery(query: $query, groupObjects: false) {
+      bulkOperation { id status }
+      userErrors { field message code }
+    }
+  }`,
+  bulkStatus: `query($id: ID!) {
+    node(id: $id) { ... on BulkOperation { id status errorCode url partialDataUrl } }
+  }`,
   createWebhook: `mutation($topic: WebhookSubscriptionTopic!, $subscription: WebhookSubscriptionInput!) {
     webhookSubscriptionCreate(topic: $topic, webhookSubscription: $subscription) {
       webhookSubscription { id topic uri }
@@ -108,12 +130,126 @@ const QUERIES = {
 };
 
 /**
+ * The onboarding read (plan Section 5.14): products with options, pictures, and variants with
+ * their SKU, barcode, price, options, and available quantity per location. Four connections,
+ * two levels deep, within Shopify's bulk limits. No customer data.
+ */
+export const CATALOG_BULK_QUERY = `{
+  products {
+    edges { node {
+      id title status description
+      options { name }
+      media { edges { node { ... on MediaImage { id alt image { url width height } } } } }
+      variants { edges { node {
+        id sku barcode title price
+        selectedOptions { name value }
+        image { url altText width height }
+        inventoryItem { id tracked
+          inventoryLevels { edges { node { id location { id } quantities(names: ["available"]) { name quantity } } } }
+        }
+      } } }
+    } }
+  }
+}`;
+
+/** Parses a catalog read's JSONL: parents first, children name them with `__parentId`. */
+export function parseCatalogJsonl(text: string): CatalogProduct[] {
+  const products = new Map<string, CatalogProduct>();
+  const variants = new Map<string, CatalogVariant>();
+  const byItem = new Map<string, CatalogVariant>();
+  const pendingLevels: Array<{ parent: string; locationId: string; available: number }> = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const row = JSON.parse(line) as Record<string, unknown> & { id?: string; __parentId?: string };
+    const id = typeof row.id === 'string' ? row.id : '';
+    if (id.startsWith('gid://shopify/Product/')) {
+      products.set(id, {
+        productId: numeric(id),
+        title: String(row.title ?? ''),
+        description: typeof row.description === 'string' && row.description ? row.description : null,
+        status: String(row.status ?? 'ACTIVE'),
+        options: ((row.options as Array<{ name: string }> | undefined) ?? []).map((o) => o.name),
+        images: [],
+        variants: [],
+      });
+    } else if (id.startsWith('gid://shopify/ProductVariant/')) {
+      const item = row.inventoryItem as { id: string; tracked: boolean } | null;
+      const image = row.image as {
+        url: string;
+        altText: string | null;
+        width: number | null;
+        height: number | null;
+      } | null;
+      const variant: CatalogVariant = {
+        variantId: numeric(id),
+        inventoryItemId: item ? numeric(item.id) : null,
+        sku: typeof row.sku === 'string' ? row.sku : null,
+        barcode: typeof row.barcode === 'string' ? row.barcode : null,
+        title: String(row.title ?? ''),
+        price: typeof row.price === 'string' ? row.price : null,
+        options: (row.selectedOptions as Array<{ name: string; value: string }> | undefined) ?? [],
+        tracked: item?.tracked ?? false,
+        levels: [],
+        image: image?.url
+          ? { url: image.url, alt: image.altText, width: image.width, height: image.height }
+          : null,
+      };
+      variants.set(id, variant);
+      if (item) byItem.set(item.id, variant);
+      products.get(row.__parentId ?? '')?.variants.push(variant);
+    } else if (id.startsWith('gid://shopify/MediaImage/')) {
+      const image = row.image as { url: string; width: number | null; height: number | null } | null;
+      if (image?.url) {
+        const picture: CatalogImage = {
+          url: image.url,
+          alt: typeof row.alt === 'string' ? row.alt : null,
+          width: image.width,
+          height: image.height,
+        };
+        products.get(row.__parentId ?? '')?.images.push(picture);
+      }
+    } else if (id.startsWith('gid://shopify/InventoryLevel/')) {
+      const location = row.location as { id: string } | null;
+      const quantities = (row.quantities as Array<{ name: string; quantity: number }>) ?? [];
+      if (location) {
+        pendingLevels.push({
+          parent: row.__parentId ?? '',
+          locationId: numeric(location.id),
+          available: quantities.find((q) => q.name === 'available')?.quantity ?? 0,
+        });
+      }
+    }
+  }
+  // An inventory level's parent is its variant (or, in some API versions, its inventory item).
+  for (const level of pendingLevels) {
+    const variant = variants.get(level.parent) ?? byItem.get(level.parent);
+    variant?.levels.push({ locationId: level.locationId, available: level.available });
+  }
+  return [...products.values()];
+}
+
+/**
  * Minimal webhook payloads: only what turning an order into reservations needs. No customer
  * fields are requested (PRD 8.5).
  */
 export const WEBHOOK_FIELDS: Record<string, string[] | undefined> = {
   ORDERS_CREATE: ['id', 'created_at', 'line_items'],
 };
+
+interface CostExtension {
+  requestedQueryCost?: number;
+  throttleStatus?: { maximumAvailable: number; currentlyAvailable: number; restoreRate: number };
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** How long until the bucket holds the query's cost again, at most 10 seconds. */
+export function throttleWaitMs(cost: CostExtension | undefined): number {
+  const status = cost?.throttleStatus;
+  if (!status || !status.restoreRate) return 2000;
+  const missing = (cost?.requestedQueryCost ?? 100) - status.currentlyAvailable;
+  return Math.min(10_000, Math.max(250, Math.ceil((missing / status.restoreRate) * 1000)));
+}
 
 export function httpShopifyAdmin(
   shopDomain: string,
@@ -123,36 +259,49 @@ export function httpShopifyAdmin(
   const endpoint = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
   async function call<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-    const res = await doFetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'x-shopify-access-token': accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-    if (!res.ok) {
-      throw new ShopifyApiError(
-        `Shopify Admin API returned ${res.status}.`,
-        res.status,
-        res.status === 429 || res.status >= 500,
-      );
+    // Shopify's GraphQL limits are cost-based: a throttled call waits for the bucket to refill
+    // (its restore rate), up to three times, then fails as retryable for the job to try later.
+    for (let attempt = 0; ; attempt++) {
+      const res = await doFetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'x-shopify-access-token': accessToken,
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+      if (res.status === 429 && attempt < 3) {
+        await sleep(Math.min(10, Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
+        continue;
+      }
+      if (!res.ok) {
+        throw new ShopifyApiError(
+          `Shopify Admin API returned ${res.status}.`,
+          res.status,
+          res.status === 429 || res.status >= 500,
+        );
+      }
+      const body = (await res.json()) as {
+        data?: T;
+        errors?: Array<{ message: string; extensions?: { code?: string } }>;
+        extensions?: { cost?: CostExtension };
+      };
+      if (body.errors?.length) {
+        const code = body.errors[0]?.extensions?.code;
+        if (code === 'THROTTLED' && attempt < 3) {
+          await sleep(throttleWaitMs(body.extensions?.cost));
+          continue;
+        }
+        throw new ShopifyApiError(
+          body.errors.map((e) => e.message).join('; '),
+          200,
+          code === 'THROTTLED' || code === 'INTERNAL_SERVER_ERROR',
+          code,
+        );
+      }
+      return body.data as T;
     }
-    const body = (await res.json()) as {
-      data?: T;
-      errors?: Array<{ message: string; extensions?: { code?: string } }>;
-    };
-    if (body.errors?.length) {
-      const code = body.errors[0]?.extensions?.code;
-      throw new ShopifyApiError(
-        body.errors.map((e) => e.message).join('; '),
-        200,
-        code === 'THROTTLED' || code === 'INTERNAL_SERVER_ERROR',
-        code,
-      );
-    }
-    return body.data as T;
   }
 
   return {
@@ -268,6 +417,48 @@ export function httpShopifyAdmin(
           quantity: l.quantity,
         })),
       }));
+    },
+
+    async startCatalogRead() {
+      const data = await call<{
+        bulkOperationRunQuery: {
+          bulkOperation: { id: string } | null;
+          userErrors: Array<{ message: string; code: string | null }>;
+        };
+      }>(QUERIES.bulkRun, { query: CATALOG_BULK_QUERY });
+      const op = data.bulkOperationRunQuery;
+      if (!op.bulkOperation) {
+        const busy = op.userErrors.some((e) => e.code === 'OPERATION_IN_PROGRESS');
+        throw new ShopifyApiError(
+          op.userErrors.map((e) => e.message).join('; ') || 'Bulk operation refused.',
+          200,
+          busy,
+          op.userErrors[0]?.code ?? undefined,
+        );
+      }
+      return op.bulkOperation.id;
+    },
+
+    async bulkOperation(id) {
+      const data = await call<{
+        node: { status: string; errorCode: string | null; url: string | null } | null;
+      }>(QUERIES.bulkStatus, { id });
+      const node = data.node;
+      if (!node) return { status: 'failed', url: null, error: 'Bulk operation not found.' };
+      if (node.status === 'COMPLETED') return { status: 'completed', url: node.url, error: null };
+      if (['FAILED', 'CANCELED', 'CANCELING', 'EXPIRED'].includes(node.status)) {
+        return { status: 'failed', url: null, error: node.errorCode ?? node.status };
+      }
+      return { status: 'running', url: null, error: null };
+    },
+
+    async fetchCatalog(url) {
+      if (!url.startsWith('https://')) throw new ShopifyApiError('Unexpected result URL.', 0, false);
+      const res = await doFetch(url);
+      if (!res.ok) {
+        throw new ShopifyApiError(`Bulk result download returned ${res.status}.`, res.status, true);
+      }
+      return parseCatalogJsonl(await res.text());
     },
 
     async ensureWebhooks(uri, topics) {

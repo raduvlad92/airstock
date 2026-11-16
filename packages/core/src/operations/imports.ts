@@ -612,7 +612,12 @@ interface PendingRow {
 }
 
 /** Rebuilds the caller who committed, with their membership as it is now. */
-async function jobCaller(db: Database, shopId: string, stored: StoredCaller): Promise<Caller> {
+export async function jobCaller(
+  db: Database,
+  shopId: string,
+  stored: StoredCaller,
+  source: Caller['source'] = 'import',
+): Promise<Caller> {
   const [m] = await db.transaction({ shopId, userId: null, readOnly: true }, (tx) =>
     tx.query<{ id: string; role: string; all_locations: boolean; scope_ids: string[] }>(
       `select m.id, m.role, m.all_locations,
@@ -638,7 +643,7 @@ async function jobCaller(db: Database, shopId: string, stored: StoredCaller): Pr
     ...(stored.clientId ? { clientId: stored.clientId } : {}),
     ...(stored.grantId ? { grantId: stored.grantId } : {}),
     // Everything the job writes is attributed to the import.
-    source: 'import',
+    source,
   };
 }
 

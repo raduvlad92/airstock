@@ -83,8 +83,11 @@ export {
   exportFileKey,
   importFileKey,
   type JobDeps,
+  jobCaller,
   runExportJob,
   runImportJob,
+  type StoredCaller,
+  storeCaller,
   sweepExportFiles,
 } from './operations/imports.ts';
 export * as ops from './operations/index.ts';
@@ -98,6 +101,26 @@ export {
   viewInvitation,
 } from './operations/members.ts';
 export { shopifyNumericId } from './operations/shopify.ts';
+export { ONBOARDING_RUN_TOPIC } from './operations/shopify-onboarding.ts';
+export {
+  type CatalogImage,
+  type CatalogProduct,
+  type CatalogVariant,
+  type MatchedRow,
+  matchCatalog,
+  onboardingCsv,
+} from './shopify/catalog.ts';
+export {
+  type AffectedLevel,
+  affectedLevels,
+  type LevelTarget,
+  levelTargets,
+  SHOPIFY_PUSH_TOPIC,
+  type SalesMap,
+  type ShopifyPushPayload,
+  salesMaps,
+  shopifyChannel,
+} from './shopify/targets.ts';
 export {
   CONNECTION_SCOPES,
   type ConnectionScope,

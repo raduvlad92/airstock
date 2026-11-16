@@ -3,7 +3,7 @@
     "get": {
       "operationId": "inventory.lots.trace",
       "summary": "Trace a lot from receipt to every order",
-      "description": "Use this for recalls and \"which orders got lot X\": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode.",
+      "description": "Use this for recalls and \"which orders got lot X\": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode. Movements and totals cover only the locations you can access (partial).",
       "x-permission": "inventory.read",
       "x-connection-scope": "inventory:read",
       "x-audit-action": "inventory.lot.traced",
@@ -141,6 +141,10 @@
                     ],
                     "additionalProperties": false
                   },
+                  "partial": {
+                    "type": "boolean",
+                    "description": "True when your location access limits the movements and totals."
+                  },
                   "orders": {
                     "type": "array",
                     "items": {
@@ -262,6 +266,7 @@
                 "required": [
                   "lot",
                   "totals",
+                  "partial",
                   "orders",
                   "movements"
                 ],

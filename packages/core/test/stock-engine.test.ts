@@ -309,6 +309,45 @@ describe('lots and expiry (A37, D4)', () => {
       h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' }),
     ).rejects.toMatchObject({ code: 'variant_has_stock' });
   });
+
+  it('traces a lot and a serial within a scoped member’s locations only (PRD 2.4)', async () => {
+    const wh = await h.run(ops.createWarehouse, { name: `Trace ${uuidv7().slice(-4)}` });
+    const own = await createLeafLocation(h, wh.warehouseId, 'Shelf');
+    const scoped = await addMember(shop.shopId, 'viewer', [wh.warehouseId]);
+    const as = { caller: scoped.caller };
+    const lotted = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId: lotted, trackingMode: 'lot' });
+    for (const [locationId, quantity] of [
+      [shop.locationId, '5'],
+      [own, '2'],
+    ] as const) {
+      await h.run(ops.receiveStock, { variantId: lotted, locationId, quantity, lotCode: 'TR-1' });
+    }
+    const trace = await h.run(ops.traceLot, { variantId: lotted, lotCode: 'TR-1' }, as);
+    expect({
+      partial: trace.partial,
+      locations: trace.movements.map((m: { locationId: string }) => m.locationId),
+      onHand: trace.totals.onHand,
+    }).toEqual({ partial: true, locations: [own], onHand: '2.000000' });
+    const full = await h.run(ops.traceLot, { variantId: lotted, lotCode: 'TR-1' });
+    expect({ partial: full.partial, onHand: full.totals.onHand }).toEqual({
+      partial: false,
+      onHand: '7.000000',
+    });
+    const serialized = await createVariant(h);
+    await h.run(ops.setStockSettings, { variantId: serialized, trackingMode: 'serial' });
+    await h.run(ops.receiveStock, {
+      variantId: serialized,
+      locationId: own,
+      quantity: '1',
+      serials: ['TR-S1'],
+    });
+    const history = await h.run(ops.serialHistory, { variantId: serialized, serial: 'TR-S1' }, as);
+    expect({ at: history.current?.locationId, moves: history.movements.length }).toEqual({
+      at: own,
+      moves: 1,
+    });
+  });
 });
 
 describe('serials (A38, receive and fulfill)', () => {

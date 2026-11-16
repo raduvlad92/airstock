@@ -234,7 +234,7 @@ describe('F-RECON-SKIPS-DOCUMENTS: the scheduled check ignores transfer and retu
 // history entries about those locations; out-of-scope stock figures and history are hidden.
 // ---------------------------------------------------------------------------------------------
 describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore location scope', () => {
-  it.fails('hides out-of-scope lot movements from a member limited to another warehouse', async () => {
+  it('hides out-of-scope lot movements from a member limited to another warehouse', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'lot' });
     const received = await h.run(ops.receiveStock, {
@@ -259,7 +259,7 @@ describe('F-SCOPE-LOT-SERIAL-HISTORY: lot trace and serial history ignore locati
     });
   });
 
-  it.fails('hides an out-of-scope serial’s position and movements', async () => {
+  it('hides an out-of-scope serial’s position and movements', async () => {
     const variantId = await createVariant(h);
     await h.run(ops.setStockSettings, { variantId, trackingMode: 'serial' });
     const serial = `SN-${uuidv7().slice(-6)}`;

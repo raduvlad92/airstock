@@ -134,6 +134,7 @@ const Movement = z.object({
   source: z.string(),
 });
 
+/** Movements matching `filter` ($1), at locations in the caller's scope ($2, null: all). */
 const MOVEMENTS_SQL = (filter: string) => `
   select o.id as "operationId", o.kind, ${iso('o.occurred_at')} as "occurredAt",
     e.delta::text as quantity, e.location_id as "locationId", l.path as "locationPath",
@@ -146,7 +147,7 @@ const MOVEMENTS_SQL = (filter: string) => `
   join locations l on l.shop_id = e.shop_id and l.id = e.location_id
   left join reservations r on r.shop_id = e.shop_id and r.id = e.reservation_id
   left join reservations rp on rp.shop_id = r.shop_id and rp.id = r.parent_id
-  where ${filter}
+  where ${filter} and ($2::uuid[] is null or l.path_ids && $2::uuid[])
   order by o.occurred_at, e.id
   limit 5000`;
 
@@ -154,7 +155,7 @@ export const traceLot = defineOperation({
   id: 'inventory.lots.trace',
   summary: 'Trace a lot from receipt to every order',
   description:
-    'Use this for recalls and "which orders got lot X": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode.',
+    'Use this for recalls and "which orders got lot X": where the lot came from (supplier, receipts) and every movement since, including each fulfillment with its order reference. Give lotId, or variantId with lotCode. Movements and totals cover only the locations you can access (partial).',
   kind: 'read',
   scope: 'shop',
   input: z.object({
@@ -175,6 +176,9 @@ export const traceLot = defineOperation({
       purchaseOrderRef: z.string().nullable(),
     }),
     totals: z.object({ received: z.string(), fulfilled: z.string(), onHand: z.string() }),
+    partial: z
+      .boolean()
+      .describe('True when your location access limits the movements and totals.'),
     orders: z
       .array(
         z.object({ externalRef: z.string().nullable(), reservationId: Id, quantity: z.string() }),
@@ -220,16 +224,19 @@ export const traceLot = defineOperation({
       ],
     );
     if (!lot) throw errors.notFound('Lot');
+    // Location scope (PRD 2.4): movements and figures at other locations are hidden.
     const movements = await ctx.tx.query<z.infer<typeof Movement>>(MOVEMENTS_SQL('e.lot_id = $1'), [
       lot.lotId,
+      ctx.locationScope,
     ]);
     const [totals] = await ctx.tx.query<{ received: string; fulfilled: string; onHand: string }>(
       `select coalesce(sum(e.delta) filter (where o.kind = 'receipt'), 0)::text as received,
          coalesce(-sum(e.delta) filter (where o.kind = 'fulfillment'), 0)::text as fulfilled,
          coalesce(sum(e.delta), 0)::text as "onHand"
        from inventory_entries e join inventory_operations o on o.shop_id = e.shop_id and o.id = e.operation_id
-       where e.lot_id = $1`,
-      [lot.lotId],
+       join locations l on l.shop_id = e.shop_id and l.id = e.location_id
+       where e.lot_id = $1 and ($2::uuid[] is null or l.path_ids && $2::uuid[])`,
+      [lot.lotId, ctx.locationScope],
     );
     const orders = new Map<
       string,
@@ -249,6 +256,7 @@ export const traceLot = defineOperation({
       result: {
         lot,
         totals: totals ?? { received: '0', fulfilled: '0', onHand: '0' },
+        partial: ctx.locationScope !== null,
         orders: [...orders.values()].map((o) => ({
           externalRef: o.externalRef,
           reservationId: o.reservationId,
@@ -270,7 +278,7 @@ export const serialHistory = defineOperation({
   id: 'inventory.serials.history',
   summary: 'Show a serial’s history',
   description:
-    'Use this for one serialized unit (a serial or certificate number): its status, where it is now, and every step since it was received, including the order it was fulfilled for.',
+    'Use this for one serialized unit (a serial or certificate number): its status, where it is now, and every step since it was received, including the order it was fulfilled for. Positions and movements at locations you cannot access are left out (partial).',
   kind: 'read',
   scope: 'shop',
   input: z.object({
@@ -285,7 +293,9 @@ export const serialHistory = defineOperation({
     status: z.string(),
     current: z
       .object({ positionId: Id, locationId: Id, locationPath: z.string(), condition: z.string() })
-      .nullable(),
+      .nullable()
+      .describe('Null when the unit is not in stock, or is at a location you cannot access.'),
+    partial: z.boolean().describe('True when your location access limits what is shown.'),
     movements: z.array(Movement),
   }),
   permission: 'inventory.read',
@@ -304,18 +314,21 @@ export const serialHistory = defineOperation({
       location_id: string | null;
       path: string | null;
       condition: string | null;
+      in_scope: boolean;
     }>(
-      `select s.id, s.serial, v.sku, s.status, s.position_id, p.location_id, l.path, p.condition
+      `select s.id, s.serial, v.sku, s.status, s.position_id, p.location_id, l.path, p.condition,
+         ($3::uuid[] is null or coalesce(l.path_ids && $3::uuid[], false)) as in_scope
        from serial_units s join variants v on v.shop_id = s.shop_id and v.id = s.variant_id
        left join inventory_positions p on p.shop_id = s.shop_id and p.id = s.position_id
        left join locations l on l.shop_id = p.shop_id and l.id = p.location_id
        where s.variant_id = $1 and s.serial_normalized = $2`,
-      [input.variantId, normalizeCode(input.serial)],
+      [input.variantId, normalizeCode(input.serial), ctx.locationScope],
     );
     if (!unit) throw errors.notFound('Serial');
+    // Location scope (PRD 2.4): the position and movements at other locations are hidden.
     const movements = await ctx.tx.query<z.infer<typeof Movement>>(
       MOVEMENTS_SQL('e.serial_id = $1'),
-      [unit.id],
+      [unit.id, ctx.locationScope],
     );
     return {
       result: {
@@ -325,7 +338,7 @@ export const serialHistory = defineOperation({
         sku: unit.sku,
         status: unit.status,
         current:
-          unit.position_id && unit.location_id
+          unit.position_id && unit.location_id && unit.in_scope
             ? {
                 positionId: unit.position_id,
                 locationId: unit.location_id,
@@ -333,6 +346,7 @@ export const serialHistory = defineOperation({
                 condition: unit.condition ?? '',
               }
             : null,
+        partial: ctx.locationScope !== null,
         movements,
       },
       audit: {

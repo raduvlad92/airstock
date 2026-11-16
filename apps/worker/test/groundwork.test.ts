@@ -105,12 +105,13 @@ describe('rate limits (D11, plan 5.15)', () => {
   let shop: SeededShop;
   beforeAll(async () => {
     t = await testApp({
-      rateLimiter: memoryLimiter({
-        api_credential: 3,
-        connection: 2,
-        session: 5,
-        client_events: 1,
-      }),
+      // A frozen clock: with the real one, calls that straddle a 10-second window boundary
+      // under CI load reset the count, and a limit test sees one request too many pass.
+      rateLimiter: memoryLimiter(
+        { api_credential: 3, connection: 2, session: 5, client_events: 1 },
+        undefined,
+        () => 0,
+      ),
     });
     shop = await seedShop(t.db, t.sink, 'Limits shop');
   });

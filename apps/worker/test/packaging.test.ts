@@ -215,7 +215,8 @@ describe('bundles and suppliers through REST', () => {
     const detail = await json(
       await call(created.token, shop.shopId, `/suppliers/${supplier.supplier.id}`),
     );
-    expect(JSON.stringify(detail)).not.toContain('2.1');
+    // The cost as a JSON string; a bare 2.1 can occur inside a timestamp such as 02:45:52.115Z.
+    expect(JSON.stringify(detail)).not.toContain('"2.1');
     const write = await call(created.token, shop.shopId, '/supplier-items', {
       itemId: (await json(saved)).item.id,
       expectedVersion: 1,
@@ -417,7 +418,7 @@ describe('N5 through MCP', () => {
       supplierId: supplier.body.supplier.id,
     });
     expect(got.body.costVisible).toBe(false);
-    expect(JSON.stringify(got.body)).not.toContain('9.99');
+    expect(JSON.stringify(got.body)).not.toContain('"9.99');
     const write = await asEditor.call('edit_catalog', {
       action: 'set_packs',
       variantId,

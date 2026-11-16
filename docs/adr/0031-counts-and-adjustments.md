@@ -37,6 +37,13 @@ A session command locks its session row first (only count commands lock it). The
 - **Repairs are not reversed.** A stock check repair (reason `reconciliation`) is refused by `reverse` (`not_reversible`).
 - **Returns.** Counts, adjustments, and condition changes do not take a return's uninspected units out of quarantine (ADR 0029 update).
 
+## Update, 16 November 2026: a quantity typed in the grid (G5)
+
+- **The read.** A quick count item may carry `read`: the position version and on hand the person saw (version null when there was no position). After the positions are locked, a count whose position moved since, meaning the version **and** on hand both differ from the read, is refused with `moved_since_read`, listing what was read and what is there now; nothing changes. A version changed only by reservations passes, for the reason the counted basis above uses ledger length: claims do not invalidate a count. A read applies to one position (a lot-tracked item names its lot; serials send none).
+- **The review** offers what a session's review does: keep my count (the number on the shelf now), or count plus the movements since. Either retries with what is there now as the read. A count below reserved still asks per claim.
+- **The grid.** The catalog query takes `stockAt`, a shelf in the caller's scope; each variant row then carries the sellable units on hand there, the version of the position a count sets, and whether one number counts it (not lot- or serial-tracked, not a bundle). The products grid shows it as an "On hand · shelf" column; a number typed there, with the grid's usual keyboard, is a one-line quick count with that read. Lots, serials, and bundles are counted in the stock panel; ranges and pastes skip the column, so a count is never a bulk edit.
+- **The stock panel** sends the same read from the positions it shows (availability positions carry their version), and shows the same review and claim choices.
+
 ## Revisit when
 
 Counts need cycle-count scheduling, recount thresholds, or counting offline (PRD Phase 4).

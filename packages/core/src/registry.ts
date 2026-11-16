@@ -78,6 +78,11 @@ export interface HandlerResult<O> {
    */
   alertCheck?: { variantIds: string[] };
   /**
+   * The alert probe (`probeStockAlerts`) for these variants, when the handler ran it before its
+   * locks; the pipeline then skips its own, which would run while the locks are held.
+   */
+  alertProbe?: { variantIds: string[]; rules: boolean; shortageAlerts: boolean };
+  /**
    * Extra events. Commands write them in the transaction with the success event; reads send
    * them with the access event, in the same queue message.
    */

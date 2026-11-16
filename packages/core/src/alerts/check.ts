@@ -430,6 +430,27 @@ export async function checkShortages(
  * order changed (`alertCheck`), and new shortages. Adds the alert events, outbox rows, and
  * webhook events to the command's own, so they commit or roll back with it.
  */
+/** The probe's columns, `rules` and `shortage_alerts`, for the variants in $1. */
+export const STOCK_ALERT_PROBE = `exists (select 1 from reorder_rules where status = 'active'
+         and variant_id = any($1::uuid[])) as rules,
+       exists (select 1 from alerts where kind = 'shortage' and status <> 'resolved'
+         and variant_id = any($1::uuid[])) as shortage_alerts`;
+
+/**
+ * Whether any of the variants has an active reorder rule or an open shortage alert: when neither,
+ * a stock change has no alert to check.
+ */
+export async function probeStockAlerts(
+  tx: Tx,
+  variantIds: string[],
+): Promise<{ variantIds: string[]; rules: boolean; shortageAlerts: boolean }> {
+  const [row] = await tx.query<{ rules: boolean; shortage_alerts: boolean }>(
+    `select ${STOCK_ALERT_PROBE}`,
+    [variantIds],
+  );
+  return { variantIds, rules: row?.rules ?? false, shortageAlerts: row?.shortage_alerts ?? false };
+}
+
 export async function applyStockAlerts(
   ctx: HandlerContext,
   handled: HandlerResult<unknown>,
@@ -458,17 +479,16 @@ export async function applyStockAlerts(
     for (const r of rows) variants.add(r.variant_id);
   }
   if (variants.size === 0 && shortages.size === 0) return;
-  // Shops without rules or open shortage alerts pay one probe each.
-  const [any] = await ctx.tx.query<{ rules: boolean; shortage_alerts: boolean }>(
-    `select exists (select 1 from reorder_rules where status = 'active'
-         and variant_id = any($1::uuid[])) as rules,
-       exists (select 1 from alerts where kind = 'shortage' and status <> 'resolved'
-         and variant_id = any($1::uuid[])) as shortage_alerts`,
-    [[...variants]],
-  );
+  // Shops without rules or open shortage alerts pay one probe each. A handler may have run it
+  // before taking its locks (a reservation, I7), for the same variants.
+  const hint = handled.alertProbe;
+  const any =
+    hint && [...variants].every((v) => hint.variantIds.includes(v))
+      ? hint
+      : await probeStockAlerts(ctx.tx, [...variants]);
   let effects = none();
-  if (any?.rules) effects = merge(effects, await checkReorderRules(ctx, [...variants]));
-  if (shortages.size > 0 || any?.shortage_alerts) {
+  if (any.rules) effects = merge(effects, await checkReorderRules(ctx, [...variants]));
+  if (shortages.size > 0 || any.shortageAlerts) {
     effects = merge(effects, await checkShortages(ctx, [...shortages], [...variants]));
   }
   if (effects.events.length === 0) return;

@@ -695,3 +695,31 @@ Database time per run, from `pg_stat_statements`:
   The counts and totals are identical.
 - **Same results:** each form of the new function was compared with migration 0017's over every variant of all six shops: the whole shop, the array, and one variant at a time. They gave identical rows. For the check, inside a transaction rolled back afterwards, 165 open reservations were expired and one warehouse was made ineligible.
 - **Single-variant reads got faster too:** the 200-lot reservation went from 16.8 to 8.2 ms of database time, and availability for that variant from 12.2 to 5.5 ms.
+
+### 2. Ten reservations of one variant at once (plan risk R5)
+
+New reservations take a per-variant advisory lock. One statement then chooses positions, locks only the chosen ones, checks them, and writes. The locks are held for that statement, the final write, and the COMMIT: 3 statements instead of 8 (ADR 0006, update for I7). Fuel Kitchen's variant with 200 lots of 24 units, `query-stock.ts --phases r5`:
+
+| Case | Before (main) | Fix 1 only | After (fixes 1 and 2) |
+| --- | --- | --- | --- |
+| Statements per reservation | 13 | 13 | 11 |
+| One caller, database time | 16.8 ms | 8.2 ms | 4.1–5.1 ms |
+| 10 callers, 1 unit: database time per reservation (with lock waits) | 964 ms | 1,051 ms | 381 ms |
+| 10 callers, 1 unit: client p50 / p95 | 1,200 / 1,233 ms | 1,324 / 1,376 ms | 572 / 603 ms |
+| 10 callers, 1 unit: server p95 (client less statements × 16 ms) | 1,045 ms | 1,158 ms | 427 ms |
+| 10 callers, 12 units: database time per reservation | 981 ms | 1,041 ms | 370 ms |
+| 10 callers, 12 units: client p50 / p95 | 1,213 / 1,318 ms | 1,314 / 1,334 ms | 566 / 577 ms |
+
+- **The "after" column is the third of three runs.** The first two had the same p50 and database time, but client p95 outliers of 1.2–2.2 s from the laptop's network: in one of them a single caller's p95 was 715 ms against 4 ms of database time.
+- **Each run's client time** includes about 16 ms per statement to Frankfurt; in the Worker a statement costs about 6 ms.
+- **Locally** (`scripts/bench/reserve-contention.ts`) the same race ran against PostgreSQL 17 on the laptop:
+  - setup: a fresh database, 200 lots of 24 units, 100 reservations by 10 callers, and 6 ms added before every statement for the Worker's round trip;
+  - before (fix 1 only): p95 862 ms for 1 unit and 650 ms for 12 units, 14–16 reservations a second;
+  - after: p95 328 and 337 ms, 31–32 a second;
+  - one caller: 13 and 11 statements, about 140 ms either way;
+  - stock reconciliation was clean after each run.
+- **Through the Worker,** the hold per reservation is about 3 statements × 6 ms plus their execution, 25–30 ms, against about 65 ms before. With ten waiting, the last should wait about 0.25 s instead of 0.6 s. Staging was not run again with 10 callers: the compute is 0.25 CU, and its Hyperdrive limit was only just lowered.
+- **When the advisory path falls back:**
+  - expired claims on the variant send a reservation to the previous path, which releases them;
+  - so does a claim statement that finds too little, a changed position, or a need for more than 32 positions;
+  - in the tests' thirty-caller race, the callers that found the units gone took the previous path and failed with `insufficient_stock`, as before.

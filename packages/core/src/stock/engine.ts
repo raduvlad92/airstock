@@ -8,6 +8,7 @@ import type { HandlerContext } from '../registry.ts';
 // The stock engine shared by every inventory command (ADR 0020, ADR 0006).
 //
 // Lock order, always:
+//   0. new reservations only: an advisory lock per variant, in key order (lockReservationVariants)
 //   1. inventory_positions, ascending id      (lockPositions, lockCandidates)
 //   2. reservations, ascending id             (lockReservations, expireClaimsAt)
 //   3. everything else: variant_costs (applyStockCost), serial_units, lots, products
@@ -363,6 +364,32 @@ export interface Pick {
 }
 
 /**
+ * The allocation rule's choice over candidate rows `cand0` (stock_positions rows with
+ * `available > 0`) and the needs in the CTE `need` ("variantId", quantity), both defined by the
+ * caller: the rule's warehouses and locations in order (`rule`, a uuid[] parameter), then earliest
+ * lot expiry, then oldest stock, then location path and position id (D3). Picks are greedy and
+ * exact. Defines the CTEs `cand` and `picks` (variant_id, position_id, location_id, lot_id,
+ * serial_id, rn, take).
+ */
+export function chooseFromCandidates(rule: string): string {
+  return `
+     cand as (
+       select sp.*, row_number() over (partition by sp.variant_id order by
+           (select min(r.i) from unnest(${rule}::uuid[]) with ordinality as r(id, i)
+             where r.id = any(sp.path_ids)) nulls last,
+           sp.expires_on nulls last, sp.received_at nulls last, sp.location_path, sp.position_id) as rn
+       from cand0 sp),
+     cum as (
+       select c.*, n.quantity as wanted,
+         sum(c.available) over (partition by c.variant_id order by c.rn) as running
+       from cand c join need n on n."variantId" = c.variant_id),
+     picks as (
+       select variant_id, position_id, location_id, lot_id, serial_id, rn,
+         least(available, wanted - (running - available)) as take
+       from cum where running - available < wanted)`;
+}
+
+/**
  * Chooses positions for each need among locked candidates, in the allocation rule's order: the
  * rule's warehouses and locations in order, then earliest lot expiry, then oldest stock, then
  * location path and position id (D3). Picks are greedy and exact; `available` is per variant.
@@ -375,33 +402,14 @@ export async function choosePositions(
 ): Promise<{ picks: Pick[]; available: Map<string, string> }> {
   if (needs.length === 0) return { picks: [], available: new Map() };
   const [row] = await tx.query<{
-    picks: Array<{
-      variantId: string;
-      positionId: string;
-      locationId: string;
-      lotId: string | null;
-      serialId: string | null;
-      quantity: string;
-    }>;
+    picks: Pick[];
     available: Array<{ variantId: string; available: string }>;
   }>(
     `with need as (
        select * from jsonb_to_recordset($1::jsonb) as x("variantId" uuid, quantity numeric)),
-     cand as (
-       select sp.*, row_number() over (partition by sp.variant_id order by
-           (select min(r.i) from unnest($3::uuid[]) with ordinality as r(id, i)
-             where r.id = any(sp.path_ids)) nulls last,
-           sp.expires_on nulls last, sp.received_at nulls last, sp.location_path, sp.position_id) as rn
-       from stock_positions(array(select "variantId" from need)) sp
-       where sp.position_id = any($2::uuid[]) and sp.available > 0),
-     cum as (
-       select c.*, n.quantity as wanted,
-         sum(c.available) over (partition by c.variant_id order by c.rn) as running
-       from cand c join need n on n."variantId" = c.variant_id),
-     picks as (
-       select variant_id, position_id, location_id, lot_id, serial_id, rn,
-         least(available, wanted - (running - available)) as take
-       from cum where running - available < wanted)
+     cand0 as (
+       select sp.* from stock_positions(array(select "variantId" from need)) sp
+       where sp.position_id = any($2::uuid[]) and sp.available > 0),${chooseFromCandidates('$3')}
      select
        coalesce((select json_agg(json_build_object('variantId', variant_id, 'positionId', position_id,
          'locationId', location_id, 'lotId', lot_id, 'serialId', serial_id, 'quantity', take::text)
@@ -415,6 +423,21 @@ export async function choosePositions(
     picks: row?.picks ?? [],
     available: new Map((row?.available ?? []).map((a) => [a.variantId, a.available])),
   };
+}
+
+/**
+ * New reservations of a variant take a transaction-level advisory lock per variant, in key order,
+ * before any row lock (I7, ADR 0006 update). They then choose, lock, and write in one short step,
+ * one after another, instead of each locking every candidate position until it commits. Only
+ * reservation creation takes it; other commands lock positions as before.
+ */
+export async function lockReservationVariants(tx: Tx, variantIds: string[]): Promise<void> {
+  await tx.query(
+    `select pg_advisory_xact_lock(k) from (
+       select distinct hashtextextended('airstock.reserve:' || v::text, 0) as k
+       from unnest($1::uuid[]) v order by k) s`,
+    [[...new Set(variantIds)]],
+  );
 }
 
 export function sumQuantities(values: string[]): string {

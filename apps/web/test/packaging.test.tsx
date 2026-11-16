@@ -84,7 +84,7 @@ type Handler = (body: unknown) => { status?: number; body: unknown } | unknown;
 
 /** Routes by "METHOD path"; records every call with its body. */
 function mockApi(routes: Record<string, Handler | unknown>) {
-  const calls: Array<{ method: string; path: string; body: unknown }> = [];
+  const calls: Array<{ method: string; path: string; search: string; body: unknown }> = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: URL | string, init: RequestInit = {}) => {
@@ -92,7 +92,7 @@ function mockApi(routes: Record<string, Handler | unknown>) {
       const method = init.method ?? 'GET';
       const path = url.pathname.replace('/api/v1', '');
       const body = init.body ? JSON.parse(String(init.body)) : undefined;
-      calls.push({ method, path, body });
+      calls.push({ method, path, search: url.search, body });
       const route = routes[`${method} ${path}`];
       if (route === undefined)
         return new Response(JSON.stringify({ code: 'not_found', title: 'Not found' }), {
@@ -387,6 +387,78 @@ describe('bundle editor', () => {
     expect(await screen.findByText('7')).toBeTruthy();
     expect(screen.getByText(/limited by SAUCER-01/)).toBeTruthy();
     expect(screen.getByText('Counts only the locations you can access.')).toBeTruthy();
+  });
+
+  it('counts bundles in a chosen warehouse or location', async () => {
+    const WAREHOUSE = '0196f3a0-0000-7000-8000-000000000010';
+    const SHELF = '0196f3a0-0000-7000-8000-000000000011';
+    const location = (id: string, name: string, path: string, status = 'active') => ({
+      locationId: id,
+      warehouseId: WAREHOUSE,
+      warehouseName: 'Main',
+      ownership: 'owned',
+      parentId: null,
+      name,
+      code: null,
+      path,
+      holdsStockAllowed: true,
+      fulfillmentEligible: true,
+      effectiveFulfillmentEligible: true,
+      status,
+      version: 1,
+    });
+    const calls = mockApi({
+      [`GET /shops/${SHOP}`]: context(['catalog.read', 'inventory.read', 'storage.read']),
+      [PACKAGING]: bundle,
+      [`GET /shops/${SHOP}/locations`]: {
+        locations: [
+          location(SHELF, 'Shelf A', 'Main/Shelf A'),
+          location('0196f3a0-0000-7000-8000-000000000012', 'Old', 'Main/Old', 'archived'),
+        ],
+      },
+      [`GET /shops/${SHOP}/variants/${VARIANT}/bundle-availability`]: {
+        variantId: VARIANT,
+        sku: 'MUG-01',
+        bundleVersion: 2,
+        partial: false,
+        available: '3',
+        limitedBy: COMPONENT,
+        components: [],
+      },
+    });
+    show(<BundleEditor {...editor} />);
+    const where = await screen.findByLabelText('Count stock in');
+    await within(where).findByRole('option', { name: 'Shelf A' });
+    expect(within(where).queryByRole('option', { name: 'Old' })).toBeNull();
+    const availabilityCalls = () =>
+      calls.filter((c) => c.path.endsWith('/bundle-availability')).map((c) => c.search);
+    await waitFor(() => expect(availabilityCalls()).toEqual(['']));
+
+    fireEvent.change(where, { target: { value: `location:${SHELF}` } });
+    await waitFor(() => expect(availabilityCalls()).toContain(`?locationId=${SHELF}`));
+    fireEvent.change(where, { target: { value: `warehouse:${WAREHOUSE}` } });
+    await waitFor(() => expect(availabilityCalls()).toContain(`?warehouseId=${WAREHOUSE}`));
+    expect(screen.getByRole('option', { name: 'All of Main' })).toBeTruthy();
+  });
+
+  it('counts the whole shop without access to the location list', async () => {
+    const calls = mockApi({
+      [`GET /shops/${SHOP}`]: context(['catalog.read', 'inventory.read']),
+      [PACKAGING]: bundle,
+      [`GET /shops/${SHOP}/variants/${VARIANT}/bundle-availability`]: {
+        variantId: VARIANT,
+        sku: 'MUG-01',
+        bundleVersion: 2,
+        partial: false,
+        available: '3',
+        limitedBy: null,
+        components: [],
+      },
+    });
+    show(<BundleEditor {...editor} />);
+    expect(await screen.findByText('3')).toBeTruthy();
+    expect(screen.queryByLabelText('Count stock in')).toBeNull();
+    expect(calls.some((c) => c.path.endsWith('/locations'))).toBe(false);
   });
 
   it('hides availability without inventory access and saves with the bundle version', async () => {

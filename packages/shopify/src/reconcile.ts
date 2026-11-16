@@ -1,4 +1,5 @@
-import { levelTargets } from '@airstock/core';
+import { levelTargets, uuidv7 } from '@airstock/core';
+import { ShopifyApiError } from './admin.ts';
 import { listingsDue, publishListing } from './listings.ts';
 import {
   clearConflict,
@@ -13,6 +14,7 @@ import {
   catchUpOrders,
   connectedStore,
   NotConnectedError,
+  ORDER_JOB,
   processOrder,
   type SyncDeps,
 } from './sync.ts';
@@ -46,6 +48,8 @@ export interface ShopifyReconcileResult {
   /** Orders read, and those where something was applied (a missed or late webhook). */
   orders: number;
   ordersApplied: number;
+  /** Orders that could not be applied: each is retried as an order job. */
+  ordersFailed: number;
   levelsCompared: number;
   pushed: number;
   conflicts: number;
@@ -64,6 +68,7 @@ const empty = (): ShopifyReconcileResult => ({
   connections: 0,
   orders: 0,
   ordersApplied: 0,
+  ordersFailed: 0,
   levelsCompared: 0,
   pushed: 0,
   conflicts: 0,
@@ -144,50 +149,107 @@ export async function reconcileConnection(
   result.connections = 1;
   const store = await connectedStore(deps, shopId, connectionId);
   const [conn] = await deps.db.transaction({ shopId, userId: null, readOnly: true }, (tx) =>
-    tx.query<{ orders_synced_through: Date | null; reconciled_at: Date | null }>(
-      'select orders_synced_through, reconciled_at from shopify_connections where id = $1',
+    tx.query<{
+      orders_synced_through: Date | null;
+      reconciled_at: Date | null;
+      orders_page_since: Date | null;
+      orders_page_after: string | null;
+    }>(
+      `select orders_synced_through, reconciled_at, orders_page_since, orders_page_after
+       from shopify_connections where id = $1`,
       [connectionId],
     ),
   );
   const startedAt = new Date(now());
 
-  // 1. Orders Shopify changed since the cursor, oldest change first.
+  // 1. Orders Shopify changed since the cursor, oldest change first. A run that stopped early
+  // left Shopify's page cursor: the same search continues from there, so a busy hour with more
+  // updated orders than one run reads is read once, not from its start again every run.
   const cursor = conn?.orders_synced_through
     ? new Date(conn.orders_synced_through).getTime()
     : store.createdAt.getTime();
-  const since = new Date(
+  const fresh = new Date(
     Math.max(store.createdAt.getTime() - ORDER_OVERLAP_MS, cursor - ORDER_OVERLAP_MS),
   );
-  let through = cursor;
+  let since = fresh;
   let after: string | null = null;
-  do {
-    const page = await store.admin.ordersUpdatedSince(since.toISOString(), after);
+  if (conn?.orders_page_after && conn.orders_page_since) {
+    since = new Date(conn.orders_page_since);
+    after = conn.orders_page_after;
+  }
+  let through = cursor;
+  const failures: Array<{ orderId: string; error: string }> = [];
+  for (;;) {
+    let page: Awaited<ReturnType<typeof store.admin.ordersUpdatedSince>>;
+    try {
+      page = await store.admin.ordersUpdatedSince(since.toISOString(), after);
+    } catch (error) {
+      // A stored cursor Shopify no longer takes: search again from the time cursor.
+      if (!(error instanceof ShopifyApiError) || error.retryable || since === fresh) throw error;
+      deps.logger?.error('shopify_order_cursor_refused', { connectionId, error: String(error) });
+      since = fresh;
+      after = null;
+      continue;
+    }
     for (const order of page.orders) {
       if (Date.parse(order.createdAt) >= store.createdAt.getTime()) {
-        const applied = await processOrder(deps, shopId, connectionId, order);
         result.orders += 1;
-        const changes =
-          applied.reserved +
-          applied.shortage +
-          (applied.released ?? 0) +
-          (applied.fulfilled ?? 0) +
-          (applied.fulfillmentsReversed ?? 0) +
-          (applied.returns?.length ?? 0);
-        if (changes > 0) result.ordersApplied += 1;
+        try {
+          const applied = await processOrder(deps, shopId, connectionId, order);
+          const changes =
+            applied.reserved +
+            applied.shortage +
+            (applied.released ?? 0) +
+            (applied.fulfilled ?? 0) +
+            (applied.fulfillmentsReversed ?? 0) +
+            (applied.returns?.length ?? 0);
+          if (changes > 0) result.ordersApplied += 1;
+        } catch (error) {
+          // One order that cannot be applied must not stop the store's reconciliation: it is
+          // retried as an order job (with backoff) and shown as the connection's last error.
+          if (error instanceof NotConnectedError) throw error;
+          result.ordersFailed += 1;
+          failures.push({ orderId: order.orderId, error: String(error) });
+          deps.logger?.error('shopify_order_reconcile_failed', {
+            connectionId,
+            orderId: order.orderId,
+            error: String(error),
+          });
+          await retryOrder(deps, shopId, connectionId, order.orderId, String(error));
+        }
       }
       through = Math.max(through, Date.parse(order.updatedAt ?? order.createdAt));
     }
     after = page.next;
-  } while (after && now() < deadline && result.orders < maxOrders);
+    if (!after || now() >= deadline || result.orders >= maxOrders) break;
+  }
   // Without more pages, everything Shopify changed before this run started is applied.
   if (!after) through = Math.max(through, startedAt.getTime() - ORDER_OVERLAP_MS);
   await deps.db.transaction({ shopId, userId: null }, (tx) =>
     tx.query(
-      `update shopify_connections set orders_synced_through = greatest(coalesce(orders_synced_through, $2), $2)
+      `update shopify_connections set
+         orders_synced_through = greatest(coalesce(orders_synced_through, $2), $2),
+         orders_page_since = $3, orders_page_after = $4
        where id = $1`,
-      [connectionId, new Date(through).toISOString()],
+      [connectionId, new Date(through).toISOString(), after ? since.toISOString() : null, after],
     ),
   );
+
+  // Daily: the store's locations again, so a location added in Shopify since the install is
+  // known (shown as unmapped, and its orders' lines are read, never guessed).
+  if (opts.daily) {
+    try {
+      const locations = await store.admin.locations();
+      await deps.db.transaction({ shopId, userId: null }, (tx) =>
+        tx.query(
+          'update shopify_connections set shopify_locations = $2::jsonb, updated_at = now() where id = $1',
+          [connectionId, JSON.stringify(locations)],
+        ),
+      );
+    } catch (error) {
+      deps.logger?.error('shopify_locations_failed', { connectionId, error: String(error) });
+    }
+  }
 
   // 2. Levels that may differ (all of them daily).
   const { candidates, pending } = await deps.db.transaction(
@@ -283,17 +345,49 @@ export async function reconcileConnection(
       );
     }
   });
+  // A run with orders it could not apply records the first as the connection's last error (sync
+  // health shows it); a clean run clears it.
+  const failure = failures[0]
+    ? `Shopify order ${failures[0].orderId} could not be applied${failures.length > 1 ? ` (and ${failures.length - 1} more)` : ''}; it is retried as a job: ${failures[0].error}`.slice(
+        0,
+        1000,
+      )
+    : null;
   await deps.db.transaction({ shopId, userId: null }, (tx) =>
     tx.query(
       `update shopify_connections set reconciled_at = now(),
          levels_compared_at = case when $2 then now() else levels_compared_at end,
-         last_error = case when $3 then last_error end,
-         last_error_at = case when $3 then last_error_at end
+         last_error = coalesce($3::text, case when $4 then last_error end),
+         last_error_at = case when $3::text is not null then now() when $4 then last_error_at end
        where id = $1`,
-      [connectionId, opts.daily, pushFailed],
+      [connectionId, opts.daily, failure, pushFailed],
     ),
   );
   return result;
+}
+
+/**
+ * Queues an order the reconciler could not apply as an order job (read from the Admin API and
+ * applied again, with the job runner's backoff; the cron sweep sends it), unless one is already
+ * waiting for the same order.
+ */
+async function retryOrder(
+  deps: SyncDeps,
+  shopId: string,
+  connectionId: string,
+  orderId: string,
+  error: string,
+): Promise<void> {
+  await deps.db.transaction({ shopId, userId: null }, (tx) =>
+    tx.query(
+      `insert into jobs (shop_id, id, kind, payload, last_error, run_after)
+       select app_shop_id(), $1, $2, jsonb_build_object('connectionId', $3::text, 'orderId', $4::text),
+         $5, now() + interval '1 minute'
+       where not exists (select 1 from jobs where kind = $2 and status in ('pending', 'running')
+         and payload->>'connectionId' = $3 and payload->>'orderId' = $4)`,
+      [uuidv7(), ORDER_JOB, connectionId, orderId, error.slice(0, 1000)],
+    ),
+  );
 }
 
 interface LevelRecord {

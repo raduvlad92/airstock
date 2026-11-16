@@ -175,6 +175,7 @@ export {
   type LevelTarget,
   levelTargets,
   type SalesMap,
+  SHOPIFY_ORDER_JOB,
   SHOPIFY_PUSH_TOPIC,
   type ShopifyPushPayload,
   salesMaps,

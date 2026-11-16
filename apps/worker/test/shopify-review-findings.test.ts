@@ -155,7 +155,7 @@ describe('Shopify connector review findings', () => {
   // webhooks were missed, as with a POS sale) has no reservation to fulfill: fulfillItems counts
   // every unit as "released", step 3's target is then 0, and no stock ever leaves. Airstock keeps
   // the shipped units as available and pushes them back to Shopify.
-  it.fails('F1: an order first seen with its fulfillment takes the shipped units out of stock', async () => {
+  it('F1: an order first seen with its fulfillment takes the shipped units out of stock', async () => {
     const s = await setup('Late create mug', 5);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }]);
     const f = s.store.fulfill(order);
@@ -180,7 +180,7 @@ describe('Shopify connector review findings', () => {
   // stops at the same order. No later missed order, level comparison, or pending push is ever
   // reconciled for the store. A Shopify reservation released by hand in Airstock poisons an order
   // the same way (its cancel or fulfillment gets reservation_not_open).
-  it.fails('F2: an order line for an archived variant does not lose the order or stop the reconciler', async () => {
+  it('F2: an order line for an archived variant does not lose the order or stop the reconciler', async () => {
     const s = await setupItems('Archived line', [5, 5]);
     const [gone, kept] = s.items as [Many['items'][0], Many['items'][0]];
     // The first item is archived in Airstock (the state archive_variant leaves); still mapped.
@@ -239,7 +239,7 @@ describe('Shopify connector review findings', () => {
   // target == record and writes nothing, so Shopify keeps showing the reserved units as sellable
   // at the mapped location (oversell), and the next comparison calls it a conflict. PRD 8.5:
   // unmapped Shopify locations are "never guessed".
-  it.fails('F4: an order committed at an unmapped Shopify location leaves the mapped level right', async () => {
+  it('F4: an order committed at an unmapped Shopify location leaves the mapped level right', async () => {
     const s = await setup('Unmapped loc', 5);
     s.store.levels.set(s.store.key(s.item.inventoryItemId, '1002'), 10);
     // Shopify commits the order at "Warehouse" (1002), which this shop has not mapped.
@@ -257,7 +257,7 @@ describe('Shopify connector review findings', () => {
   // delivered first, the reconciler, or the create job's own retries running late), step 3 takes
   // the original quantity as what is still to ship and reserves again the units an edit removed
   // or a refund took back. Nothing corrects it until the order changes again in Shopify.
-  it.fails('F5: a late orders/create does not undo an edit already applied', async () => {
+  it('F5: a late orders/create does not undo an edit already applied', async () => {
     const s = await setup('Late payload', 10);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 3 }]);
     const createBody = s.store.webhookBody(order);
@@ -342,7 +342,7 @@ describe('Shopify connector review findings', () => {
   // fulfilled here. The first push then reads Shopify's lower quantity as the record and writes
   // the opening stock over it: Shopify shows the sold units as available again, and Airstock
   // keeps them on hand after they ship.
-  it.fails('F8: an order placed while the onboarding preview waits is not sold twice', async () => {
+  it('F8: an order placed while the onboarding preview waits is not sold twice', async () => {
     const m = await h.merchant('Onboarding race');
     const store = h.newStore('review');
     const code = `RACE-${uuidv7().slice(-6)}`;
@@ -397,7 +397,7 @@ describe('Shopify connector review findings', () => {
   // quarantine at that mapped location. The unit went back to the other location (a returns
   // center, a 3PL), so Airstock now counts a quarantined unit that is not there. ADR 0035: units
   // at an unmapped location wait for a person to receive them.
-  it.fails('F9: a refund restocked at an unmapped Shopify location is not received here', async () => {
+  it('F9: a refund restocked at an unmapped Shopify location is not received here', async () => {
     const s = await setup('Return elsewhere', 5);
     const order = s.store.placeOrder([{ variant: s.item, quantity: 2 }]);
     await event(s, 'orders/create', s.store.webhookBody(order));
@@ -461,7 +461,7 @@ describe('Shopify connector review findings', () => {
   // orders again and never reaches the rest. New orders are rescued by the level comparison's
   // catch-up; fulfillments, which do not change Shopify's available, are not. Here maxOrders 2
   // and pages of 1 stand in for the budget.
-  it.fails('F11: the reconciler gets past more orders than one run reads', async () => {
+  it('F11: the reconciler gets past more orders than one run reads', async () => {
     const s = await setupItems('Busy hour', [10]);
     const [only] = s.items as [Many['items'][0]];
     const orders = [];

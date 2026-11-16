@@ -74,6 +74,7 @@ export {
   type ShopifyReconcileOptions,
   type ShopifyReconcileResult,
 } from './reconcile.ts';
+export { releaseRedactedStore } from './redact.ts';
 export {
   type ConnectedStore,
   catchUpOrders,

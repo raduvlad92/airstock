@@ -16,6 +16,8 @@ export const shopifyChannel = (connectionId: string) => `shopify:${connectionId}
 
 /** Outbox topic: push these levels of one connection (all of them when the lists are absent). */
 export const SHOPIFY_PUSH_TOPIC = 'shopify.levels.push';
+/** The job that reads a Shopify order and applies it (@airstock/shopify's ORDER_JOB). */
+export const SHOPIFY_ORDER_JOB = 'shopify.order_created';
 
 export interface ShopifyPushPayload {
   connectionId: string;
@@ -165,6 +167,8 @@ export interface SalesMap {
   /** Base units reserved per Shopify item: the pack's base quantity, or 1. Bundles: 1 bundle. */
   perItem: string;
   bundle: boolean;
+  /** Orders created from this time are followed even if seen before the map (onboarding). */
+  ordersFrom: string | null;
 }
 
 export async function salesMaps(
@@ -179,9 +183,10 @@ export async function salesMaps(
     pack_id: string | null;
     per_item: string;
     bundle: boolean;
+    orders_from: Date | null;
   }>(
     `select m.shopify_variant_id, m.shopify_inventory_item_id, m.variant_id, m.pack_id,
-       coalesce(pk.base_quantity, 1)::text as per_item,
+       coalesce(pk.base_quantity, 1)::text as per_item, m.orders_from,
        exists (select 1 from bundles b where b.shop_id = m.shop_id and b.variant_id = m.variant_id
          and b.active) as bundle
      from shopify_variant_maps m
@@ -199,6 +204,7 @@ export async function salesMaps(
         packId: r.pack_id,
         perItem: r.per_item,
         bundle: r.bundle,
+        ordersFrom: r.orders_from ? new Date(r.orders_from).toISOString() : null,
       },
     ]),
   );

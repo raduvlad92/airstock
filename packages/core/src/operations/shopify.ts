@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { AppError, errors } from '../errors.ts';
-import { defineOperation } from '../registry.ts';
+import { defineOperation, type HandlerContext } from '../registry.ts';
 import { Id, iso } from '../schemas.ts';
 import { MAPPING_IN_DASHBOARD, ShopifyId, shopifyNumericId } from '../shopify/ids.ts';
-import { SHOPIFY_PUSH_TOPIC } from '../shopify/targets.ts';
+import { SHOPIFY_PUSH_TOPIC, shopifyChannel } from '../shopify/targets.ts';
 import { applyLocationMaps, applyVariantMaps, lockActiveConnection } from './shopify-mapping.ts';
 
 export { shopifyNumericId };
@@ -296,6 +296,13 @@ export const connectShopifyStore = defineOperation({
       }
       throw error;
     }
+    // Installed again after an uninstall: take over the previous connection's orders, holds,
+    // maps, and records, so orders still open in Shopify are followed to the end (their
+    // fulfillments and cancellations land on the holds made for them) instead of counting as
+    // placed before the connection.
+    const adopted = existing
+      ? null
+      : await adoptPreviousConnection(ctx, connectionId, input.shopDomain);
     return {
       result: { connectionId, shopDomain: input.shopDomain, reconnected: Boolean(existing) },
       audit: {
@@ -305,6 +312,7 @@ export const connectShopifyStore = defineOperation({
           shopDomain: input.shopDomain,
           scopes: input.scopes,
           reconnected: Boolean(existing),
+          ...(adopted ? { continues: adopted } : {}),
         },
       },
     };
@@ -355,6 +363,66 @@ export const updateShopifyConnectionDetails = defineOperation({
     };
   },
 });
+
+/** Tables whose rows belong to a connection and move to the one that continues it. */
+const CONTINUED_TABLES = [
+  'shopify_orders',
+  'shopify_order_lines', // its line reservations follow (on update cascade)
+  'shopify_fulfillments',
+  'shopify_refund_lines',
+  'shopify_return_dispositions',
+  'shopify_location_maps',
+  'shopify_variant_maps',
+  'shopify_inventory_levels',
+  'shopify_listings', // its differences follow (on update cascade)
+  'shopify_catalog_variants',
+] as const;
+
+/**
+ * Moves the shop's most recent uninstalled connection to the same store onto a new one: its
+ * order rows and holds (whose channel and allocation rule are renamed), its maps, and its
+ * records of Shopify's quantities. Orders placed while the app was uninstalled lower those
+ * records when the reconciler applies them (it continues from the old cursor), so a push is
+ * explained, never written over an order. Returns the previous connection's ID.
+ */
+async function adoptPreviousConnection(
+  ctx: HandlerContext,
+  connectionId: string,
+  shopDomain: string,
+): Promise<string | null> {
+  const [previous] = await ctx.tx.query<{
+    id: string;
+    orders_from: Date;
+    orders_synced_through: Date | null;
+  }>(
+    `select id, coalesce(orders_from, created_at) as orders_from, orders_synced_through
+     from shopify_connections
+     where shop_domain = $1 and status = 'uninstalled' and id <> $2
+     order by created_at desc limit 1 for update`,
+    [shopDomain, connectionId],
+  );
+  if (!previous) return null;
+  await ctx.tx.query(
+    `update shopify_connections set orders_from = $2, orders_synced_through = $3 where id = $1`,
+    [connectionId, previous.orders_from, previous.orders_synced_through],
+  );
+  for (const table of CONTINUED_TABLES) {
+    await ctx.tx.query(`update ${table} set connection_id = $2 where connection_id = $1`, [
+      previous.id,
+      connectionId,
+    ]);
+  }
+  await ctx.tx.query('update allocation_rules set channel = $2 where channel = $1', [
+    shopifyChannel(previous.id),
+    shopifyChannel(connectionId),
+  ]);
+  await ctx.tx.query(
+    `update reservations set channel = $2, updated_at = now()
+     where channel = $1 and status in ('active', 'partially_fulfilled')`,
+    [shopifyChannel(previous.id), shopifyChannel(connectionId)],
+  );
+  return previous.id;
+}
 
 export const recordShopifyWebhook = defineOperation({
   id: 'shopify.webhooks.receive',

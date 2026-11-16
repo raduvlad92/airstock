@@ -10,6 +10,7 @@ import {
   ORDER_TOPICS,
   PRODUCT_TOPICS,
   receiveWebhook,
+  releaseRedactedStore,
   type ShopifyConfig,
   type SyncDeps,
   verifyQueryHmac,
@@ -55,6 +56,7 @@ const HANDLED_TOPICS = new Set([...ORDER_TOPICS, ...PRODUCT_TOPICS, 'app/uninsta
  * logged, and acknowledged.
  */
 const PRIVACY_TOPICS = new Set(['customers/data_request', 'customers/redact', 'shop/redact']);
+// shop/redact also releases what an uninstalled store's orders still hold (packages/shopify).
 
 interface InstallFlow {
   state: string;
@@ -97,6 +99,11 @@ export function mountShopify(app: Hono<AppEnv>, deps: AppDeps): void {
     const eventId = c.req.header('x-shopify-event-id') ?? webhookId;
     if (PRIVACY_TOPICS.has(topic)) {
       deps.logger.info?.('shopify_privacy_webhook', { topic, shopDomain });
+      // The store is gone for good: what its orders still hold here is released (Shopify
+      // retries the webhook if this fails; releasing twice changes nothing).
+      if (topic === 'shop/redact' && isShopDomain(shopDomain)) {
+        await releaseRedactedStore(syncDeps(c), { shopDomain, requestId: c.get('requestId') });
+      }
       return c.body(null, 200);
     }
     if (!HANDLED_TOPICS.has(topic)) return c.body(null, 200);

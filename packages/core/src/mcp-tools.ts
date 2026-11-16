@@ -52,7 +52,7 @@ export function buildMcpTools(operations: readonly AnyOperation[]): McpToolDef[]
         .max(200)
         .optional()
         .describe(
-          'Reuse the same key when retrying the same request, so it is not carried out twice.',
+          'Reuse the same key when retrying the same request within 7 days, so it is not carried out twice.',
         );
     }
     const description = multi

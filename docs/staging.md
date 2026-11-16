@@ -20,6 +20,7 @@ too. Airstock therefore:
 | --- | --- | --- |
 | Worker | `airstock-staging` | Custom domain `airstock.deletecookies.dev`; `workers.dev` and preview URLs are off; Smart Placement; bound to itself as `SELF` (jobs run in the fetch handler, next to the database); sweeps every 30 minutes and partitions daily at 03:00 UTC |
 | Hyperdrive | `airstock-staging` (`d4107a1ef7aa4b6ea8935a208edb0512`) | Query caching **off**: cached reads could cross tenants |
+| Hyperdrive origin connection limit | 20 (`airstock-staging`) | Lowered from 60 on 16 November 2026: 10 concurrent callers ran the 0.25 CU compute out of memory while Hyperdrive held 60 idle connections ([PR #80](https://github.com/raduvlad92/airstock/pull/80)) |
 | Queues | `airstock-staging-audit`, `airstock-staging-jobs`, each with a `-dlq` | |
 | R2 | `airstock-staging-files` | EU jurisdiction. Media under `shops/{shopId}/media/{mediaId}/` (ADR 0015) |
 | Neon project | `airstock-staging` (`autumn-meadow-53762460`), branch `main`, database `airstock` | AWS `eu-central-1` (Frankfurt), PostgreSQL 17 |

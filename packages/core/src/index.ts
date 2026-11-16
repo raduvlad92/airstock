@@ -26,9 +26,11 @@ export {
   dispatchOutbox,
   drainOutbox,
   ensureAuditPartitions,
+  IDEMPOTENCY_RETENTION_DAYS,
   ingestAuditEvents,
   type OutboxMessage,
   sweepExpiredReservations,
+  sweepIdempotencyRecords,
   sweepShortages,
   sweepUnboundConnectionGrants,
 } from './background.ts';

@@ -66,7 +66,7 @@ function operationObject(op: AnyOperation) {
       in: 'header',
       required: true,
       description:
-        'Unique per command. Retrying with the same key returns the original result without repeating the effect.',
+        'Unique per command. Retrying with the same key within 7 days returns the original result without repeating the effect. After 7 days the key is forgotten, and a request with it runs as a new one.',
       schema: { type: 'string', maxLength: 200 },
     });
   }

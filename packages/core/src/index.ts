@@ -41,6 +41,7 @@ export {
 export { AppError, errors, type ProblemDetails } from './errors.ts';
 export { uuidv7, uuidv7Time } from './ids.ts';
 export { RATE_LIMIT_PERIOD_SECONDS, RATE_LIMITS, type RateLimitKind } from './limits.ts';
+export { mcpInstructions } from './mcp-instructions.ts';
 export { buildMcpTools, type McpToolDef, resolveToolCall } from './mcp-tools.ts';
 export * as mediaFiles from './media/files.ts';
 export {

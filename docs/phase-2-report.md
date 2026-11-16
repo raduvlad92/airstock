@@ -21,12 +21,8 @@ Everything is reachable from the dashboard, REST, and MCP: **201 operations in 2
 Two independent reviews, of the inventory engine and of the Shopify connector, confirmed 35 defects before any merchant used the product. Each got a failing test first, then a fix. No expected-failure test is left on `main` (Section 5).
 
 **Exit criteria (Section 2):**
-- **Done (10):** G1, G2, G3, G4, G7, G8, G9, G10, G12, G13.
-- **Partly (4):**
-  - G5: no quantity can be typed into the grid as a count;
-  - G6: the lot trace has no export;
-  - G17: purchasing and picking commands have no fault-injection tests;
-  - G18: two load cases were over target and both are fixed (PRs #89, #92), except 10 simultaneous readers of the inventory list on the 20,000-variant shop, which is limited by the database size; Shopify latencies and Neon compute were not measured.
+- **Done (13):** G1, G2, G3, G4, G5, G6, G7, G8, G9, G10, G12, G13, G17. G5, G6, and G17 closed in PR #94: counts typed in the grid, the lot trace export, and failure and replay tests for 23 more commands.
+- **Partly (1):** G18. Two load cases were over target and both are fixed (PRs #89, #92), except 10 simultaneous readers of the inventory list on the 20,000-variant shop, which is limited by the database size. Shopify latencies and Neon compute were not measured.
 - **Waiting for the owner's run (4):** G11 iPhone, G14 n8n, G15 Shopify development stores and the rehearsal, G16 ChatGPT.
 
 **Left before the pilot:**
@@ -36,7 +32,7 @@ Two independent reviews, of the inventory engine and of the Shopify connector, c
    - reconnecting both Shopify development stores, then the rehearsal with the owner's product export;
    - the ChatGPT run of the Phase 2 prompts;
    - the production decision ([Section 2.2](phase-2-status.md#22-production-decision-i7)).
-2. **The build's own gaps:** the G5, G6, and G17 items above, and a real-browser run of every flow on staging (Section 8).
+2. **The build's own gaps:** a real-browser run of every flow on staging (Section 8).
 3. **I8 go-live:** production as decided, a restore test (A22), then onboarding the owner's store.
 
 ### 1.1 What was built

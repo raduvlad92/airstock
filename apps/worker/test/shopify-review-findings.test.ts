@@ -1,4 +1,4 @@
-import { uuidv7 } from '@airstock/core';
+import { runImportJob, uuidv7 } from '@airstock/core';
 import {
   pushAvailability,
   reconcileConnection,
@@ -8,6 +8,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ownerQuery } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
+import { json } from './setup.ts';
 import { type Merchant, type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
 
 // Review of the Shopify connector (16 November 2026): one test per confirmed defect, named after
@@ -333,5 +334,61 @@ describe('Shopify connector review findings', () => {
     expect(retried.map((r) => r.outcome)).not.toContain('conflict');
     await reconcileConnection(h.deps(), s.m.shopId, s.connectionId, { daily: true });
     expect(await shopifyAlerts(s.m.shopId)).toEqual([]);
+  });
+  // FINDING 8 (stock drift, oversell; main). The onboarding import receives Shopify's available
+  // at the time of the bulk read as opening stock, and maps the variants only after a person
+  // commits the preview. An order placed in between (the preview can wait hours) arrives while
+  // its variant is unmapped, so its line is recorded as `unmapped` for good and never reserved or
+  // fulfilled here. The first push then reads Shopify's lower quantity as the record and writes
+  // the opening stock over it: Shopify shows the sold units as available again, and Airstock
+  // keeps them on hand after they ship.
+  it.fails('F8: an order placed while the onboarding preview waits is not sold twice', async () => {
+    const m = await h.merchant('Onboarding race');
+    const store = h.newStore('review');
+    const code = `RACE-${uuidv7().slice(-6)}`;
+    const [variant] = store.addProduct({
+      title: 'Race mug',
+      variants: [{ sku: code, quantities: { '1001': 10 } }],
+    });
+    const connectionId = await h.install(m, store);
+    const base = `/shops/${m.shopId}/shopify/connections/${connectionId}`;
+    await h.command(m.cookie, `${base}/locations`, {
+      connectionId,
+      locations: [{ shopifyLocationId: '1001', locationId: m.locationId }],
+    });
+    const started = await h.command(m.cookie, `${base}/onboardings`, { connectionId });
+    expect(started.status, await started.clone().text()).toBe(201);
+    const onboardingId = (await json(started)).onboarding.onboardingId as string;
+    await h.runOnboardingSteps(m.shopId, onboardingId);
+    const viewed = await json(
+      await h.dashboard(m.cookie, `/shops/${m.shopId}/shopify/onboardings/${onboardingId}`),
+    );
+    expect(viewed.onboarding.status).toBe('previewed');
+    // While the preview waits for review, Shopify sells 3.
+    const order = store.placeOrder([{ variant: variant!, quantity: 3 }]);
+    await h.deliver(store.domain, 'orders/create', store.webhookBody(order));
+    await h.runJobs(m.shopId);
+    // The person commits; the import and the maps complete.
+    const committed = await h.command(
+      m.cookie,
+      `/shops/${m.shopId}/shopify/onboardings/${onboardingId}/commit`,
+      {},
+    );
+    expect(committed.status, await committed.clone().text()).toBe(200);
+    await h.runOnboardingSteps(m.shopId, onboardingId, 1);
+    await runImportJob(
+      { db: h.t.db, audit: h.t.sink, files: h.deps().files! },
+      m.shopId,
+      viewed.onboarding.importId,
+    );
+    await h.runOnboardingSteps(m.shopId, onboardingId);
+    await h.flush(m.shopId);
+    // 10 on the shelf, 3 of them sold: 7 to sell, in both systems.
+    expect(store.available(variant!)).toBe(7);
+    const [mapped] = await ownerQuery<{ variant_id: string }>(
+      'select variant_id from shopify_variant_maps where shop_id = $1',
+      [m.shopId],
+    );
+    expect(await h.available(m, mapped!.variant_id)).toBe('7.000000');
   });
 });

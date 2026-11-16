@@ -132,6 +132,11 @@ const SyncResult = z.object({
 interface Acc {
   /** Levels whose record of Shopify's quantity changed: pushed after commit. */
   levels: Set<string>;
+  /**
+   * Shopify's own changes to its available, applied to the records at the end, in level order
+   * (the order the push locks them in).
+   */
+  took: Array<{ item: string; location: string; items: number; at: string }>;
   outbox: Array<{ topic: string; payload: unknown }>;
   events: AuditEvent[];
   webhooks: WebhookEmit[];
@@ -201,11 +206,14 @@ function units(line: Pick<LineRow, 'bundle' | 'per_item'>, items: number): strin
   return line.bundle ? String(items) : normalize(exactProduct(String(items), line.per_item));
 }
 
-/** Lowers Airstock's record of Shopify's available, unless Shopify's own read is newer. */
+/**
+ * Lowers Airstock's record of Shopify's available (raises it for a negative count), unless
+ * Shopify's own read is newer. Applied at the end of the sync, in level order.
+ */
 async function shopifyTook(
-  tx: Tx,
+  _tx: Tx,
   acc: Acc,
-  connectionId: string,
+  _connectionId: string,
   item: string | null,
   shopifyLocationId: string | null,
   items: number,
@@ -215,13 +223,22 @@ async function shopifyTook(
   // Shopify now shows a number Airstock's availability may not match (an oversold order, a
   // restock): the level is pushed after commit, from the corrected record.
   acc.levels.add(`${item}@${shopifyLocationId}`);
-  await tx.query(
-    `update shopify_inventory_levels set expected_available = expected_available - $4,
-       updated_at = now()
-     where connection_id = $1 and shopify_inventory_item_id = $2 and shopify_location_id = $3
-       and expected_available is not null and expected_as_of < $5::timestamptz`,
-    [connectionId, item, shopifyLocationId, items, at],
+  acc.took.push({ item, location: shopifyLocationId, items, at });
+}
+
+async function applyTook(tx: Tx, acc: Acc, connectionId: string): Promise<void> {
+  const sorted = [...acc.took].sort((a, b) =>
+    a.item !== b.item ? (a.item < b.item ? -1 : 1) : a.location < b.location ? -1 : 1,
   );
+  for (const t of sorted) {
+    await tx.query(
+      `update shopify_inventory_levels set expected_available = expected_available - $4,
+         updated_at = now()
+       where connection_id = $1 and shopify_inventory_item_id = $2 and shopify_location_id = $3
+         and expected_available is not null and expected_as_of < $5::timestamptz`,
+      [connectionId, t.item, t.location, t.items, t.at],
+    );
+  }
 }
 
 /** The line's reservations with something open: oldest first. */
@@ -595,6 +612,7 @@ export const syncShopifyOrder = defineOperation({
     };
     const acc: Acc = {
       levels: new Set(),
+      took: [],
       outbox: [],
       events: [],
       webhooks: [],
@@ -1068,6 +1086,7 @@ export const syncShopifyOrder = defineOperation({
         ],
       );
     }
+    await applyTook(ctx.tx, acc, connectionId);
     // Levels whose record changed are pushed after commit, unless a stock change in this
     // transaction already announces them (its push covers the same level).
     const announced = new Set<string>();

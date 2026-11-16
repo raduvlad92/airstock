@@ -82,20 +82,41 @@ export interface WebhookStatus {
   message?: string;
 }
 
-export type SetResult = { kind: 'set' } | { kind: 'stale' };
+/** One quantity of a batched compare-and-set write. */
+export interface SetQuantity {
+  inventoryItemId: string;
+  locationId: string;
+  quantity: number;
+  /** What Airstock believes Shopify's quantity is (`changeFromQuantity`). */
+  from: number;
+}
+
+/**
+ * A batched write: Shopify applies all quantities or none. `stale` lists the indexes refused
+ * because Shopify's quantity was not `from` (all of them when Shopify did not say which).
+ */
+export type SetResult = { kind: 'set' } | { kind: 'stale'; stale: number[] };
+
+/** Most quantities in one `inventorySetQuantities` call. */
+export const MAX_SET_QUANTITIES = 100;
+/** Most inventory items read in one call. */
+export const MAX_READ_ITEMS = 25;
 
 export interface ShopifyAdmin {
   locations(): Promise<ShopifyLocation[]>;
   /** Variants that have a SKU, for matching by SKU. */
   variantsWithSku(limit?: number): Promise<ShopifyVariant[]>;
-  /** Shopify's `available` quantity, or null when the item is not stocked at the location. */
-  getAvailable(inventoryItemId: string, locationId: string): Promise<number | null>;
-  /** Compare-and-set of `available`: refused as stale when Shopify's quantity is not `from`. */
+  /**
+   * Shopify's `available` for these items (at most MAX_READ_ITEMS), keyed `item@location`; a
+   * location where an item is not stocked is absent.
+   */
+  getAvailable(inventoryItemIds: string[]): Promise<Map<string, number>>;
+  /**
+   * Compare-and-set of `available` for many levels in one `inventorySetQuantities` call (at most
+   * MAX_SET_QUANTITIES): refused as stale when a quantity in Shopify is not its `from`.
+   */
   setAvailable(input: {
-    inventoryItemId: string;
-    locationId: string;
-    quantity: number;
-    from: number;
+    quantities: SetQuantity[];
     idempotencyKey: string;
     reference: string;
   }): Promise<SetResult>;
@@ -151,10 +172,14 @@ const QUERIES = {
       pageInfo { hasNextPage endCursor }
     }
   }`,
-  available: `query($item: ID!, $location: ID!) {
-    inventoryItem(id: $item) {
-      id
-      inventoryLevel(locationId: $location) { quantities(names: ["available"]) { name quantity } }
+  available: `query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on InventoryItem {
+        id
+        inventoryLevels(first: 10) {
+          nodes { location { id } quantities(names: ["available"]) { name quantity } }
+        }
+      }
     }
   }`,
   setAvailable: `mutation($input: InventorySetQuantitiesInput!, $key: String!) {
@@ -648,21 +673,35 @@ export function httpShopifyAdmin(
       return out;
     },
 
-    async getAvailable(inventoryItemId, locationId) {
+    async getAvailable(inventoryItemIds) {
+      const out = new Map<string, number>();
+      if (inventoryItemIds.length === 0) return out;
+      if (inventoryItemIds.length > MAX_READ_ITEMS) throw new Error('Too many items in one read.');
       const data = await call<{
-        inventoryItem: {
-          inventoryLevel: { quantities: Array<{ name: string; quantity: number }> } | null;
-        } | null;
-      }>(QUERIES.available, {
-        item: gid('InventoryItem', inventoryItemId),
-        location: gid('Location', locationId),
-      });
-      const level = data.inventoryItem?.inventoryLevel;
-      if (!level) return null;
-      return level.quantities.find((q) => q.name === 'available')?.quantity ?? null;
+        nodes: Array<{
+          id?: string;
+          inventoryLevels?: {
+            nodes: Array<{
+              location: { id: string };
+              quantities: Array<{ name: string; quantity: number }>;
+            }>;
+          };
+        } | null>;
+      }>(QUERIES.available, { ids: inventoryItemIds.map((id) => gid('InventoryItem', id)) });
+      for (const node of data.nodes) {
+        if (!node?.id || !node.inventoryLevels) continue;
+        for (const level of node.inventoryLevels.nodes) {
+          const available = level.quantities.find((q) => q.name === 'available')?.quantity;
+          if (available !== undefined) {
+            out.set(`${numeric(node.id)}@${numeric(level.location.id)}`, available);
+          }
+        }
+      }
+      return out;
     },
 
     async setAvailable(input) {
+      if (input.quantities.length > MAX_SET_QUANTITIES) throw new Error('Too many quantities.');
       const data = await call<{
         inventorySetQuantities: {
           userErrors: Array<{ code: string | null; field: string[] | null; message: string }>;
@@ -673,20 +712,28 @@ export function httpShopifyAdmin(
           name: 'available',
           reason: 'correction',
           referenceDocumentUri: input.reference,
-          quantities: [
-            {
-              inventoryItemId: gid('InventoryItem', input.inventoryItemId),
-              locationId: gid('Location', input.locationId),
-              quantity: input.quantity,
-              changeFromQuantity: input.from,
-            },
-          ],
+          quantities: input.quantities.map((q) => ({
+            inventoryItemId: gid('InventoryItem', q.inventoryItemId),
+            locationId: gid('Location', q.locationId),
+            quantity: q.quantity,
+            changeFromQuantity: q.from,
+          })),
         },
       });
       const errors = data.inventorySetQuantities.userErrors;
       if (errors.length === 0) return { kind: 'set' };
-      if (errors.some((e) => e.code === 'CHANGE_FROM_QUANTITY_STALE')) return { kind: 'stale' };
-      const first = errors[0]!;
+      const stale = errors.filter((e) => e.code === 'CHANGE_FROM_QUANTITY_STALE');
+      if (stale.length === errors.length) {
+        // The field path names the quantity: ["input", "quantities", "3", "changeFromQuantity"].
+        const indexes = stale.map((e) => Number(e.field?.[2]));
+        return {
+          kind: 'stale',
+          stale: indexes.every((i) => Number.isInteger(i) && i >= 0 && i < input.quantities.length)
+            ? [...new Set(indexes)]
+            : input.quantities.map((_, i) => i),
+        };
+      }
+      const first = errors.find((e) => e.code !== 'CHANGE_FROM_QUANTITY_STALE')!;
       throw new ShopifyApiError(
         first.message,
         200,

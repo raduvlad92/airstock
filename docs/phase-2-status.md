@@ -35,7 +35,7 @@ Staging: https://airstock.deletecookies.dev (see [staging.md](staging.md)). Ever
 | I5, now | Give an n8n webhook URL and set up a subscription in the dashboard (Integrations → Webhooks); [webhooks.md](webhooks.md) has the n8n signature check | **Ready** |
 | I6, now | **Reconnect both Shopify development stores**, so they grant the new permissions: in staging, open each shop → Settings → Integrations → "Connect another store", enter `airstock-dev-a.myshopify.com` (and `airstock-dev-b.myshopify.com` in its shop), and approve in Shopify. Optionally, on `airstock-dev-a`, order `AIR-MUG-01` with the test gateway, fulfill it, then refund with restock: sync health should show no conflicts and the unit should be in quarantine | **Ready** |
 | I6, now | Give the store's Shopify product export, for the rehearsal on a development store | **Ready** |
-| I7 | Decide production: domain, Neon plan, WorkOS production environment, email sender | Later |
+| I7 | Decide production: the brief and recommendations are in Section 2.2 | **Ready to decide** |
 
 ### 2.1 iPhone check (I4)
 
@@ -85,6 +85,23 @@ The scanner has only been tested in browsers on a computer. This run checks the 
 16. **Unknown code to quick add.** In **Look up**, scan a new slab. Tap **Quick add as a one-of-a-kind item**. The certificate field should already hold the code.
 
 Note anything that fails, and at which step.
+
+### 2.2 Production decision (I7)
+
+The pilot needs a production environment separate from staging. These are the choices, with a recommendation each. Nothing is created or paid for until the owner decides. Costs are monthly, on top of the Workers Paid plan already paid for ($5).
+
+| Decision | Recommendation | Cost | Why |
+| --- | --- | --- | --- |
+| Web address | A subdomain the owner already has, such as `app.airstock.deletecookies.dev`, until the product name is chosen (PRD 17) | $0 | Moving later means reconnecting the Shopify app, the ChatGPT connector, and the WorkOS redirect: about an hour, no data change |
+| Database | A new Neon project on the **Launch** plan in Frankfurt; autoscaling 0.5–2 CU, scaling to zero after 5 minutes; 7 days of restore history | about $10 | Free keeps 6 hours of restore history; the volume run ran a 0.25 CU compute out of memory under 10 parallel callers (Section 1, CI fix note) |
+| Sign-in | A WorkOS production environment | $0 up to 1 million users | WorkOS asks for billing details for production |
+| Email | Keep sending from `mail.tracker.deletecookies.dev` while the owner is the only merchant; Resend Pro, or a freed domain slot, before a second merchant | $0 now, $20 later | Alerts and PO emails go to the owner's own addresses; Resend stores email data in the US (PRD 12.4), acceptable while the data is the owner's |
+| Shopify | A new custom-distribution app for the owner's store, configured like `config/shopify/shopify.app.staging.toml` | $0 | Custom apps get protected customer data without a review (Section 5.2); custom distribution is one store and can't be changed, so staging keeps its own app |
+| Cloudflare | A production Worker, Hyperdrive (connection limit 20), an EU R2 bucket, and queues, on the existing account | within Workers Paid | Same shape as staging |
+
+**Expected total:** about $10–15 a month beyond Workers Paid while the owner is the only merchant; $20 more with Resend Pro.
+
+**Before real data:** a restore test (A22) on the production database, then the onboarding rehearsal on production with the owner's export.
 
 ## 3. Decisions
 

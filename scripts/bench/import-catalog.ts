@@ -1,10 +1,12 @@
 /**
  * Import benchmark (plan Section 8): preview and commit time and SQL statements per row for a
- * create import of N rows (products with size variants, custom fields), run in process.
+ * create import of N rows (products with size variants, custom fields), run in process. --packs
+ * adds a supplier, a supplier SKU, a case quantity, and a case barcode to every row.
  *
- *   DATABASE_APP_URL=… DATABASE_OWNER_URL=… tsx scripts/bench/import-catalog.ts [--rows 10000] [--stock]
+ *   DATABASE_APP_URL=… DATABASE_OWNER_URL=… tsx scripts/bench/import-catalog.ts [--rows 10000] [--stock] [--packs]
  */
 import { parseArgs } from 'node:util';
+import { gtinCheckDigit } from '../../packages/core/src/catalog/barcodes.ts';
 import {
   ensureUser,
   execute,
@@ -19,6 +21,7 @@ const { values: args } = parseArgs({
   options: {
     rows: { type: 'string', default: '10000' },
     stock: { type: 'boolean', default: false },
+    packs: { type: 'boolean', default: false },
   },
 });
 const url =
@@ -56,16 +59,21 @@ const run = (op: Parameters<typeof execute>[1], input: unknown) =>
     idempotencyKey: uuidv7(),
   }).then((r) => r.result as never);
 await run(ops.addTemplate, { template: 'apparel' });
+if (args.packs) await run(ops.createSupplier, { name: 'Bench supplier' });
 
 const n = Number(args.rows);
 const lines = [
-  `product,name,sku,price,option:Size,material,care_instructions${args.stock ? ',stock' : ''}`,
+  `product,name,sku,price,option:Size,material,care_instructions${args.stock ? ',stock' : ''}${args.packs ? ',supplier,supplier_sku,Case qty,Case barcode' : ''}`,
 ];
 const sizes = ['S', 'M', 'L', 'XL'];
+const ean = (i: number) => {
+  const body = `2${String(i).padStart(11, '0')}`;
+  return `${body}${gtinCheckDigit(body)}`;
+};
 for (let i = 0; i < n; i++) {
   const p = Math.floor(i / 4);
   lines.push(
-    `P${p},Bench shirt ${p},BI-${String(i).padStart(6, '0')},${10 + (p % 40)}.90,${sizes[i % 4]},Cotton,Wash at 30.${args.stock ? `,${i % 5}` : ''}`,
+    `P${p},Bench shirt ${p},BI-${String(i).padStart(6, '0')},${10 + (p % 40)}.90,${sizes[i % 4]},Cotton,Wash at 30.${args.stock ? `,${i % 5}` : ''}${args.packs ? `,Bench supplier,BS-${i},12,${ean(i)}` : ''}`,
   );
 }
 const created = (await run(ops.createImport, { fileName: 'bench.csv' })) as { importId: string };
@@ -84,6 +92,12 @@ const mapping: Record<string, string> = {
   care_instructions: 'field:care_instructions',
 };
 if (args.stock) mapping.stock = `stock:${shop.defaultLocationId}`;
+if (args.packs) {
+  mapping.supplier = 'supplier';
+  mapping.supplier_sku = 'supplier_sku';
+  mapping['Case qty'] = 'pack:Case';
+  mapping['Case barcode'] = 'pack_barcode:Case';
+}
 let t = performance.now();
 statements = 0;
 await run(ops.previewImport, { importId: created.importId, mapping });

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { ApiError, api, command, type Out } from '../api.ts';
 import { Badge, Card, ErrorNotice, Field, formatDateTime, Notice } from '../components/ui.tsx';
+import { SyncHealth } from './shopify-health.tsx';
 
 // A connected Shopify store: its location maps, matching by SKU, and the onboarding import
 // (plan Section 5.14). Unmapped Shopify locations are listed, never guessed.
@@ -46,11 +47,12 @@ export function ShopifyCard({ shopId, connection: c }: { shopId: string; connect
       {c.conflicts ? (
         <p className="notice error">
           {c.conflicts} quantity difference(s) with Shopify that no order explains. Airstock left
-          Shopify unchanged.
+          Shopify unchanged; choose a side under Sync health.
         </p>
       ) : null}
       {c.status === 'active' ? (
         <>
+          <SyncHealth shopId={shopId} connectionId={c.connectionId} />
           <LocationMaps shopId={shopId} connection={c} />
           <MatchBySku shopId={shopId} connection={c} />
           <OnboardingPanel shopId={shopId} connection={c} />
@@ -191,8 +193,8 @@ function MatchBySku({ shopId, connection: c }: { shopId: string; connection: Con
     <section className="subsection">
       <h3>Variants</h3>
       <p className="fine">
-        Match the store’s variants to yours by SKU. Packs and bundles are mapped from Sync health;
-        the onboarding import below also matches by barcode.
+        Match the store’s variants to yours by SKU. Packs and bundles are mapped under Sync health
+        (Mappings); the onboarding import below also matches by barcode.
       </p>
       <button
         type="button"

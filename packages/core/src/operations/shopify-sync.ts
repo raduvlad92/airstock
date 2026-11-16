@@ -79,7 +79,12 @@ const Health = z.object({
   unmappedVariants: z.object({
     count: z.number().int(),
     sample: z.array(
-      z.object({ shopifyVariantId: z.string(), sku: z.string().nullable(), title: z.string() }),
+      z.object({
+        shopifyVariantId: z.string(),
+        inventoryItemId: z.string().nullable(),
+        sku: z.string().nullable(),
+        title: z.string(),
+      }),
     ),
   }),
   unmappedLocations: z.array(z.object({ id: z.string(), name: z.string() })),
@@ -250,16 +255,22 @@ async function connectionHealth(
 
   const [unmapped] = await tx.query<{
     count: number;
-    sample: Array<{ shopifyVariantId: string; sku: string | null; title: string }>;
+    sample: Array<{
+      shopifyVariantId: string;
+      inventoryItemId: string | null;
+      sku: string | null;
+      title: string;
+    }>;
   }>(
     `with u as (
-       select cv.shopify_variant_id, cv.sku, cv.title from shopify_catalog_variants cv
+       select cv.shopify_variant_id, cv.shopify_inventory_item_id, cv.sku, cv.title
+       from shopify_catalog_variants cv
        where cv.connection_id = $1 and cv.tracked
          and not exists (select 1 from shopify_variant_maps m where m.connection_id = cv.connection_id
            and m.shopify_variant_id = cv.shopify_variant_id))
      select (select count(*)::int from u) as count,
        coalesce((select json_agg(json_build_object('shopifyVariantId', x.shopify_variant_id,
-         'sku', x.sku, 'title', x.title)) from (select * from u order by sku nulls last, title
+         'inventoryItemId', x.shopify_inventory_item_id, 'sku', x.sku, 'title', x.title)) from (select * from u order by sku nulls last, title
          limit $2) x), '[]'::json) as sample`,
     [c.id, limit],
   );

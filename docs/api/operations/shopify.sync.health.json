@@ -408,6 +408,12 @@
                                   "shopifyVariantId": {
                                     "type": "string"
                                   },
+                                  "inventoryItemId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
                                   "sku": {
                                     "type": [
                                       "string",
@@ -420,6 +426,7 @@
                                 },
                                 "required": [
                                   "shopifyVariantId",
+                                  "inventoryItemId",
                                   "sku",
                                   "title"
                                 ],

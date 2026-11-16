@@ -1,7 +1,7 @@
 import type { ops } from '@airstock/core';
 import { DEFAULT_ORIGINAL_MAX_SIDE } from '@airstock/core/media';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { ApiError, command, errorMessage, type Out } from '../api.ts';
 import { type CatalogSchema, useCatalogSchema } from '../catalog/schema.ts';
 import { type PreparedFile, prepareFile } from '../components/media/derivatives.ts';
@@ -42,6 +42,15 @@ function remember(key: string, value: string) {
   } catch {
     // Private mode: not remembered.
   }
+}
+
+function dataUrl(blob: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
 }
 
 interface Picture {
@@ -150,41 +159,25 @@ function NewItem({ env, initialCertificate }: { env: ScanEnv; initialCertificate
     : [];
   const hasCertificateField = fields.some((f) => f.key === CERTIFICATE_FIELD);
 
-  // Object URLs for thumbnails are released when the form goes away.
-  const urls = useRef<string[]>([]);
-  useEffect(
-    () => () => {
-      for (const u of urls.current) URL.revokeObjectURL(u);
-    },
-    [],
-  );
-
   const addPictures = async (files: File[]) => {
-    const rows: Picture[] = files.map((f) => {
-      let url: string | null = null;
-      try {
-        url = URL.createObjectURL(f);
-        urls.current.push(url);
-      } catch {
-        url = null;
-      }
-      return {
-        id: crypto.randomUUID(),
-        name: f.name,
-        url,
-        prepared: null,
-        state: 'preparing',
-        progress: 0,
-      };
-    });
+    const rows: Picture[] = files.map((f) => ({
+      id: crypto.randomUUID(),
+      name: f.name,
+      url: null,
+      prepared: null,
+      state: 'preparing',
+      progress: 0,
+    }));
     setPictures((current) => [...current, ...rows]);
     // One at a time: each picture holds its bytes and two resized copies in memory.
     for (const [i, file] of files.entries()) {
       const row = rows[i]!;
       try {
         const prepared = await prepareFile(file, undefined, { originalMaxSide: maxSide });
+        // The preview is the small thumbnail as a data: URL; the CSP allows no blob: images.
+        const url = prepared.derivatives ? await dataUrl(prepared.derivatives.thumbnail) : null;
         setPictures((list) =>
-          list.map((p) => (p.id === row.id ? { ...p, prepared, state: 'ready' } : p)),
+          list.map((p) => (p.id === row.id ? { ...p, prepared, url, state: 'ready' } : p)),
         );
       } catch (error) {
         setPictures((list) =>

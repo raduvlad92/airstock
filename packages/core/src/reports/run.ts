@@ -245,8 +245,11 @@ const WAREHOUSE = text('warehouse', 'Warehouse');
 function stockOnHand(c: Ctx): Built {
   const p = c.params;
   const condition = c.f.condition ? `and s.condition = ${p.add(c.f.condition)}` : '';
+  // Every position of the shop, joined with the filtered variants: the planner inlines
+  // stock_positions() and sees real row counts (I7), where an array of every variant hid them.
   const sp = `sp as (
-    select s.*, lf.warehouse from stock_positions(array(select variant_id from vf)) s
+    select s.*, lf.warehouse, vf.sku, vf.item from stock_positions() s
+    join vf on vf.variant_id = s.variant_id
     join lf on lf.location_id = s.location_id
     where (s.on_hand > 0 or s.reserved > 0) ${condition})`;
   const head = `${variantCte(c)}, ${locationCte(c)}, ${sp}`;
@@ -255,7 +258,7 @@ function stockOnHand(c: Ctx): Built {
     return {
       kind: 'sql',
       ctes: `${head}, base as (
-        select s.variant_id::text as key, s.variant_id::text as "_variantId", vf.sku, vf.item as product,
+        select s.variant_id::text as key, s.variant_id::text as "_variantId", s.sku, s.item as product,
           coalesce(sum(s.on_hand) filter (where s.transfer_id is null), 0) as "onHand",
           coalesce(sum(s.on_hand) filter (where s.condition = 'sellable' and s.transfer_id is null
             and not s.lot_expired), 0) as sellable,
@@ -267,9 +270,9 @@ function stockOnHand(c: Ctx): Built {
           coalesce(sum(s.on_hand) filter (where s.lot_expired and s.transfer_id is null), 0) as expired,
           coalesce(sum(s.on_hand) filter (where s.transfer_id is not null), 0) as "inTransit",
           ${costOr(c, 'sum(s.on_hand) * max(vc.average_cost)')} as value
-        from sp s join vf on vf.variant_id = s.variant_id
+        from sp s
         left join variant_costs vc on vc.shop_id = app_shop_id() and vc.variant_id = s.variant_id
-        group by s.variant_id, vf.sku, vf.item)`,
+        group by s.variant_id, s.sku, s.item)`,
       columns: [
         SKU,
         PRODUCT,
@@ -316,15 +319,15 @@ function stockOnHand(c: Ctx): Built {
     ctes: `${head}, base as (
       select s.variant_id::text || ':' || s.location_id::text || ':' || s.condition || ':'
           || coalesce(s.lot_id::text, '-') as key,
-        s.variant_id::text as "_variantId", vf.sku, vf.item as product, s.location_path as location,
+        s.variant_id::text as "_variantId", s.sku, s.item as product, s.location_path as location,
         s.warehouse, s.condition, lt.code as lot, lt.expires_on as "expiresOn",
         sum(s.on_hand) as "onHand", sum(s.reserved) as reserved, sum(s.available) as available,
         ${costOr(c, 'sum(s.on_hand) * max(vc.average_cost)')} as value
-      from sp s join vf on vf.variant_id = s.variant_id
+      from sp s
       left join lots lt on lt.shop_id = app_shop_id() and lt.id = s.lot_id
       left join variant_costs vc on vc.shop_id = app_shop_id() and vc.variant_id = s.variant_id
       group by s.variant_id, s.location_id, s.location_path, s.warehouse, s.condition, s.lot_id,
-        vf.sku, vf.item, lt.code, lt.expires_on)`,
+        s.sku, s.item, lt.code, lt.expires_on)`,
     columns: [
       SKU,
       PRODUCT,
@@ -1006,6 +1009,12 @@ interface CursorData {
   v: string | number | boolean | null;
   /** The last row's key. */
   k: string;
+  /**
+   * The first page's row count and totals, carried to later pages so they are not computed over
+   * every row again for each page (I7). Absent in cursors made before.
+   */
+  n?: number;
+  t?: Record<string, string>;
 }
 
 function encode(c: CursorData): string {
@@ -1022,6 +1031,14 @@ function decode(text: string, signature: string): CursorData {
       new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes),
     ) as CursorData;
     if (c.s !== signature || typeof c.k !== 'string') throw new Error();
+    if (c.n !== undefined && !Number.isInteger(c.n)) throw new Error();
+    if (
+      c.t !== undefined &&
+      (typeof c.t !== 'object' ||
+        c.t === null ||
+        Object.values(c.t).some((v) => typeof v !== 'string'))
+    )
+      throw new Error();
     return c;
   } catch {
     throw errors.validation([
@@ -1190,9 +1207,16 @@ export async function runReport(
           ? `'${col.key}', coalesce(sum(b.${ident(col.key)}), 0)::text`
           : `'${col.key}', coalesce(round_half_even(sum(b.${ident(col.key)}), 6), 0)::text`,
       );
+    // The count and totals cover every row: computed for the first page only, then carried in
+    // the cursor (a later page would otherwise cost as much as the whole report again).
+    const carried = cursor?.n !== undefined && cursor.t !== undefined;
     const sql = `with ${built.ctes}
-      select (select count(*)::int from base) as count,
-        (select json_build_object(${totalSql.join(', ') || `'rows', count(*)::text`}) from base b) as totals,
+      select ${
+        carried
+          ? 'null::int as count, null::json as totals'
+          : `(select count(*)::int from base) as count,
+        (select json_build_object(${totalSql.join(', ') || `'rows', count(*)::text`}) from base b) as totals`
+      },
         coalesce((select json_agg(r order by r."_ord") from (
           select ${select} from base b where ${keyset}
           order by ${expr} ${dir} nulls last, b.key limit ${limit + 1}) r), '[]'::json) as rows`;
@@ -1204,13 +1228,20 @@ export async function runReport(
       throw error;
     }
     if (!result) throw errors.internal();
-    count = result.count;
-    totals = Object.fromEntries(
-      Object.entries(result.totals).filter(([key]) => columns.some((col) => col.key === key)),
-    );
-    for (const [key, value] of Object.entries(totals)) {
-      const col = columns.find((x) => x.key === key)!;
-      if (col.type !== 'integer') totals[key] = normalize(value);
+    if (carried) {
+      count = cursor.n!;
+      totals = Object.fromEntries(
+        Object.entries(cursor.t!).filter(([key]) => columns.some((col) => col.key === key)),
+      );
+    } else {
+      count = result.count;
+      totals = Object.fromEntries(
+        Object.entries(result.totals).filter(([key]) => columns.some((col) => col.key === key)),
+      );
+      for (const [key, value] of Object.entries(totals)) {
+        const col = columns.find((x) => x.key === key)!;
+        if (col.type !== 'integer') totals[key] = normalize(value);
+      }
     }
     rows = result.rows;
     lastSort = rows.map((r) => r._sort as string | null);
@@ -1224,7 +1255,12 @@ export async function runReport(
   const last = rows[rows.length - 1];
   const nextCursor =
     more && last
-      ? encode({ s: sig, v: lastSort[lastSort.length - 1] ?? null, k: String(last.key) })
+      ? encode({
+          s: sig,
+          v: lastSort[lastSort.length - 1] ?? null,
+          k: String(last.key),
+          ...(built.kind === 'sql' ? { n: count, t: totals } : {}),
+        })
       : null;
 
   if (columns.some((col) => col.key === 'packs')) await addPackBreakdown(tx, rows);

@@ -79,6 +79,18 @@ ADR 0006's order holds for every command: positions by ID, then reservations by 
 - **The scheduled check covers documents.** `readStockProblems` also runs `transfer_reconciliation_problems()` and `return_reconciliation_problems()`. Their five problem kinds (`transfer_hold_mismatch`, `transfer_in_transit_mismatch`, `return_received_mismatch`, `return_inspected_mismatch`, `return_unit_inspected_mismatch`) open the alert and offer no automatic repair: they are checked by hand.
 - **A repair is not reversed.** `reverse` refuses an operation with reason `reconciliation`: the repair only explains the balance in the history, so reversing it would change real stock. A count corrects a wrong balance.
 
+## Update, 16 November 2026 (milestone I7): stock_positions over a whole shop
+
+The I7 volume run measured the inventory list (stock on hand by position, first page of 50) at 1.36 s for the spare-parts shop's 34,000 positions with one caller, and 7.4 s with ten. Migration 0081 keeps the rule and its results, and changes how it runs:
+
+- **Eligibility once per query.** `fulfillment_ineligible_ids()` returns the shop's ineligible warehouses and locations (partial indexes find them), and a position's location is eligible when its `path_ids` overlap none of them. Before, `location_fulfillment_eligible()` ran two index lookups per position. Location scopes already rely on warehouse and location IDs never colliding in `path_ids`. `lockCandidates` uses the same test.
+- **`stock_positions()`** is every position of the current shop, the rule itself, kept to one plain SELECT so the planner inlines it. `stock_positions(variant_ids)` filters it with `variant_id in (select unnest(...))`, a semi-join, where `= any($1)` compared each position with a 20,000-element array one id at a time. The stock-on-hand report joins `stock_positions()` with its variant filter, so the planner sees real row counts and uses hash joins.
+- **Fewer lookups per position.** The variant's sell-by margin is read only for lots with an expiry date. Expired claims are looked up only where something is allocated: `allocated` is the sum of the position's outstanding allocations, so a position with nothing allocated has none.
+- **Same results.** `stock-positions.test.ts` compares every form with migration 0017's body across each branch: an ineligible warehouse and parent location, an expired lot, an expired claim, quarantine, and in transit. On the bench, all six persona shops gave identical rows, with 165 open reservations expired and one warehouse made ineligible for the check (rolled back).
+- **Report totals once.** A report's count and totals cover every row, so later pages carry the first page's in the cursor instead of computing them again.
+
+Partline's list went from 1,322 ms to 177 ms of database time with one caller (`docs/phase-2-measurements.md`, "I7 fixes").
+
 ## Revisit when
 
 - Allocation over a variant with hundreds of lots misses the 500 ms target (plan risk R5): lock the candidates in one statement with a cap, then consider an advisory lock per variant and location.

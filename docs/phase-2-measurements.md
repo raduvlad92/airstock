@@ -653,3 +653,45 @@ DATABASE_OWNER_URL=<staging owner> tsx scripts/bench/cleanup.ts --names '<test s
 ```
 
 The branch `i7-volume` was deleted afterwards to keep the project's storage free for I6 and the rest of I7; a branch of `i0-personas` and the commands above make it again in a few minutes.
+
+## I7 fixes
+
+**When:** 16 November 2026, after the I7 volume run.  
+**Database:** Neon `airstock-bench`, a branch `i7-fixes` from `i0-personas`, migrated to main and seeded with `seed-stock-activity.ts` for Fuel Kitchen and Partline only (the two shops the over-target items need), then compacted as in the volume run. The other four shops have their opening stock only. Autoscaling 0.25 to 2 CU, as before.  
+**Client:** the same laptop, 14–17 ms per round trip. `query-stock.ts --phases list,r5` runs only the inventory list and the 200-lot reservations. "Before" is main at that time, measured on the same branch first.
+
+### 1. The inventory list (stock on hand by position, first page of 50)
+
+Migration 0081 (ADR 0020, update for I7):
+- eligibility is computed once per query from the shop's ineligible warehouses and locations;
+- variants are filtered with a semi-join;
+- the report joins the inlined `stock_positions()` with its variant filter;
+- the sell-by margin and expired claims are looked up only where they can matter;
+- later pages carry the first page's count and totals in the cursor.
+
+Database time per run, from `pg_stat_statements`:
+
+| Shop | Positions with stock | Before, 1 caller | After, 1 caller | Before, 10 callers | After, 10 callers |
+| --- | --- | --- | --- | --- | --- |
+| Bench Cards and Bricks | 1,236 | 60 ms | 10 ms | 529 ms | 79 ms |
+| Bench Fuel Kitchen | 3,345 | 146 ms | 23 ms | 1,401 ms | 205 ms |
+| Bench Lumen Skin | 1,932 | 89 ms | 15 ms | 428 ms | 135 ms |
+| Bench Maison Verre | 5,879 | 239 ms | 31 ms | 1,270 ms | 266 ms |
+| Bench Partline Supply | 33,420 | 1,322 ms | 177 ms | 7,184 ms | 1,790 ms |
+| Bench Stride Sportswear | 4,443 | 189 ms | 24 ms | 962 ms | 75 ms |
+
+- **One caller:** every shop is well within the 1 s target. Partline is 177 ms, server p95 196 ms.
+- **Ten callers:** every shop but Partline is under 0.3 s. Partline's ten lists need about 1.8 s of CPU between them. That is 1.9 s at p95 while the compute scales up from 0.25 CU, and 0.86 s of database time (server p95 1.04 s) with the compute held at 2 CU. Ten people opening the 34,000-position list in the same second is the limit at 2 CU. Production's minimum compute is the owner's I7 decision.
+- **The function alone,** over Partline's 33,420 positions:
+  - the array form `stock_positions(array(...))` went from 1,205 ms to 239 ms;
+  - the inlined `stock_positions()` takes 97 ms.
+- **The report's SQL,** first page: 1,387 ms before, 196 ms after.
+- **Filtered runs,** Partline, before and after:
+  - search "pump": 155 → 48 ms;
+  - one variant: 13 → 2.6 ms;
+  - by variant: 1,202 → 162 ms;
+  - by location: 1,151 → 126 ms.
+  
+  The counts and totals are identical.
+- **Same results:** each form of the new function was compared with migration 0017's over every variant of all six shops: the whole shop, the array, and one variant at a time. They gave identical rows. For the check, inside a transaction rolled back afterwards, 165 open reservations were expired and one warehouse was made ineligible.
+- **Single-variant reads got faster too:** the 200-lot reservation went from 16.8 to 8.2 ms of database time, and availability for that variant from 12.2 to 5.5 ms.

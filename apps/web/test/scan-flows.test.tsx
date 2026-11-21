@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BASE,
@@ -21,8 +21,8 @@ import {
 } from './scan-kit.tsx';
 
 // The scan page's flows against a stubbed API (plan 5.12): look up, location labels, receive with
-// packs, serials, and costs, and an unknown code attached or created. The server side of each
-// call has its own tests; these check what the page sends and shows.
+// packs, serials, lots with expiry, and costs, and an unknown code attached or created. The server
+// side of each call has its own tests; these check what the page sends and shows.
 
 afterEach(() => {
   cleanup();
@@ -132,6 +132,79 @@ describe('scan page: receive', () => {
       unitCost: '300.50',
       costPer: 'base_unit',
     });
+  });
+
+  it('captures a scanned lot code and its expiry, then shows that lot at the shelf', async () => {
+    let received = false;
+    const oat = item({
+      sku: 'OAT-1',
+      productName: 'Oat milk',
+      trackingMode: 'lot_expiry',
+      matchedBy: 'sku',
+      packs: [],
+    });
+    const lotStock = {
+      ...STOCK,
+      sku: 'OAT-1',
+      trackingMode: 'lot_expiry',
+      totals: { ...STOCK.totals, onHand: '2', sellableOnHand: '2', reserved: '0', available: '2' },
+      positions: [
+        {
+          ...STOCK.positions[0]!,
+          lotId: '0196f3a0-0000-7000-8000-000000000201',
+          lotCode: 'L-2311',
+          expiresOn: '2027-03-31',
+          onHand: '2',
+          reserved: '0',
+          available: '2',
+        },
+      ],
+    };
+    const calls = mockApi({
+      ...BASE(OPERATOR),
+      [`/shops/${SHOP}/scan`]: (call: Call) =>
+        call.query.code === 'OAT-1'
+          ? { code: 'OAT-1', kind: 'item', item: oat, stock: received ? lotStock : null }
+          : scanRoutes({ [LOCATION.code]: LOCATION })(call),
+      [`POST /shops/${SHOP}/receipts`]: () => {
+        received = true;
+        return { quantity: '2', variantId: VAR };
+      },
+    });
+    renderScan('?flow=receive');
+    await scan(LOCATION.code);
+    await scan('OAT-1');
+    expect(await screen.findByText('1 unit → Main stock/B-02')).toBeTruthy();
+    // A code that is no item, scanned while the lot is empty, is the lot code from the carton.
+    await scan('L-2311');
+    expect(await screen.findByText('1 unit · lot L-2311 → Main stock/B-02')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Lot' })).toHaveProperty('value', 'L-2311');
+    await scan('OAT-1');
+    expect(await screen.findByText('2 units · lot L-2311 → Main stock/B-02')).toBeTruthy();
+    // Lots with expiry need the date before anything is received.
+    const receive = screen.getByRole('button', { name: 'Receive 2' });
+    expect(receive).toHaveProperty('disabled', true);
+    fireEvent.change(screen.getByLabelText('Expiry date'), { target: { value: '2027-03-31' } });
+    expect(receive).toHaveProperty('disabled', false);
+    fireEvent.click(receive);
+    expect(await screen.findByText(/Received 2 × OAT-1 into Main stock\/B-02/)).toBeTruthy();
+    expect(calls.find((c) => c.path === `/shops/${SHOP}/receipts`)!.body).toEqual({
+      variantId: VAR,
+      locationId: LOC,
+      quantity: '2',
+      lotCode: 'L-2311',
+      expiresOn: '2027-03-31',
+    });
+
+    // Looking the item up now shows the lot with its expiry at that shelf.
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Scan flows' })).getByRole('button', {
+        name: 'Look up',
+      }),
+    );
+    await scan('OAT-1');
+    const list = await screen.findByRole('list', { name: 'Stock per location' });
+    expect(list.textContent).toBe('Main stock/B-02Lot L-2311 (exp. 2027-03-31) · 2');
   });
 });
 

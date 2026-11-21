@@ -131,15 +131,20 @@ describe('webhooks over REST (D14)', () => {
     expect(
       await verifyWebhookSignature(hit!.headers['airstock-signature'], hit!.body, [created.secret]),
     ).toMatchObject({ ok: true });
-    const log = await t.app.request(
-      `/api/v1/shops/${shop.shopId}/webhook-deliveries?subscriptionId=${created.subscription.subscriptionId}`,
-      { headers },
-    );
-    expect((await json(log)).deliveries[0]).toMatchObject({
-      eventId: sent.eventId,
-      status: 'delivered',
-      lastStatusCode: 200,
-    });
+    // The receiver has the request before the sender records the answer, so the log can still say
+    // "sending" for a moment.
+    await expect
+      .poll(
+        async () => {
+          const log = await t.app.request(
+            `/api/v1/shops/${shop.shopId}/webhook-deliveries?subscriptionId=${created.subscription.subscriptionId}`,
+            { headers },
+          );
+          return (await json(log)).deliveries[0];
+        },
+        { timeout: 10_000 },
+      )
+      .toMatchObject({ eventId: sent.eventId, status: 'delivered', lastStatusCode: 200 });
   });
 
   it('refuses a credential without the webhooks:manage scope', async () => {

@@ -159,7 +159,9 @@ describe('chatgpt-run', () => {
     // Pipes in arguments are escaped; empty values are left out.
     expect(search).toContain('"search":"oak \\| walnut"');
     expect(search).not.toContain('"sort"');
-    expect(search).toMatch(/^\| 2 \| \d\d:\d\d:\d\d \| 1 \|/);
+    // The calls sit an hour back, so in the first hour after midnight UTC they fall on the day
+    // before the shop's setup events, and the table then prints each time with its date.
+    expect(search).toMatch(/^\| 2 \| (?:\d{4}-\d\d-\d\d )?\d\d:\d\d:\d\d \| 1 \|/);
     expect(lines.find((l) => l.startsWith('| 5 |'))).toMatch(/\| 3 \|.*\| denied: forbidden \|$/);
     expect(lines.filter((l) => /\| (Right|\*\*Wrong\*\*) \|$/.test(l))).toEqual([
       expect.stringMatching(/^\| 1 \| `search_catalog` query \| .* \| Right \|$/),

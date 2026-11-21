@@ -3,8 +3,9 @@ import { crc32, deflateSync } from 'node:zlib';
 import { expect, type Page, test } from '@playwright/test';
 
 // The phone flows of milestone I4b in a real browser, under the app's CSP: count, move, receive
-// against a purchase order, and quick add. Codes arrive the way a keyboard-wedge scanner sends
-// them (fast keys ending in Enter, nothing focused), as in the I4a scan tests.
+// against a purchase order, lots captured while scanning (G11), and quick add. Codes arrive the
+// way a keyboard-wedge scanner sends them (fast keys ending in Enter, nothing focused), as in the
+// I4a scan tests.
 
 function api(page: Page, shopId: string) {
   return async <T>(path: string, body?: unknown): Promise<T> => {
@@ -70,7 +71,33 @@ const label = (id: string) => `LOC:${id.toUpperCase()}`;
 
 interface Availability {
   totals: { onHand: string; reserved: string };
-  positions: Array<{ locationPath: string; onHand: string }>;
+  positions: Array<{
+    locationPath: string;
+    onHand: string;
+    lotCode: string | null;
+    expiresOn: string | null;
+  }>;
+}
+
+const OAT_BARCODE = '5901234123457';
+
+/** A second item, tracked by lot with expiry. */
+async function lotItem(call: ReturnType<typeof api>): Promise<string> {
+  const { variantId } = await call<{ variantId: string }>('/items', {
+    name: 'Oat milk',
+    sku: 'OAT-1',
+    barcode: OAT_BARCODE,
+    acknowledgeSimilar: true,
+  });
+  await call(`/variants/${variantId}/stock-settings`, { trackingMode: 'lot_expiry' });
+  return variantId;
+}
+
+/** Each position as "path · lot (expiry): on hand". */
+function lotPositions(stock: Availability): string[] {
+  return stock.positions
+    .map((p) => `${p.locationPath} · ${p.lotCode} (${p.expiresOn}): ${p.onHand}`)
+    .sort();
 }
 
 test('count: a quick count of a shelf by scanning asks before releasing reserved units', async ({
@@ -178,6 +205,99 @@ test('receive: against a purchase order line, with the over-receipt confirmed', 
   }>(`/purchase-orders/${order.id}`);
   expect(po.status).toBe('received');
   expect(po.lines[0]).toMatchObject({ received: '3.000000', overReceived: '1.000000' });
+  expect(violations).toEqual([]);
+});
+
+test('receive: a lot code and its expiry captured while scanning, then found at the shelf', async ({
+  page,
+}) => {
+  const violations = cspWatch(page);
+  const { shopId, call, shelves } = await setup(page, 'scan-lot', ['A-01']);
+  const oat = await lotItem(call);
+
+  await page.goto(`/app/scan?shop=${shopId}&flow=receive`);
+  await expect(page.getByRole('heading', { name: 'Receive' })).toBeVisible();
+  await wedge(page, label(shelves['A-01']!));
+  await expect(
+    page.getByText('Scan the item or its case to receive into Main stock/A-01.'),
+  ).toBeVisible();
+  await wedge(page, OAT_BARCODE);
+  await expect(page.locator('.scan-confirm')).toHaveText('1 unit → Main stock/A-01');
+  // The carton's lot code is no item: with the lot still empty, it is the lot.
+  await wedge(page, 'L-2311');
+  await expect(page.getByRole('status')).toHaveText('Lot L-2311.');
+  await expect(page.getByRole('textbox', { name: 'Lot' })).toHaveValue('L-2311');
+  await wedge(page, OAT_BARCODE);
+  await expect(page.locator('.scan-confirm')).toHaveText('2 units · lot L-2311 → Main stock/A-01');
+  // A lot with expiry needs its date first.
+  const receive = page.getByRole('button', { name: 'Receive 2' });
+  await expect(receive).toBeDisabled();
+  await page.getByLabel('Expiry date').fill('2030-04-25');
+  await receive.click();
+  await expect(page.getByRole('status')).toHaveText('Received 2 × OAT-1 into Main stock/A-01.');
+
+  // Looking the item up shows the lot with its expiry at that shelf.
+  await page
+    .getByRole('navigation', { name: 'Scan flows' })
+    .getByRole('button', { name: 'Look up' })
+    .click();
+  await wedge(page, OAT_BARCODE);
+  await expect(page.getByRole('heading', { name: 'Oat milk' })).toBeVisible();
+  await expect(page.getByText('Lots with expiry')).toBeVisible();
+  const stockHere = page.getByRole('list', { name: 'Stock per location' }).getByRole('listitem');
+  await expect(stockHere).toHaveCount(1);
+  await expect(stockHere).toHaveText('Main stock/A-01Lot L-2311 (exp. 2030-04-25) · 2');
+  const after = await call<Availability>(`/availability?variantId=${oat}`);
+  expect(lotPositions(after)).toEqual(['Main stock/A-01 · L-2311 (2030-04-25): 2.000000']);
+  expect(violations).toEqual([]);
+});
+
+test('move: a shelf with two lots asks which one, and the scanned lot moves', async ({ page }) => {
+  const violations = cspWatch(page);
+  const { shopId, call, shelves } = await setup(page, 'scan-lot-move', ['A-01', 'B-01']);
+  const oat = await lotItem(call);
+  for (const [lotCode, expiresOn, quantity] of [
+    ['L-A', '2030-01-31', '4'],
+    ['L-B', '2030-06-30', '3'],
+  ]) {
+    await call('/receipts', {
+      variantId: oat,
+      locationId: shelves['A-01'],
+      quantity,
+      lotCode,
+      expiresOn,
+    });
+  }
+
+  await page.goto(`/app/scan?shop=${shopId}&flow=move`);
+  await expect(page.getByRole('heading', { name: 'Move' })).toBeVisible();
+  await wedge(page, label(shelves['A-01']!));
+  await expect(page.getByRole('status')).toHaveText('Moving from Main stock/A-01. Scan the items.');
+  await wedge(page, OAT_BARCODE);
+  await expect(page.getByText('Which lot of OAT-1? Choose or scan it.')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Lot' })).toHaveValue('');
+  // The lot code scanned from the carton chooses it.
+  await wedge(page, 'L-B');
+  await expect(page.getByRole('status')).toHaveText('Lot L-B.');
+  await expect(page.getByRole('combobox', { name: 'Lot' })).toHaveValue('L-B');
+  await expect(page.getByText('Available here: 3')).toBeVisible();
+  await wedge(page, OAT_BARCODE);
+  await wedge(page, label(shelves['B-01']!));
+  await expect(page.locator('.scan-confirm').last()).toHaveText(
+    'OAT-1: 2 units · lot L-B · Main stock/A-01 → Main stock/B-01',
+  );
+  await page.getByRole('button', { name: 'Move 2 units to Main stock/B-01' }).click();
+  await expect(page.getByRole('status')).toHaveText(
+    'Moved OAT-1: 2 units · lot L-B from Main stock/A-01 to Main stock/B-01.',
+  );
+
+  // The lot keeps its expiry on the new shelf; the other lot did not move.
+  const after = await call<Availability>(`/availability?variantId=${oat}`);
+  expect(lotPositions(after)).toEqual([
+    'Main stock/A-01 · L-A (2030-01-31): 4.000000',
+    'Main stock/A-01 · L-B (2030-06-30): 1.000000',
+    'Main stock/B-01 · L-B (2030-06-30): 2.000000',
+  ]);
   expect(violations).toEqual([]);
 });
 

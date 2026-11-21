@@ -223,8 +223,14 @@ describe('pick lists (A41, pick half)', () => {
     expect(events).toHaveLength(1);
   });
 
-  it('flags a short pick and names the position to count', async () => {
+  it('flags a short pick and names the position to count, with what was picked from it', async () => {
     const box = list.pickLines.find((l) => l.sku === 'BOX-PICK' && l.quantity === '7')!;
+    // The other order's 2 boxes on that shelf are picked first: they are in a tote now.
+    const other = list.pickLines.find(
+      (l) => l.positionId === box.positionId && l.lineId !== box.lineId,
+    )!;
+    expect(other).toMatchObject({ sku: 'BOX-PICK', quantity: '2' });
+    await h.run(ops.recordPick, { pickListId: list.pickListId, lineId: other.lineId });
     const res = await h.run(ops.recordShortPick, {
       pickListId: list.pickListId,
       lineId: box.lineId,
@@ -237,12 +243,18 @@ describe('pick lists (A41, pick half)', () => {
       locationId: box.locationId,
       variantId: boxes,
       missing: '2',
+      // Picked but still on record at the shelf: the 2 of the other order and the 5 found.
+      picked: '7',
     });
     await expect(
       h.run(ops.recordShortPick, {
         pickListId: list.pickListId,
         lineId: list.pickLines.find(
-          (l) => l.sku === 'BOX-PICK' && l.status === 'open' && l.lineId !== box.lineId,
+          (l) =>
+            l.sku === 'BOX-PICK' &&
+            l.status === 'open' &&
+            l.lineId !== box.lineId &&
+            l.lineId !== other.lineId,
         )!.lineId,
         found: '99',
       }),

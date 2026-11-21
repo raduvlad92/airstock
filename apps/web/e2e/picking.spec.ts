@@ -5,7 +5,9 @@ import { readLabelPdf } from '../test/pdf-images.ts';
 
 // A41, pick half, in a real browser under the app's CSP: a pick list for 20 orders built in the
 // dashboard and printed as a PDF, then worked on the scan page with a keyboard-wedge scanner:
-// location, item, confirm; one short pick; finishing fulfills, and only then does stock drop.
+// location, item, confirm; one short pick, handed over to Count, which keeps the units already
+// picked and moves the short order to other stock; finishing fulfills, and only then does stock
+// drop for the picked orders.
 
 function api(page: Page, shopId: string) {
   return async <T>(path: string, body?: unknown): Promise<T> => {
@@ -48,7 +50,7 @@ test('a pick list for 20 orders is printed, picked by scanning, and fulfilled at
   const { warehouses } = await call<{ warehouses: Array<{ warehouseId: string }> }>('/warehouses');
   const warehouseId = warehouses[0]!.warehouseId;
   const shelves: Record<string, string> = {};
-  for (const code of ['B-01', 'A-01']) {
+  for (const code of ['B-01', 'A-01', 'C-01']) {
     shelves[code] = (
       await call<{ locationId: string }>('/locations', { warehouseId, name: code, code })
     ).locationId;
@@ -72,6 +74,12 @@ test('a pick list for 20 orders is printed, picked by scanning, and fulfilled at
       quantity: '20',
     });
   }
+  // 5 more cards on C-01, free for the short order's claim (the orders take A-01's first).
+  await call('/receipts', {
+    variantId: variants['CARD-1'],
+    locationId: shelves['C-01'],
+    quantity: '5',
+  });
   // 20 orders of one unit, alternating cards and boxes.
   for (let i = 1; i <= 20; i++) {
     await call('/reservations', {
@@ -135,21 +143,53 @@ test('a pick list for 20 orders is printed, picked by scanning, and fulfilled at
   await expect(page.getByRole('status')).toHaveText(
     'Short: 1 × CARD-1 not found at Main stock/A-01. Flagged for a count.',
   );
-  // The short line hands over to Count with its shelf and the item listed, and back.
-  await page.getByRole('button', { name: 'Count that shelf' }).click();
-  await expect(
-    page.getByText(
-      'Short pick: 1 × CARD-1 missing at Main stock/A-01. Count what is on the shelf.',
-    ),
-  ).toBeVisible();
-  await expect(page.getByRole('list', { name: 'To confirm' })).toHaveText('CARD-1: 0 units');
-  await page.getByRole('button', { name: 'Pick', exact: true }).click();
-
-  // Picking changed nothing in stock.
+  // Picking, short pick included, changed nothing in stock.
   const during = await call<{ totals: { onHand: string } }>(
     `/availability?variantId=${variants['CARD-1']}`,
   );
   expect(during.totals.onHand).toBe(stockBefore.totals.onHand);
+  const { pickLists } = await call<{ pickLists: Array<{ pickListId: string }> }>(
+    '/pick-lists?status=open',
+  );
+  const { pickLines } = await call<{
+    pickLines: Array<{ status: string; externalRef: string; sku: string; short: string }>;
+  }>(`/pick-lists/${pickLists[0]!.pickListId}`);
+  const shorted = pickLines.filter((l) => l.status === 'short');
+  expect(shorted).toEqual([expect.objectContaining({ sku: 'CARD-1', short: '1', picked: '0' })]);
+
+  // The short line hands over to Count with its shelf and the item listed. The 9 cards picked
+  // from the shelf are in the tote, still on record there: the count adds them to the 0 found.
+  await page.getByRole('button', { name: 'Count that shelf' }).click();
+  await expect(
+    page.getByText(
+      'Short pick: 1 × CARD-1 missing at Main stock/A-01. Count what is on the shelf. The 9 already picked from it are added.',
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole('list', { name: 'To confirm' })).toHaveText(
+    'CARD-1: 0 units + 9 picked',
+  );
+  await page.getByRole('button', { name: 'Confirm count of 1 item' }).click();
+  // Only the short order's unit needs a decision; it is listed first.
+  await expect(
+    page.getByText('CARD-1 at Main stock/A-01: 1 reserved unit needs a decision (0 chosen)'),
+  ).toBeVisible();
+  const claim = page.locator('.scan-claim-list li').first();
+  await expect(claim).toContainText(`${shorted[0]!.externalRef} 1 reserved · short pick`);
+  await claim.getByRole('button', { name: 'Move to other stock' }).click();
+  await page.getByRole('button', { name: 'Apply with these choices' }).click();
+  await expect(page.getByRole('status')).toHaveText(
+    'Counted at Main stock/A-01: CARD-1 -11. 1 reserved claim(s) settled.',
+  );
+  const counted = await call<{
+    positions: Array<{ locationPath: string; onHand: string; reserved: string }>;
+  }>(`/availability?variantId=${variants['CARD-1']}`);
+  expect(
+    Object.fromEntries(counted.positions.map((p) => [p.locationPath, [p.onHand, p.reserved]])),
+  ).toEqual({
+    'Main stock/A-01': ['9.000000', '9.000000'],
+    'Main stock/C-01': ['5.000000', '1.000000'],
+  });
+  await page.getByRole('button', { name: 'Pick', exact: true }).click();
 
   // The boxes, on the next shelf.
   await expect(page.locator('.scan-pick-stop')).toHaveText('Main stock/B-01');
@@ -165,11 +205,12 @@ test('a pick list for 20 orders is printed, picked by scanning, and fulfilled at
     page.getByText(/19 fulfillment\(s\) recorded; 1 short line\(s\) stay reserved/),
   ).toBeVisible();
 
-  // Fulfillment at the end is what lowers stock: 9 cards and 10 boxes left.
+  // Fulfillment at the end is what lowers stock: the 9 picked cards leave A-01, and the short
+  // order stays reserved on C-01 for the next list; 10 boxes left.
   const cards = await call<{ totals: { onHand: string; reserved: string } }>(
     `/availability?variantId=${variants['CARD-1']}`,
   );
-  expect(cards.totals).toMatchObject({ onHand: '11.000000', reserved: '1.000000' });
+  expect(cards.totals).toMatchObject({ onHand: '5.000000', reserved: '1.000000' });
   const boxes = await call<{ totals: { onHand: string } }>(
     `/availability?variantId=${variants['BOX-1']}`,
   );

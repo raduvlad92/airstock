@@ -386,3 +386,90 @@ describe('picking up products created in Shopify', () => {
     expect(again.status).toBe(409);
   });
 });
+
+describe('shopify_sync listings over MCP', () => {
+  it('lists a product and settles a listing difference through an MCP client, as REST does', async () => {
+    const s = await setup('MCP lister');
+    const desk = await h.item(s.m, 'Desk lamp', sku('DSK'), { price: '20.00' });
+    const floor = await h.item(s.m, 'Floor lamp', sku('FLR'), { price: '35.00' });
+    const mcp = await h.mcp(s.m, ['catalog:read', 'catalog:write']);
+    const listed = await mcp.call('shopify_sync', {
+      action: 'list_product',
+      productId: desk.productId,
+    });
+    expect(listed.error, JSON.stringify(listed.body)).toBe(false);
+    expect(listed.body).toEqual({
+      connectionId: s.connectionId,
+      productId: desk.productId,
+      status: 'draft',
+      state: 'pending',
+    });
+    const viaRest = await h.command(
+      s.m.cookie,
+      `/shops/${s.m.shopId}/products/${floor.productId}/shopify-listing`,
+      { productId: floor.productId },
+    );
+    expect(await json(viaRest)).toEqual({ ...listed.body, productId: floor.productId });
+    expect(await publishRequested(s)).toEqual(['created', 'created']);
+
+    // Shopify renames the desk lamp: a difference, settled by taking Shopify's title.
+    const shopifyId = (await listing(s, desk.productId))!.shopify_product_id!;
+    s.store.editProduct(shopifyId, { title: 'Desk lamp (Shopify)' });
+    await webhook(s, 'products/update', shopifyId);
+    expect((await differences(s)).map((d) => d.field)).toEqual(['title']);
+    const settled = await mcp.call('shopify_sync', {
+      action: 'resolve_listing',
+      connectionId: s.connectionId,
+      productId: desk.productId,
+      field: 'title',
+      choice: 'take_shopify',
+    });
+    expect(settled.body).toEqual({ field: 'title', choice: 'take_shopify' });
+    const [product] = await ownerQuery<{ name: string }>(
+      'select name from products where id = $1',
+      [desk.productId],
+    );
+    expect(product?.name).toBe('Desk lamp (Shopify)');
+    expect(await differences(s)).toEqual([]);
+    expect(await publishRequested(s)).toEqual([]);
+    await mcp.close();
+  });
+
+  it('refuses a grant without catalog:write and another shop’s product and connection', async () => {
+    const s = await setup('MCP list refusals');
+    const mine = await h.item(s.m, 'Reading lamp', sku('RDG'));
+    const readOnly = await h.mcp(s.m, ['catalog:read']);
+    const refused = await readOnly.call('shopify_sync', {
+      action: 'list_product',
+      productId: mine.productId,
+    });
+    expect(refused).toMatchObject({ error: true, body: { code: 'forbidden' } });
+    expect(refused.body.detail).toContain('catalog:write');
+    await readOnly.close();
+
+    const theirs = await setup('MCP list other shop');
+    const their = await h.item(theirs.m, 'Their lamp', sku('THR'));
+    const mcp = await h.mcp(s.m, ['catalog:read', 'catalog:write']);
+    const settle = {
+      action: 'resolve_listing',
+      connectionId: s.connectionId,
+      productId: mine.productId,
+      field: 'title',
+      choice: 'push_airstock',
+    };
+    for (const args of [
+      { action: 'list_product', productId: their.productId },
+      { action: 'list_product', productId: mine.productId, connectionId: theirs.connectionId },
+      { ...settle, connectionId: theirs.connectionId, productId: their.productId },
+      { ...settle, productId: their.productId },
+    ]) {
+      const foreign = await mcp.call('shopify_sync', args);
+      expect(foreign.body.code, JSON.stringify(args)).toBe('not_found');
+    }
+    // This shop's own connection and product, with nothing to settle, is a conflict instead.
+    const nothing = await mcp.call('shopify_sync', settle);
+    expect(nothing).toMatchObject({ error: true, body: { status: 409, code: 'no_difference' } });
+    await mcp.close();
+    expect(await listing(s, mine.productId)).toBeUndefined();
+  });
+});

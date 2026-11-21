@@ -757,6 +757,14 @@ export const resolveListingDifference = defineOperation({
       [input.connectionId, input.productId, input.field],
     );
     if (!listing || !difference) {
+      // A connection or product this shop does not have is not found, as on every route (A13).
+      const [known] = await ctx.tx.query<{ connection: boolean; product: boolean }>(
+        `select exists (select 1 from shopify_connections where id = $1) as connection,
+           exists (select 1 from products where id = $2) as product`,
+        [input.connectionId, input.productId],
+      );
+      if (!known?.connection) throw errors.notFound('Shopify connection');
+      if (!known.product) throw errors.notFound('Product');
       throw errors.conflict('no_difference', 'There is no open difference for this field.');
     }
     const acc = newAcc();

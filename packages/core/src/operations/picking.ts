@@ -867,7 +867,7 @@ export const recordShortPick = defineOperation({
   id: 'picking.picks.short',
   summary: 'Record a short pick: fewer units found than the line needs',
   description:
-    'Use this when the picker cannot find everything a line asks for at its position. Records what was found (it counts as picked) and flags the line short; the missing units stay reserved at that position until a count settles it and they are reallocated. Returns the position to count. Stock does not change. Not for units taken from another lot or position (use record_pick with lotCode, serial, or locationId).',
+    'Use this when the picker cannot find everything a line asks for at its position. Records what was found (it counts as picked) and flags the line short; the missing units stay reserved at that position until a count settles it and they are reallocated. Returns the position to count, with the units already picked from it on open lists, which the count adds to what is on the shelf. Stock does not change. Not for units taken from another lot or position (use record_pick with lotCode, serial, or locationId).',
   kind: 'command',
   scope: 'shop',
   input: z.object({
@@ -888,6 +888,11 @@ export const recordShortPick = defineOperation({
         lotId: Id.nullable(),
         serialId: Id.nullable(),
         missing: z.string(),
+        picked: z
+          .string()
+          .describe(
+            'Units already picked from this position on open pick lists, this one included: off the shelf but on record here until their list is finished. A count of the shelf adds them to what is counted, or it would take them off the books.',
+          ),
       })
       .describe('The position to count: where the count that settles the difference starts.'),
   }),
@@ -942,6 +947,15 @@ export const recordShortPick = defineOperation({
     );
     await touchList(ctx.tx, line.pick_list_id);
     const result = await pickResult(ctx, line.pick_list_id, line.id, [], null);
+    // Picks never change stock: units picked from this position on open lists are in totes but
+    // still on record here, so the count of the shelf must add them back.
+    const [tote] = await ctx.tx.query<{ picked: string }>(
+      `select coalesce(sum(pl.picked), 0)::text as picked
+       from pick_lists l
+       join pick_lines pl on pl.shop_id = l.shop_id and pl.pick_list_id = l.id
+       where l.status = 'open' and pl.position_id = $1`,
+      [line.position_id],
+    );
     // I4b: the count of this position (milestone I2's count) starts from here.
     const count = {
       positionId: line.position_id,
@@ -950,6 +964,7 @@ export const recordShortPick = defineOperation({
       lotId: line.lot_id,
       serialId: line.serial_id,
       missing,
+      picked: normalize(tote?.picked ?? '0'),
     };
     return {
       result: { ...result, count },

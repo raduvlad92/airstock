@@ -47,8 +47,9 @@ function claimLabel(c: Claim): string {
 }
 
 export function ClaimChooser({
-  problems,
+  problems: given,
   describe,
+  shortOrder = null,
   pending,
   onApply,
   onCancel,
@@ -56,11 +57,22 @@ export function ClaimChooser({
   problems: ClaimProblem[];
   /** Names the item of a problem, such as its SKU and shelf. */
   describe: (p: ClaimProblem) => string;
+  /** The order a short pick left without its units: listed first and marked. */
+  shortOrder?: string | null;
   pending: boolean;
   onApply: (choices: ClaimChoice[]) => void;
   onCancel: () => void;
 }) {
   const [actions, setActions] = useState<Record<string, Action>>({});
+  const problems = shortOrder
+    ? given.map((p) => ({
+        ...p,
+        allocations: [
+          ...p.allocations.filter((a) => a.externalRef === shortOrder),
+          ...p.allocations.filter((a) => a.externalRef !== shortOrder),
+        ],
+      }))
+    : given;
   // Per position, how much each claim gives up: claims in order until the difference is covered.
   const quantities: Record<string, string> = {};
   let ready = true;
@@ -107,7 +119,10 @@ export function ClaimChooser({
                   <li key={a.allocationId}>
                     <span>
                       <strong>{claimLabel(a)}</strong>{' '}
-                      <span className="muted">{formatDecimal(a.outstanding)} reserved</span>
+                      <span className="muted">
+                        {formatDecimal(a.outstanding)} reserved
+                        {shortOrder && a.externalRef === shortOrder ? ' · short pick' : ''}
+                      </span>
                     </span>
                     <div className="scan-claim-actions">
                       {(

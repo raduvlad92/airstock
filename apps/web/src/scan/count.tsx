@@ -1,5 +1,5 @@
 import type { ops } from '@airstock/core';
-import { compare } from '@airstock/core/catalog/decimal';
+import { add, compare, normalize } from '@airstock/core/catalog/decimal';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, command, errorMessage, type Out } from '../api.ts';
@@ -62,9 +62,38 @@ function lineProblem(line: ItemLine, locationId: string | null): string | null {
   return null;
 }
 
+/**
+ * Units picked from the shelf on open pick lists: in a tote, but on record at the shelf until
+ * their list is finished (picks never change stock). A count after a short pick adds them.
+ */
+interface Tote {
+  variantId: string;
+  lotCode: string;
+  quantity: string;
+}
+
+function inTote(line: ItemLine, tote: Tote | null): string | null {
+  if (!tote || line.item.trackingMode === 'serial' || line.item.variantId !== tote.variantId) {
+    return null;
+  }
+  if (isLotTracked(line.item) && line.lotCode.trim().toUpperCase() !== tote.lotCode.toUpperCase()) {
+    return null;
+  }
+  return tote.quantity;
+}
+
 /** The count entry the API takes for a line (quick count and count sessions alike). */
-function countItem(line: ItemLine, locationId?: string) {
+function countItem(line: ItemLine, locationId?: string, picked: string | null = null) {
   const serial = line.item.trackingMode === 'serial';
+  if (picked && !serial && /^\d+(\.\d{1,6})?$/.test(line.tally.quantity)) {
+    // What is on the shelf plus what was picked from it, in base units.
+    return {
+      variantId: line.item.variantId,
+      ...(locationId ? { locationId } : {}),
+      counted: normalize(add(lineUnits(line), picked)),
+      ...(isLotTracked(line.item) && line.lotCode.trim() ? { lotCode: line.lotCode.trim() } : {}),
+    };
+  }
   return {
     variantId: line.item.variantId,
     ...(locationId ? { locationId } : {}),
@@ -138,6 +167,15 @@ function QuickCount({ env }: { env: ScanEnv }) {
   const [banner, setBanner] = useState<string | null>(null);
   // A short pick pins the count to its shelf until it is confirmed or cleared.
   const [pinned, setPinned] = useState(shortPick !== null);
+  const [tote, setTote] = useState<Tote | null>(() =>
+    shortPick?.variantId && shortPick.picked && compare(shortPick.picked, '0') > 0
+      ? {
+          variantId: shortPick.variantId,
+          lotCode: shortPick.lotCode ?? '',
+          quantity: normalize(shortPick.picked),
+        }
+      : null,
+  );
   const key = useRef(crypto.randomUUID());
   const setLines = (next: ItemLine[]) => {
     key.current = crypto.randomUUID();
@@ -150,8 +188,12 @@ function QuickCount({ env }: { env: ScanEnv }) {
     if (!shortPick || presetDone.current) return;
     presetDone.current = true;
     const missing = shortPick.missing ? formatDecimal(shortPick.missing) : null;
+    const picked =
+      shortPick.picked && compare(shortPick.picked, '0') > 0
+        ? ` The ${formatDecimal(shortPick.picked)} already picked from it are added.`
+        : '';
     setBanner(
-      `Short pick${missing ? `: ${missing} × ${shortPick.sku ?? 'the item'} missing` : ''} at ${shortPick.locationPath}. Count what is on the shelf.`,
+      `Short pick${missing ? `: ${missing} × ${shortPick.sku ?? 'the item'} missing` : ''} at ${shortPick.locationPath}. Count what is on the shelf.${picked}`,
     );
     if (!shortPick.sku) return;
     void resolveScan(env.shopId, shortPick.sku)
@@ -180,7 +222,7 @@ function QuickCount({ env }: { env: ScanEnv }) {
         `/shops/${env.shopId}/counts/quick`,
         {
           locationId: at!.locationId,
-          counts: lines.map((l) => countItem(l)),
+          counts: lines.map((l) => countItem(l, undefined, inTote(l, tote))),
           ...(choices.length > 0 ? { reservationChoices: choices } : {}),
         },
         key.current,
@@ -204,6 +246,7 @@ function QuickCount({ env }: { env: ScanEnv }) {
       setProblems(null);
       setBanner(null);
       setPinned(false);
+      setTote(null);
       void queryClient.invalidateQueries({ queryKey: ['shop', env.shopId] });
     },
     onError: (error) => {
@@ -228,6 +271,7 @@ function QuickCount({ env }: { env: ScanEnv }) {
         setAt({ locationId: scan.location.locationId, path: scan.location.path });
         setBanner(null);
         setPinned(false);
+        setTote(null);
         env.feedback('ok', `Counting ${scan.location.path}. Scan the items.`);
       } else if (scan.location.locationId === at?.locationId) {
         env.feedback('ok', `Counting ${at.path}.`);
@@ -258,6 +302,7 @@ function QuickCount({ env }: { env: ScanEnv }) {
           const line = lines.find((l) => l.item.variantId === p.variantId);
           return `${line?.item.sku ?? 'Item'} at ${at?.path}`;
         }}
+        shortOrder={tote ? (shortPick?.order ?? null) : null}
         pending={submit.isPending}
         onApply={(choices) => submit.mutate(choices)}
         onCancel={() => setProblems(null)}
@@ -265,6 +310,10 @@ function QuickCount({ env }: { env: ScanEnv }) {
     );
   }
 
+  const withTote = (l: ItemLine) => {
+    const picked = inTote(l, tote);
+    return picked ? ` + ${formatDecimal(picked)} picked` : '';
+  };
   const blocked = lines.map((l) => lineProblem(l, at?.locationId ?? null)).find(Boolean) ?? null;
   const moved = at && env.location && env.location.locationId !== at.locationId && lines.length > 0;
   return (
@@ -293,7 +342,14 @@ function QuickCount({ env }: { env: ScanEnv }) {
                   env={env}
                   line={line}
                   locationId={at!.locationId}
-                  note={recordNote(line, at!.locationId)}
+                  note={[
+                    recordNote(line, at!.locationId),
+                    inTote(line, tote)
+                      ? `${formatDecimal(inTote(line, tote)!)} picked from here, added to the count`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                   quantityLabel="Counted"
                   serialHint={SERIAL_HINT}
                   onChange={(next) => setLines(lines.map((l) => (l.id === next.id ? next : l)))}
@@ -318,7 +374,10 @@ function QuickCount({ env }: { env: ScanEnv }) {
         <>
           <ul className="scan-confirm-list" aria-label="To confirm" aria-live="polite">
             {lines.map((l) => (
-              <li key={l.id}>{lineSummary(l)}</li>
+              <li key={l.id}>
+                {lineSummary(l)}
+                {withTote(l)}
+              </li>
             ))}
           </ul>
           {blocked ? <p className="notice error">{blocked}</p> : null}
@@ -340,6 +399,7 @@ function QuickCount({ env }: { env: ScanEnv }) {
                 setActive(null);
                 setBanner(null);
                 setPinned(false);
+                setTote(null);
               }}
             >
               Clear

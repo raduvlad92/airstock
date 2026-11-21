@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BASE,
@@ -221,6 +221,7 @@ describe('scan page: quick count', () => {
           lotId: null,
           serialId: null,
           missing: '2',
+          picked: '0',
         },
       },
       [`POST /shops/${SHOP}/counts/quick`]: {
@@ -255,6 +256,144 @@ describe('scan page: quick count', () => {
       locationId: LOC,
       counts: [{ variantId: VAR, counted: '0' }],
     });
+  });
+
+  it('adds the units already picked from a short-picked shelf, and lists the short order first', async () => {
+    localStorage.setItem(`airstock.scan.pick.${SHOP}`, LIST);
+    const PICKED_ALLOC = '0196f3a0-0000-7000-8000-000000000a03';
+    const calls = mockApi({
+      ...BASE([...COUNTER, 'picking.run']),
+      [`/shops/${SHOP}/scan`]: scanRoutes({
+        [LOCATION.code]: LOCATION,
+        'BOX-1': { ...UNIT_SCAN, code: 'BOX-1', item: item({ matchedBy: 'sku' }) },
+      }),
+      [`/shops/${SHOP}/pick-lists/${LIST}`]: {
+        pickListId: LIST,
+        number: 4,
+        status: 'open',
+        lines: 2,
+        shortLines: 0,
+        pickLines: [
+          {
+            lineId: PICK_LINE,
+            sequence: 2,
+            status: 'open',
+            locationId: LOC,
+            locationPath: 'Main stock/B-02',
+            variantId: VAR,
+            sku: 'BOX-1',
+            productName: 'Booster box',
+            variantName: null,
+            lotId: null,
+            lotCode: null,
+            serial: null,
+            externalRef: 'api:order/8',
+            quantity: '1',
+            remaining: '1',
+            inPacks: { packs: [], looseUnits: '1' },
+          },
+        ],
+      },
+      // Three boxes of another order were picked from this shelf earlier: they are in the tote.
+      [`POST /shops/${SHOP}/pick-lists/${LIST}/short-picks`]: {
+        openLines: 0,
+        count: {
+          positionId: POS,
+          locationId: LOC,
+          variantId: VAR,
+          lotId: null,
+          serialId: null,
+          missing: '1',
+          picked: '3',
+        },
+      },
+      [`POST /shops/${SHOP}/counts/quick`]: (call: Call) =>
+        (call.body as { reservationChoices?: unknown }).reservationChoices
+          ? {
+              operationId: OP,
+              sessionId: SESSION,
+              ...CHANGES,
+              changes: [
+                {
+                  variantId: VAR,
+                  locationId: LOC,
+                  condition: 'sellable',
+                  lotId: null,
+                  serialId: null,
+                  delta: '-9',
+                },
+              ],
+              reallocated: [{ allocationId: ALLOC, reservationId: RES, quantity: '1', to: [] }],
+            }
+          : new Problem(409, {
+              code: 'below_reserved',
+              title: 'This leaves fewer units than are reserved.',
+              positions: [
+                {
+                  positionId: POS,
+                  variantId: VAR,
+                  locationId: LOC,
+                  onHandAfter: '3',
+                  reserved: '4',
+                  toResolve: '1',
+                  allocations: [
+                    {
+                      allocationId: PICKED_ALLOC,
+                      reservationId: RES,
+                      purpose: 'external_order',
+                      externalRef: 'api:order/7',
+                      outstanding: '3',
+                    },
+                    {
+                      allocationId: ALLOC,
+                      reservationId: RES,
+                      purpose: 'external_order',
+                      externalRef: 'api:order/8',
+                      outstanding: '1',
+                    },
+                  ],
+                },
+              ],
+            }),
+    });
+    renderScan('?flow=pick');
+    await scan(LOCATION.code);
+    fireEvent.click(await screen.findByRole('button', { name: 'Short…' }));
+    fireEvent.change(screen.getByLabelText('Found'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Only 0 found' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Count that shelf' }));
+
+    expect(
+      await screen.findByText(
+        'Short pick: 1 × BOX-1 missing at Main stock/B-02. Count what is on the shelf. The 3 already picked from it are added.',
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'To confirm' }).textContent).toBe(
+        'BOX-1: 0 units + 3 picked',
+      ),
+    );
+    expect(screen.getByText(/3 picked from here, added to the count/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm count of 1 item' }));
+
+    // Only the short order's unit needs a decision: it comes first, marked.
+    expect(await screen.findByRole('heading', { name: 'Reserved stock' })).toBeTruthy();
+    const claims = screen.getAllByRole('listitem').filter((li) => li.closest('.scan-claim-list'));
+    expect(claims.map((li) => li.querySelector('span')?.textContent)).toEqual([
+      'api:order/8 1 reserved · short pick',
+      'api:order/7 3 reserved',
+    ]);
+    fireEvent.click(within(claims[0]!).getByRole('button', { name: 'Move to other stock' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply with these choices' }));
+    expect(await screen.findByText(/Counted at Main stock\/B-02: BOX-1 -9/)).toBeTruthy();
+    expect(posts(calls, `/shops/${SHOP}/counts/quick`).map((c) => c.body)).toEqual([
+      { locationId: LOC, counts: [{ variantId: VAR, counted: '3' }] },
+      {
+        locationId: LOC,
+        counts: [{ variantId: VAR, counted: '3' }],
+        reservationChoices: [{ allocationId: ALLOC, action: 'reallocate', quantity: '1' }],
+      },
+    ]);
   });
 });
 

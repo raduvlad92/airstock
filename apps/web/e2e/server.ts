@@ -25,6 +25,7 @@ import {
   runImportJob,
   runReportExportJob,
   sessionCaller,
+  shopifyConnectorCaller,
   uuidv7,
   WebhookSecretCipher,
 } from '@airstock/core';
@@ -196,6 +197,38 @@ async function stockDrift(shopId: string): Promise<void> {
   }
 }
 
+/**
+ * An order no stock covers (D6): only a connector records a shortage, as the Shopify order sync
+ * does, so this reserves through the Shopify connector's caller with `allowShortage`.
+ */
+async function shortageOrder(url: URL): Promise<unknown> {
+  const shopId = url.searchParams.get('shopId') ?? '';
+  const owner = new pg.Client({ connectionString: ownerUrl.toString() });
+  await owner.connect();
+  try {
+    const { rows } = await owner.query<{ id: string }>(
+      `select id from memberships where shop_id = $1 and role = 'owner' limit 1`,
+      [shopId],
+    );
+    const caller = shopifyConnectorCaller(shopId, uuidv7(), rows[0]!.id);
+    const done = await execute({ db, audit }, ops.reserveStock, {
+      caller,
+      shopId,
+      input: {
+        variantId: url.searchParams.get('variantId'),
+        quantity: url.searchParams.get('quantity'),
+        allowShortage: true,
+        purpose: 'external_order',
+        externalRef: url.searchParams.get('externalRef'),
+      },
+      idempotencyKey: uuidv7(),
+    });
+    return done.result;
+  } finally {
+    await owner.end();
+  }
+}
+
 const TYPES: Record<string, string> = {
   '.js': 'text/javascript',
   '.css': 'text/css',
@@ -236,6 +269,12 @@ const server = createServer(async (req, res) => {
       const shopId = url.searchParams.get('shopId') ?? '';
       if (url.searchParams.get('action') === 'drift') await stockDrift(shopId);
       const result = await reconcileShop(db, shopId, 'scheduled');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(result));
+      return;
+    }
+    if (url.pathname === '/__e2e/shortage') {
+      const result = await shortageOrder(url);
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(result));
       return;

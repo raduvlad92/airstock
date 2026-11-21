@@ -140,7 +140,13 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
   } | null>(null);
   const [shortFound, setShortFound] = useState<string | null>(null);
   const [lastShort, setLastShort] = useState<
-    (Shorted['count'] & { path: string; sku: string; lotCode: string | null }) | null
+    | (Shorted['count'] & {
+        path: string;
+        sku: string;
+        lotCode: string | null;
+        order: string | null;
+      })
+    | null
   >(null);
   const [completed, setCompleted] = useState<Completed | null>(null);
   const key = useRef(crypto.randomUUID());
@@ -202,6 +208,7 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
         path: p.line.locationPath,
         sku: p.line.sku,
         lotCode: p.line.lotCode,
+        order: p.line.externalRef,
       });
       done();
       await refresh();
@@ -439,8 +446,11 @@ function PickWalk({ env, listId, onLeave }: { env: ScanEnv; listId: string; onLe
                   locationPath: lastShort.path,
                   variantId: lastShort.variantId,
                   missing: lastShort.missing,
+                  // Picked units are in the tote but still on record at the shelf.
+                  picked: lastShort.picked,
                   sku: lastShort.sku,
                   ...(lastShort.lotCode ? { lotCode: lastShort.lotCode } : {}),
+                  ...(lastShort.order ? { order: lastShort.order } : {}),
                 })
               }
             >

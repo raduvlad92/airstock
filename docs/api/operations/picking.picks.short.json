@@ -3,7 +3,7 @@
     "post": {
       "operationId": "picking.picks.short",
       "summary": "Record a short pick: fewer units found than the line needs",
-      "description": "Use this when the picker cannot find everything a line asks for at its position. Records what was found (it counts as picked) and flags the line short; the missing units stay reserved at that position until a count settles it and they are reallocated. Returns the position to count. Stock does not change. Not for units taken from another lot or position (use record_pick with lotCode, serial, or locationId).",
+      "description": "Use this when the picker cannot find everything a line asks for at its position. Records what was found (it counts as picked) and flags the line short; the missing units stay reserved at that position until a count settles it and they are reallocated. Returns the position to count, with the units already picked from it on open lists, which the count adds to what is on the shelf. Stock does not change. Not for units taken from another lot or position (use record_pick with lotCode, serial, or locationId).",
       "x-permission": "picking.run",
       "x-connection-scope": "inventory:write",
       "x-audit-action": "picking.pick.short",
@@ -540,6 +540,10 @@
                       },
                       "missing": {
                         "type": "string"
+                      },
+                      "picked": {
+                        "type": "string",
+                        "description": "Units already picked from this position on open pick lists, this one included: off the shelf but on record here until their list is finished. A count of the shelf adds them to what is counted, or it would take them off the books."
                       }
                     },
                     "required": [
@@ -548,7 +552,8 @@
                       "variantId",
                       "lotId",
                       "serialId",
-                      "missing"
+                      "missing",
+                      "picked"
                     ],
                     "additionalProperties": false,
                     "description": "The position to count: where the count that settles the difference starts."

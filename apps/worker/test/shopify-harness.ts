@@ -11,13 +11,15 @@ import {
   TokenCipher,
 } from '@airstock/shopify';
 import { expect } from 'vitest';
-import { ownerQuery } from '../../../test/helpers.ts';
+import { ownerQuery, type SeededShop } from '../../../test/helpers.ts';
 import type { JobMessage, ShopifyAppConfig } from '../src/shopify.ts';
 import type { WorkosUser } from '../src/workos.ts';
 import { FakeAuth, FakeStore } from './fake-shopify.ts';
+import { mcpSession } from './mcp-client.ts';
 import {
   cookieHeader,
   cookiesFrom,
+  type GrantMember,
   json,
   PUBLIC_URL,
   signInAs,
@@ -263,6 +265,21 @@ export async function shopifyHarness() {
     );
   }
 
+  /** An MCP client for the merchant's owner (or `member`), granted these scopes. */
+  async function mcp(m: Merchant, scopes: string[], member?: GrantMember) {
+    const [owner] = await ownerQuery<{ id: string; user_id: string }>(
+      `select id, user_id from memberships where shop_id = $1 and role = 'owner'`,
+      [m.shopId],
+    );
+    const shop = { shopId: m.shopId, userId: owner!.user_id } as SeededShop;
+    return mcpSession(
+      t,
+      shop,
+      scopes,
+      member ?? { membershipId: owner!.id, userId: owner!.user_id },
+    );
+  }
+
   /** Runs an onboarding's steps until it waits for a person or finishes. */
   async function runOnboardingSteps(shopId: string, onboardingId: string, max = 10) {
     const steps = [];
@@ -294,6 +311,7 @@ export async function shopifyHarness() {
     flushTogether,
     originals,
     runOnboardingSteps,
+    mcp,
     newStore: (prefix: string) => new FakeStore(`${prefix}-${uuidv7().slice(-8)}.myshopify.com`),
   };
 }

@@ -11,10 +11,10 @@ import type { FakeStore } from './fake-shopify.ts';
 import { json } from './setup.ts';
 import { type Merchant, type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
 
-// Review of the Shopify connector (16 November 2026): one test per confirmed defect, named after
-// the finding. Each is `it.fails` so CI stays green until the defect is fixed; the comment above
-// each says what goes wrong. When a fix lands, its test starts passing, `it.fails` then fails,
-// and the fix turns it into a plain `it`.
+// Regression tests for the Shopify connector review (16 November 2026): one test per confirmed
+// defect, named after the finding. Every finding is fixed; the comment above each test says what
+// went wrong before the fix, and the test keeps it from coming back. The listings findings of
+// PR #79 are in shopify-review-findings-pr79.test.ts.
 //
 // Test files run in parallel against one database and outbox: every query here is limited to
 // this file's shops.

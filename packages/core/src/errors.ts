@@ -25,14 +25,15 @@ export class AppError extends Error {
   }
 
   toProblem(requestId?: string): ProblemDetails {
-    return {
+    const own = {
       type: `urn:airstock:problem:${this.code}`,
       title: this.message,
       status: this.status,
       code: this.code,
       ...(requestId ? { requestId } : {}),
-      ...this.extra,
     };
+    // Extras add members but never replace these: `status` is the HTTP status (RFC 9457).
+    return { ...own, ...this.extra, ...own };
   }
 }
 

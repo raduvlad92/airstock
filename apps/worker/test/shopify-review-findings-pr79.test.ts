@@ -5,11 +5,11 @@ import { ownerQuery } from '../../../test/helpers.ts';
 import type { FakeStore } from './fake-shopify.ts';
 import { type Merchant, type ShopifyHarness, shopifyHarness } from './shopify-harness.ts';
 
-// Review of the Shopify connector (16 November 2026), findings in the listings code of PR #79,
-// which merged into main during the review: one test per confirmed defect, named after the
-// finding. Each is `it.fails` so CI stays green until the fix lands; the comment above each says
-// what goes wrong. The other findings are in shopify-review-findings.test.ts. Every query here is
-// limited to this file's shops.
+// Regression tests for the Shopify connector review (16 November 2026), findings in the listings
+// code of PR #79, which merged into main during the review: one test per confirmed defect, named
+// after the finding. Both findings are fixed; the comment above each test says what went wrong
+// before the fix, and the test keeps it from coming back. The other findings are in
+// shopify-review-findings.test.ts. Every query here is limited to this file's shops.
 
 let h: ShopifyHarness;
 beforeAll(async () => {

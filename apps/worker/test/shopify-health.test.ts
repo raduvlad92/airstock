@@ -231,3 +231,123 @@ describe('Shopify sync health', () => {
     ).toHaveLength(1);
   });
 });
+
+describe('shopify_sync over MCP (G15)', () => {
+  it('lists connections, reads sync health, and resolves a conflict, with the same answers as REST', async () => {
+    const s = await setup('MCP mug', 5);
+    await conflictAt(s, 8);
+    const mcp = await h.mcp(s.m, ['shop:read', 'inventory:read', 'inventory:write']);
+    const connections = await mcp.call('shopify_sync', { action: 'connections' });
+    expect(connections.error, JSON.stringify(connections.body)).toBe(false);
+    expect(connections.body.connections).toEqual([
+      expect.objectContaining({ connectionId: s.connectionId, status: 'active', conflicts: 1 }),
+    ]);
+    const restConnections = await h.dashboard(
+      s.m.cookie,
+      `/shops/${s.m.shopId}/shopify/connections`,
+    );
+    expect(await json(restConnections)).toEqual(connections.body);
+
+    const seen = await mcp.call('shopify_sync', { action: 'health', connectionId: s.connectionId });
+    expect(seen.body.connections).toEqual([await health(s)]);
+    expect(seen.body.connections[0]).toMatchObject({
+      status: 'active',
+      lastError: null,
+      conflicts: [{ inventoryItemId: s.item.inventoryItemId, airstock: 5, shopify: 8 }],
+    });
+    const everyStore = await mcp.call('shopify_sync', { action: 'health' });
+    expect(everyStore.body).toEqual(seen.body);
+
+    const resolved = await mcp.call('shopify_sync', {
+      action: 'resolve_conflict',
+      connectionId: s.connectionId,
+      inventoryItemId: s.item.inventoryItemId,
+      shopifyLocationId: '1001',
+      choice: 'push_airstock',
+    });
+    expect(resolved.error, JSON.stringify(resolved.body)).toBe(false);
+    expect(resolved.body).toMatchObject({ choice: 'push_airstock', airstock: 5, shopify: 8 });
+    await h.flushTogether(s.m.shopId);
+    expect(s.store.available(s.item)).toBe(5);
+    const after = await mcp.call('shopify_sync', {
+      action: 'health',
+      connectionId: s.connectionId,
+    });
+    expect(after.body.connections[0].conflicts).toEqual([]);
+    expect(after.body.connections).toEqual([await health(s)]);
+    // Nothing left to resolve, over MCP as over REST.
+    const again = await mcp.call('shopify_sync', {
+      action: 'resolve_conflict',
+      connectionId: s.connectionId,
+      inventoryItemId: s.item.inventoryItemId,
+      shopifyLocationId: '1001',
+      choice: 'push_airstock',
+    });
+    expect(again.error).toBe(true);
+    const restAgain = await resolve(s, 'push_airstock');
+    expect(restAgain.status).toBe(409);
+    expect(again.body).toEqual({ ...(await json(restAgain)), requestId: again.body.requestId });
+    await mcp.close();
+  });
+
+  it('refuses grants without the scopes, another shop’s connection, and a conflict outside the member’s scope', async () => {
+    const s = await setup('MCP refusal mug', 2);
+    await conflictAt(s, 6);
+    const conflict = {
+      action: 'resolve_conflict',
+      connectionId: s.connectionId,
+      inventoryItemId: s.item.inventoryItemId,
+      shopifyLocationId: '1001',
+      choice: 'push_airstock',
+    };
+    const readOnly = await h.mcp(s.m, ['shop:read', 'inventory:read']);
+    const refused = await readOnly.call('shopify_sync', conflict);
+    expect(refused).toMatchObject({ error: true, body: { code: 'forbidden' } });
+    expect(refused.body.detail).toContain('inventory:write');
+    await readOnly.close();
+    const shopOnly = await h.mcp(s.m, ['shop:read']);
+    const noHealth = await shopOnly.call('shopify_sync', { action: 'health' });
+    expect(noHealth.body.detail).toContain('inventory:read');
+    await shopOnly.close();
+    const stockOnly = await h.mcp(s.m, ['inventory:read']);
+    const noConnections = await stockOnly.call('shopify_sync', { action: 'connections' });
+    expect(noConnections.body.detail).toContain('shop:read');
+    await stockOnly.close();
+
+    // Another merchant's connection is not found from this shop.
+    const theirs = await setup('MCP other mug', 1);
+    const mcp = await h.mcp(s.m, ['shop:read', 'inventory:read', 'inventory:write']);
+    const foreignHealth = await mcp.call('shopify_sync', {
+      action: 'health',
+      connectionId: theirs.connectionId,
+    });
+    expect(foreignHealth).toMatchObject({ error: true, body: { code: 'not_found' } });
+    const foreignResolve = await mcp.call('shopify_sync', {
+      ...conflict,
+      connectionId: theirs.connectionId,
+      inventoryItemId: theirs.item.inventoryItemId,
+    });
+    expect(foreignResolve.body.code).toBe('not_found');
+    const listed = await mcp.call('shopify_sync', { action: 'connections' });
+    expect(listed.body.connections.map((c: { connectionId: string }) => c.connectionId)).toEqual([
+      s.connectionId,
+    ]);
+    await mcp.close();
+
+    // A manager limited to another warehouse sees no conflict there and cannot resolve it (A42).
+    const elsewhere = await json(
+      await h.command(s.m.cookie, `/shops/${s.m.shopId}/warehouses`, { name: 'Elsewhere' }),
+    );
+    const scoped = await addMember(s.m.shopId, 'manager', [elsewhere.warehouseId]);
+    const limited = await h.mcp(s.m, ['shop:read', 'inventory:read', 'inventory:write'], scoped);
+    const limitedHealth = await limited.call('shopify_sync', {
+      action: 'health',
+      connectionId: s.connectionId,
+    });
+    expect(limitedHealth.body.connections[0]).toMatchObject({ conflicts: [], shortages: [] });
+    const outside = await limited.call('shopify_sync', conflict);
+    expect(outside).toMatchObject({ error: true, body: { status: 403 } });
+    await limited.close();
+    expect((await health(s)).conflicts).toHaveLength(1);
+  });
+});

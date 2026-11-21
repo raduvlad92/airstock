@@ -24,9 +24,9 @@ import {
   waitUntilBlockedBy,
 } from '../../../test/helpers.ts';
 
-// Review findings for the inventory engine (review/inventory-findings). Each test demonstrates one
-// confirmed defect and is marked `it.fails` so CI stays green until the fix lands: when a fix
-// makes the assertion pass, `it.fails` turns red and the marker comes off. No fixes here.
+// Regression tests for the inventory engine's review findings (review/inventory-findings): one
+// test per confirmed defect, named after the finding. Every finding is fixed; the comment above
+// each describe says what went wrong before the fix, and the test keeps it from coming back.
 //
 // Tests only assert on this file's own shops and never drain the shared outbox.
 

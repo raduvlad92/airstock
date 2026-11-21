@@ -304,7 +304,9 @@ async function requireReturnInScope(ctx: HandlerContext, r: ReturnRow): Promise<
 
 function assertOpen(r: ReturnRow): void {
   if (r.status === 'cancelled' || r.status === 'completed') {
-    throw errors.conflict('return_closed', `The return is ${r.status}.`, { status: r.status });
+    throw errors.conflict('return_closed', `The return is ${r.status}.`, {
+      currentStatus: r.status,
+    });
   }
 }
 

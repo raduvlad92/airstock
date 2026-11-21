@@ -1,4 +1,4 @@
-import { type Caller, execute, ops, uuidv7 } from '@airstock/core';
+import { AppError, type Caller, execute, ops, uuidv7 } from '@airstock/core';
 import { type Database, PgDatabase } from '@airstock/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -35,6 +35,22 @@ async function onHand(): Promise<string> {
 }
 
 describe('failure contract (PRD 7.3)', () => {
+  it('keeps a problem’s own members when an error adds extras of the same name (RFC 9457)', () => {
+    const error = new AppError(409, 'return_closed', 'The return is completed.', 'conflict', {
+      status: 'completed',
+      code: 'other',
+      currentStatus: 'completed',
+    });
+    expect(error.toProblem('req-1')).toEqual({
+      type: 'urn:airstock:problem:return_closed',
+      title: 'The return is completed.',
+      status: 409,
+      code: 'return_closed',
+      requestId: 'req-1',
+      currentStatus: 'completed',
+    });
+  });
+
   it('rolls back a failed stock transaction and records the failure separately (A11)', async () => {
     const faulty = appDatabase({
       beforeCommit: () => {

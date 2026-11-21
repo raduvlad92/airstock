@@ -541,7 +541,9 @@ async function lockSession(ctx: HandlerContext, sessionId: string) {
   ]);
   if (!s) throw errors.notFound('Count');
   if (s.status !== 'open') {
-    throw errors.conflict('count_closed', `The count is ${s.status}.`, { status: s.status });
+    throw errors.conflict('count_closed', `The count is ${s.status}.`, {
+      currentStatus: s.status,
+    });
   }
   return s;
 }

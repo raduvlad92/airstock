@@ -228,7 +228,9 @@ function assertReadied(t: TransferRow): void {
 
 function assertNotClosed(t: TransferRow): void {
   if (t.status === 'cancelled' || t.status === 'received') {
-    throw errors.conflict('transfer_closed', `The transfer is ${t.status}.`, { status: t.status });
+    throw errors.conflict('transfer_closed', `The transfer is ${t.status}.`, {
+      currentStatus: t.status,
+    });
   }
 }
 
